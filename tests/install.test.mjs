@@ -78,11 +78,12 @@ test('fresh installation preserves existing configuration and unrelated files', 
   original(s);
   clean(s);
   assert.ok(existsSync(join(s.root, 'azpr/runtime.mjs')));
+  assert.ok(existsSync(join(s.root, 'azpr/comments.mjs')));
   assert.ok(existsSync(join(s.root, 'azpr/settings.schema.json')));
   assert.ok(!existsSync(join(s.root, 'skills')));
   assert.ok(!existsSync(join(s.root, 'agents')));
   assert.deepEqual(readdirSync(join(s.root, 'commands')).sort(),
-    ['my-command.md', 'pr-check.md', 'pr-deep.md', 'pr-review.md', 'pr-stop.md']);
+    ['my-command.md', 'pr-check.md', 'pr-comment.md', 'pr-deep.md', 'pr-review.md', 'pr-stop.md']);
 });
 
 test('installed loader resolves the real plugin and registers roles from installed prompts', async () => {
@@ -91,14 +92,14 @@ test('installed loader resolves the real plugin and registers roles from install
   const module = await import(pathToFileURL(join(s.root, 'plugins/azpr.js')).href);
   const hooks = await module.AzurePrReview({});
   const config = { command: {} };
-  for (const name of ['pr-check', 'pr-review', 'pr-deep', 'pr-stop']) {
+  for (const name of ['pr-check', 'pr-review', 'pr-deep', 'pr-stop', 'pr-comment']) {
     config.command[name] = {
       subtask: false,
       template: readFileSync(join(s.root, 'commands', name + '.md'), 'utf8'),
     };
   }
   await hooks.config(config);
-  assert.equal(Object.keys(config.agent).length, 6);
+  assert.equal(Object.keys(config.agent).length, 8);
   assert.equal(config.agent['azpr-functional'].model, 'team/free-a');
   assert.match(config.agent['azpr-functional'].prompt, /Functional|functional/);
 });
@@ -141,6 +142,19 @@ test('explicit settings replace the installed model mapping', () => {
   ok(install(s, ['--replace', '--settings', file]));
   assert.equal(readFileSync(join(s.root, 'azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
   original(s);
+});
+
+test('replacement preserves a personal output language without prompt customizations', () => {
+  const s=setup(), file=profile(s);
+  const settings=JSON.parse(readFileSync(file,'utf8'));
+  settings.outputLanguage='zh-TW';
+  writeFileSync(file,JSON.stringify(settings,null,2)+'\n');
+  ok(install(s,['--settings',file]));
+  ok(install(s,['--replace']));
+  assert.equal(JSON.parse(readFileSync(join(s.root,'azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
+  assert.equal(JSON.parse(readFileSync(join(backups(s,'replaced.')[0],'azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
+  assert.match(readFileSync(join(s.root,'azpr/prompts/final.md'),'utf8'),/configured outputLanguage/);
+  original(s); clean(s);
 });
 
 test('unrelated global skills are never inspected or moved', () => {
@@ -276,7 +290,7 @@ test('credentials and main config backups survive install and replacement', () =
 test('installed commands preserve the ordinary agent and model route', () => {
   const s = setup();
   ok(install(s));
-  for (const name of ['pr-check', 'pr-review', 'pr-deep', 'pr-stop']) {
+  for (const name of ['pr-check', 'pr-review', 'pr-deep', 'pr-stop', 'pr-comment']) {
     const content = readFileSync(join(s.root, 'commands', name + '.md'), 'utf8');
     assert.doesNotMatch(content, /^\s*(agent|model):/m);
     assert.match(content, /subtask: false/);

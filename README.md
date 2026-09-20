@@ -34,6 +34,7 @@ See [Azure MCP setup](docs/AZURE_MCP.md) and [validation](docs/VALIDATION.md) be
 | `/pr-check <Azure PR URL>` | Check access to complete PR changes and source at fixed commits. |
 | `/pr-review <Azure PR URL>` | Source check, two independent initial reviewers, then evidence verification. |
 | `/pr-deep <Azure PR URL>` | Source check, three independent initial reviewers, then deep-mode verification. |
+| `/pr-comment <review-id> [--publish]` | Preview concise inline feedback; explicitly publish that saved preview. |
 | `/pr-stop [run-id]` | Revoke the run's grants and request cancellation of its review sessions. |
 
 ```text
@@ -43,6 +44,12 @@ See [Azure MCP setup](docs/AZURE_MCP.md) and [validation](docs/VALIDATION.md) be
 
 Mentioning a PR or asking for a review in ordinary chat does not activate this workflow. The normal agent can still review code using its existing capabilities.
 
+### Optional PR comments
+
+Reviews never post automatically. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a complete review, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use `freeB`; they do not rerun a paid review.
+
+The shared `outputLanguage` setting controls the final report and comment prose. The default policy posts at most five confirmed, actionable defects as short inline threads, with no long summary or cosmetic nits. The runtime restricts writes to the saved bodies and PR, verifies HEAD and source anchors, and checks duplicate markers and actual create responses. No votes, approvals, merges, or existing-thread edits are authorized. Publishing requires the supported Azure MCP schemas and write permission; it is disabled by default. See [comment policy, setup, and limitations](docs/COMMENTING.md).
+
 ## Model roles
 
 Models are local configuration, not hardcoded workflow choices.
@@ -50,7 +57,7 @@ Models are local configuration, not hardcoded workflow choices.
 | Setting | Responsibility |
 | --- | --- |
 | `freeA` | Functional correctness, edge cases, and regressions. |
-| `freeB` | Source check, failure scenarios, and economy-mode verification. |
+| `freeB` | Source check, failure scenarios, economy-mode verification, and explicit comment planning/publishing. |
 | `deep` | Independent deep review in `/pr-deep`. |
 | `final` | Final verification in `/pr-deep`. |
 
@@ -62,7 +69,17 @@ A source check fixes the repository, PR ID, base/head commits, and cumulative ch
 
 ## Reports and cancellation
 
-Reports and plugin messages are in English. With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
+Set the top-level `outputLanguage` in your installed `azpr/settings.json` to control **both the final report and Azure comment prose**, without editing prompts. For example, add or update this field in your existing settings for Traditional Chinese:
+
+```json
+"outputLanguage": "zh-TW"
+```
+
+The default is `en` (English), including when the field is omitted. Other examples are `zh-CN` (Simplified Chinese), `ja` (Japanese), and `zh-Hant-TW` (Traditional Chinese with an explicit script). Use a language tag, not a language name or free-form instruction. Change it before starting a review, then restart OpenCode. To use another language after a preview, restart and run a new review/preview; publishing never translates an already saved preview.
+
+Only final-report Markdown, comment prose, and comment skip explanations are localized. Intermediate reviews, structured fields, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to both final-verifier roles and both comment roles; actual language quality depends on the model. No translation model or extra review stage is added.
+
+With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
 
 Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context.
 
@@ -80,7 +97,7 @@ sh install.sh --replace
 sh install.sh --replace --settings /path/to/team.json
 ```
 
-Replacement archives the installed integration and preserves its settings unless an explicit profile is supplied. Conflicting commands or agents require manual resolution.
+Replacement archives the installed integration and preserves its settings, including `outputLanguage`, unless an explicit profile is supplied. Prompts are replaced: migrate any old prompt-based language override to `outputLanguage` and reapply unrelated policy customizations from the backup before restarting. Conflicting commands or agents require manual resolution.
 
 Set `enabled: false` and restart OpenCode to disable review execution. To remove the integration, use the installed uninstaller:
 

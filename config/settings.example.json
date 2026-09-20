@@ -31,9 +31,14 @@
     "deep": 80,
     "final": 100
   },
+  "comments": {
+    "enabled": false,
+    "maxComments": 5
+  },
   "auxiliaryModels": "preserve",
   "enabled": true,
   "returnReport": "receipt",
+  "outputLanguage": "en",
   "runTimeoutSeconds": 1200,
   "maxStageCharacters": 250000
 }

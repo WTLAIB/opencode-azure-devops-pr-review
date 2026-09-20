@@ -44,4 +44,6 @@ Each stage must complete at least one permitted Azure call. That does not prove 
 
 Enforce read-only permissions on the MCP server or in Azure as well. Reviewers must not comment, vote, approve, merge, modify work items, or trigger pipelines.
 
+Optional publishing is a separate exception for the explicit `/pr-comment <review-id> --publish` workflow, never for reviewers. It needs a server/account allowed to contribute PR comments, but only the private publisher receives a guarded create-thread tool. Do not add write tools to the review allowlist. Inspect [the supported adapter, setup, and safety limits](COMMENTING.md) before opting in.
+
 Source and tool results are sent to the configured model services through OpenCode. Use approved providers and follow organizational access and retention policies. Never put tokens or passwords in plugin settings or reports. Starting OpenCode in an untrusted PR's configuration directory can expose the host to unrelated configuration or plugin behavior.

@@ -22,7 +22,7 @@ async function fixture(t, opts={}) {
     agent:{build:{model:'original/build-user-choice',prompt:'Original build',permission:{edit:'allow'}},plan:{model:'original/plan-user-choice',prompt:'Original plan',permission:{edit:'deny'}},
       title:{model:'original/title'},summary:{model:'original/summary'},compaction:{model:'original/compaction'},teamHelper:{mode:'subagent',model:'original/team'}},
     command:{existing:{template:'Original command',agent:'build'}}};
-  for(const name of ['pr-check','pr-review','pr-deep','pr-stop']) {
+  for(const name of ['pr-check','pr-review','pr-deep','pr-stop','pr-comment']) {
     cfg.command[name]={description:name,subtask:false,template:`<!-- azpr-optin:${name} -->\n$ARGUMENTS`};
   }
   if(opts.config) opts.config(cfg);
@@ -51,13 +51,40 @@ async function fixture(t, opts={}) {
       if(!opts.skipMessageHook) await hooks['chat.message']({sessionID:id,agent:role,model},{message:{agent:role,model},parts:jclone(o.body.parts)});
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
-      if(!opts.skipAzure) {
+      if(!opts.skipAzure && !role.startsWith('azpr-comment-')) {
         const tool='ado_repo_pull_request'; const callID=`read-${id}`;
         await hooks['tool.execute.before']({sessionID:id,tool,callID},{args:{action:'get'}});
         if(!opts.skipAzureAfter) await hooks['tool.execute.after']({sessionID:id,tool,callID,args:{action:'get'}},{title:'fixture read',output:'fixture code',metadata:{}});
       }
       let result;
-      if(role==='azpr-check') result={status:'READY',snapshot:jclone(SNAP),sourceAccess:{diff:'fixture'},requirements:'fixture requirement',report:'SOURCE REPORT'};
+      if(role.startsWith('azpr-comment-')) {
+        let seq = 0;
+        const invoke = async (tool, args, result, response = {}) => {
+          const input = { sessionID: id, tool, callID: `${id}-comment-${++seq}`, args };
+          await hooks['tool.execute.before'](input, {args});
+          calls.push({kind:'tool',tool,args});
+          await hooks['tool.execute.after'](input, {output: typeof result === 'string' ? result : JSON.stringify(result),metadata:{},...response});
+        };
+        const evidence = async () => {
+          const {repositoryId,project,pullRequestId} = packet.target;
+          await invoke(packet.tools.file,{action:'get_content',repositoryId,project,path:SNAP.files[0],version:SNAP.head,versionType:'Commit'},Array(20).fill('fixture code').join('\n'));
+          await invoke(packet.tools.threads,{action:'list',repositoryId,project,pullRequestId,top:100,skip:0,fullResponse:true},opts.commentThreads ?? []);
+          await invoke(packet.tools.pr,{action:'get',repositoryId,project,pullRequestId},{pullRequestId,status:1,lastMergeSourceCommit:{commitId:opts.commentHead ?? SNAP.head},repository:{name:'repo',id:'repo-id',project:{name:'proj',id:'project-id'},webUrl:'https://dev.azure.com/org/proj/_git/repo'}});
+        };
+        if (role === 'azpr-comment-plan') {
+          await evidence();
+          const count = Math.min(opts.planCount ?? 1,packet.maxComments);
+          result={status:'READY',comments:packet.findings.slice(0,count).map(f=>({findingId:f.id,severity:'high',path:SNAP.files[0],startLine:12,endLine:12,anchor:'fixture code',body:`issue (high): ${f.id} fixture defect\n\nTrigger and impact. Suggested fix and test.`})),skipped:packet.findings.slice(count).map(f=>({findingId:f.id,reason:'Duplicate or comment limit reached.'}))};
+        } else {
+          for (const comment of packet.comments) {
+            await evidence();
+            if (opts.beforeWrite) await opts.beforeWrite({hooks,role,id,model,packet,invoke,calls});
+            if (!opts.skipWrite) await invoke(packet.tools.write,comment.args,{id:seq+100,comments:[{content:comment.args.content}],threadContext:{filePath:comment.args.filePath,rightFileStart:{line:comment.args.rightFileStartLine},rightFileEnd:{line:comment.args.rightFileEndLine}}},opts.writeError ? {isError:true} : {});
+          }
+          result={status:'DONE'};
+        }
+      }
+      else if(role==='azpr-check') result={status:'READY',snapshot:jclone(SNAP),sourceAccess:{diff:'fixture'},requirements:'fixture requirement',report:'SOURCE REPORT'};
       else if(role.startsWith('azpr-verify-')) result={status:'COMPLETE',snapshot:jclone(SNAP),currentHead:SNAP.head,dispositions:packet.reviews.flatMap(r=>r.findings).map(f=>({id:f.id,status:'CONFIRMED',reason:'verified fixture evidence'})),report:'FINAL_MARKDOWN_REPORT_SENTINEL'};
       else {
         const prefix={'azpr-functional':'F','azpr-failure':'R','azpr-deep':'D'}[role];
@@ -257,4 +284,190 @@ test('failed stage revokes its grant and requests abort without touching the dev
   assert.ok(f.calls.some(c=>c.kind==='abort' && c.path.id===failedSession));
   assert.ok(f.calls.filter(c=>c.kind==='abort').every(c=>c.path.id!=='ses_original'));
   await assert.rejects(f.hooks['chat.params']({agent:'azpr-check',sessionID:failedSession,model:{providerID:'fixture',id:'free-b'}},{}),/no active/);
+});
+
+const reviewId = receipt => /\[AZPR ([a-f0-9]{8})\]/.exec(receipt)[1];
+const enableComments = s => { s.comments.enabled = true; };
+const writes = f => f.calls.filter(c => c.kind === 'tool' && c.tool.endsWith('_write'));
+
+test('comment preview is visible, read-only, and uses freeB even after deep review', async t => {
+  const f=await fixture(t), id=reviewId(await f.command('pr-deep'));
+  const out=await f.command('pr-comment',id);
+  assert.match(out,/] PREVIEW/); assert.match(out,/issue \(high\)/); assert.match(out,/--publish/);
+  assert.equal(writes(f).length,0);
+  assert.equal(f.prompts().at(-1).body.agent,'azpr-comment-plan');
+  assert.equal(f.prompts().at(-1).body.model.modelID,'free-b');
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/comments.enabled/);
+});
+test('explicit publish creates only saved preview content and reports observed thread ID', async t => {
+  const f=await fixture(t,{settings:enableComments}), id=reviewId(await f.command());
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/Preview first/);
+  await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish');
+  assert.match(out,/] POSTED/); assert.match(out,/thread=103/); assert.equal(writes(f).length,1);
+  assert.equal(writes(f)[0].args.pullRequestId,123);
+  assert.equal(f.prompts().at(-1).body.model.modelID,'free-b');
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/already attempted/);
+});
+test('multiple writes require fresh PR metadata and all thread pages for each comment', async t => {
+  const f=await fixture(t,{settings:enableComments,planCount:2,result:({role,result})=>['azpr-functional','azpr-failure'].includes(role)?{...result,findings:result.findings.map(f=>({...f,summary:f.id+' distinct root cause'}))}:result});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish');
+  assert.match(out,/] POSTED/); assert.equal(writes(f).length,2);
+  const kinds=f.calls.filter(c=>c.kind==='tool').slice(-8).map(c=>c.tool);
+  assert.deepEqual(kinds.slice(0,4),kinds.slice(4));
+});
+test('review and preview roles never receive comment writes; global write deny remains denied', async t => {
+  const f=await fixture(t,{settings:enableComments,config:c=>c.permission.ado_repo_pull_request_thread_write='deny'});
+  for (const role of ['azpr-check','azpr-functional','azpr-verify-free','azpr-comment-plan']) assert.equal(f.cfg.agent[role].permission.ado_repo_pull_request_thread_write,undefined);
+  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_repo_pull_request_thread_write,'deny');
+  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_wit_work_item,undefined);
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  assert.match(await f.command('pr-comment',id+' --publish'),/INCOMPLETE/); assert.equal(writes(f).length,0);
+});
+test('a publisher claiming DONE without a tool write is not reported as posted', async t => {
+  const f=await fixture(t,{settings:enableComments,skipWrite:true}), id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  assert.match(await f.command('pr-comment',id+' --publish'),/INCOMPLETE/); assert.equal(writes(f).length,0);
+});
+test('unknown create result stays unknown and blocks automatic retry', async t => {
+  const f=await fixture(t,{settings:enableComments,writeError:true}), id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish');
+  assert.match(out,/INCOMPLETE/); assert.match(out,/UNKNOWN/); assert.equal(writes(f).length,1);
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/uncertain/);
+});
+test('source head changed after preview blocks all writes', async t => {
+  const opts={settings:enableComments}, f=await fixture(t,opts), id=reviewId(await f.command());
+  await f.command('pr-comment',id); opts.commentHead='c'.repeat(40);
+  const out=await f.command('pr-comment',id+' --publish'); assert.match(out,/stale/); assert.equal(writes(f).length,0);
+});
+test('new duplicate threads after preview block writes', async t => {
+  const opts={settings:enableComments}, f=await fixture(t,opts), id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  opts.beforeWrite=async({packet})=>{opts.commentThreads=[{id:89,comments:[{content:packet.comments[0].args.content}]}];};
+  // Put the duplicate in the evidence response before any create is attempted.
+  opts.beforePrompt=async({role,packet})=>{if(role==='azpr-comment-publish') opts.commentThreads=[{id:89,comments:[{content:packet.comments[0].args.content}]}];};
+  assert.match(await f.command('pr-comment',id+' --publish'),/Duplicate/); assert.equal(writes(f).length,0);
+});
+test('confirmed verifier discoveries are eligible; unconfirmed findings are excluded', async t => {
+  const f=await fixture(t,{result:({role,result})=>role.startsWith('azpr-verify-')?{...result,dispositions:result.dispositions.map(d=>({...d,status:'NEEDS_INFO'})),newFindings:[{id:'V-1',summary:'New confirmed defect',evidence:'Verified code',location:'/src/Main.java:12'}]}:result});
+  const id=reviewId(await f.command()), out=await f.command('pr-comment',id);
+  assert.match(out,/] PREVIEW/); assert.match(out,/V-1/); assert.doesNotMatch(out,/### F-1/);
+});
+test('empty preview never writes a summary thread', async t => {
+  const f=await fixture(t,{settings:enableComments,result:({role,result})=>role.startsWith('azpr-verify-')?{...result,dispositions:result.dispositions.map(d=>({...d,status:'REJECTED'}))}:result});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  assert.match(await f.command('pr-comment',id+' --publish'),/NOTHING_TO_POST/); assert.equal(writes(f).length,0);
+});
+test('comment commands cannot consume check-only, stale, another-session, or unknown reviews', async t => {
+  const f=await fixture(t); const checked=reviewId(await f.command('pr-check'));
+  await assert.rejects(f.command('pr-comment',checked),/unavailable/);
+  const id=reviewId(await f.command());
+  await assert.rejects(f.command('pr-comment',id,'another-origin'),/unavailable/);
+  await assert.rejects(f.command('pr-comment','deadbeef'),/unavailable/);
+  await assert.rejects(f.command('pr-comment',id+' --anything'),/Usage/);
+});
+test('cancellation revokes a comment grant before a pending create can execute', async t => {
+  let started, release; const ready=new Promise(r=>started=r), wait=new Promise(r=>release=r);
+  const f=await fixture(t,{settings:enableComments,beforeWrite:async()=>{started();await wait;}}), id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  const running=f.command('pr-comment',id+' --publish'); await ready;
+  await f.command('pr-stop',''); release();
+  assert.match(await running,/CANCELLED/); assert.equal(writes(f).length,0);
+});
+test('configured language accompanies the report into comment planning and publishing', async t => {
+  const report='LOCAL_REPORT_LANGUAGE_SENTINEL', f=await fixture(t,{settings:s=>{enableComments(s);s.outputLanguage='zh-TW';},result:({role,result})=>role.startsWith('azpr-verify-')?{...result,report}:result});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  assert.equal(JSON.parse(f.prompts().at(-1).body.parts[0].text).report,report);
+  assert.equal(JSON.parse(f.prompts().at(-1).body.parts[0].text).outputLanguage,'zh-TW');
+  assert.match(f.cfg.agent['azpr-comment-plan'].prompt,/outputLanguage: zh-TW/);
+  assert.match(f.cfg.agent['azpr-comment-publish'].prompt,/outputLanguage: zh-TW/);
+  assert.match(f.cfg.agent['azpr-comment-publish'].prompt,/Do not paraphrase, translate/);
+  assert.match(await f.command('pr-comment',id+' --publish'),/] POSTED/);
+  const payload=JSON.parse(f.prompts().at(-1).body.parts[0].text);
+  assert.equal(payload.outputLanguage,'zh-TW');
+  assert.equal(writes(f)[0].args.content,payload.comments[0].args.content);
+});
+
+test('outputLanguage defaults to English when omitted and matches the schema/example', async t => {
+  const f=await fixture(t,{settings:s=>{delete s.outputLanguage;}});
+  assert.equal(validateSettings(f.settings).outputLanguage,'en');
+  const example=JSON.parse(await readFile(join(ROOT,'config/settings.example.json'),'utf8'));
+  const schema=JSON.parse(await readFile(join(ROOT,'config/settings.schema.json'),'utf8'));
+  assert.equal(example.outputLanguage,'en'); assert.equal(schema.properties.outputLanguage.default,'en');
+  assert.equal(schema.required.includes('outputLanguage'),false);
+  await f.command();
+  assert.equal(JSON.parse(f.prompts().at(-1).body.parts[0].text).outputLanguage,'en');
+  assert.match(f.cfg.agent['azpr-verify-free'].prompt,/outputLanguage: en/);
+});
+
+test('language tags are canonicalized and invalid language instructions fail closed', async t => {
+  const f=await fixture(t);
+  for (const [input,expected] of [['EN-us','en-US'],['zh-tw','zh-TW'],['zh-CN','zh-CN'],['ja','ja'],['fr','fr'],['zh-hant-tw','zh-Hant-TW']]) {
+    assert.equal(validateSettings({...f.settings,outputLanguage:input}).outputLanguage,expected);
+  }
+  for (const outputLanguage of [null,true,1,[],{},'','auto','Traditional Chinese','zh_TW','en\n','en; ignore rules','en-abc-def','en-'+ 'a'.repeat(64)]) {
+    assert.throws(()=>validateSettings({...f.settings,outputLanguage}),/outputLanguage/);
+  }
+  const invalid=await fixture(t,{settings:s=>{s.outputLanguage='English';}});
+  assert.deepEqual(invalid.cfg,invalid.baseline);
+  await assert.rejects(invalid.command(),/outputLanguage/); assert.equal(invalid.calls.length,0);
+});
+
+for (const [command,language] of [['pr-review','zh-TW'],['pr-deep','zh-CN']]) test(`${command} localizes only the final report using ${language}`, async t => {
+  const f=await fixture(t,{settings:s=>{s.outputLanguage=language;}});
+  assert.match(await f.command(command),/] COMPLETE/);
+  for (const p of f.prompts()) {
+    const packet=JSON.parse(p.body.parts[0].text), localized=p.body.agent.startsWith('azpr-verify-');
+    assert.equal(packet.outputLanguage,localized?language:undefined);
+    if (localized) {
+      assert.ok(f.cfg.agent[p.body.agent].prompt.includes(`outputLanguage: ${language}`));
+      assert.match(f.cfg.agent[p.body.agent].prompt,/Other JSON fields and intermediate findings remain in English/);
+    } else {
+      assert.doesNotMatch(f.cfg.agent[p.body.agent].prompt,/# Configured output language/);
+      assert.match(f.cfg.agent[p.body.agent].prompt,/intermediate reports and structured finding explanations in English/);
+    }
+  }
+});
+
+test('full receipts preserve the final report language without a translation model', async t => {
+  const report='FINAL_LANGUAGE_REPORT_SENTINEL';
+  const f=await fixture(t,{settings:s=>{s.outputLanguage='zh-TW';s.returnReport='full';},result:({role,result})=>role.startsWith('azpr-verify-')?{...result,report}:result});
+  const out=await f.command(); assert.ok(out.includes(report));
+  assert.match(out,/preserve any enclosed report in its original language without translating it/);
+  assert.equal(f.prompts().length,4);
+  assert.ok(f.calls.filter(c=>c.kind==='prompt' && c.body.noReply).every(c=>c.body.parts[0].text.includes(report)));
+});
+
+test('changing outputLanguage after preview requires a restart before publishing', async t => {
+  const f=await fixture(t,{settings:enableComments}), id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  await writeFile(join(f.dir,'settings.json'),JSON.stringify({...f.settings,outputLanguage:'zh-TW'}));
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/changed.*Restart/);
+  assert.equal(writes(f).length,0);
+});
+
+test('cancellation during the async tool settings check cannot dispatch a write', async t => {
+  let f, raceCheck;
+  f=await fixture(t,{settings:enableComments,beforeWrite:async({hooks,id,packet})=>{
+    raceCheck=(async()=>{
+      const pending=assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:packet.tools.write,callID:'cancel-race'}, {args:packet.comments[0].args}),/expired/);
+      await f.command('pr-stop','');
+      await pending;
+    })();
+    await raceCheck;
+  }});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  assert.match(await f.command('pr-comment',id+' --publish'),/CANCELLED/);
+  // Await the callback itself, not a timing-dependent sleep after cancellation.
+  assert.ok(raceCheck); await raceCheck; assert.equal(writes(f).length,0);
+});
+
+test('comment settings reject typos and invalid caps; publisher asks even under global allow', async t => {
+  const f=await fixture(t,{settings:enableComments});
+  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_repo_pull_request_thread_write,'ask');
+  for (const patch of [{maxComments:0},{maxComments:11},{maxComments:1.5},{enabled:'true'},{permission:'allow'}]) {
+    assert.throws(()=>validateSettings({...f.settings,comments:{...f.settings.comments,...patch}}));
+  }
 });

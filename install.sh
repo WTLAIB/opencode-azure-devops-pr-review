@@ -29,7 +29,7 @@ while [ "$#" -gt 0 ]; do
     *) die "Unknown argument: $1" ;;
   esac
 done
-for file in src/runtime.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
+for file in src/runtime.mjs src/comments.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
   [ -f "$src/$file" ] || die "Incomplete package: $file is missing."
 done
 if [ -n "$profile" ]; then
@@ -71,11 +71,11 @@ trap 'exit 130' HUP INT TERM
 
 # Refuse conflicts rather than trying to rewrite JSONC.
 for config in "$root/opencode.json" "$root/opencode.jsonc" "$root/config.json"; do
-  if [ -f "$config" ] && grep -Eq '"(pr-check|pr-review|pr-deep|pr-stop|azpr-(check|functional|failure|deep|verify-free|verify-paid))"[[:space:]]*:' "$config"; then
+  if [ -f "$config" ] && grep -Eq '"(pr-check|pr-review|pr-deep|pr-stop|pr-comment|azpr-(check|functional|failure|deep|verify-free|verify-paid|comment-plan|comment-publish))"[[:space:]]*:' "$config"; then
     die "Reserved command/agent keys appear in $config. Resolve them manually."
   fi
 done
-for role in check functional failure deep verify-free verify-paid; do
+for role in check functional failure deep verify-free verify-paid comment-plan comment-publish; do
   for sub in agent agents; do
     path=$root/$sub/azpr-$role.md
     [ ! -e "$path" ] && [ ! -L "$path" ] || die "Conflicting agent file: $path"
@@ -85,7 +85,7 @@ for sub in commands command plugins plugin azpr azpr-backups; do
   [ ! -L "$root/$sub" ] || die "Symlinked integration directory: $root/$sub"
 done
 # Alternate discovery directories must not shadow this installation.
-for rel in command/pr-check.md command/pr-review.md command/pr-deep.md command/pr-stop.md plugin/azpr.js; do
+for rel in command/pr-check.md command/pr-review.md command/pr-deep.md command/pr-stop.md command/pr-comment.md plugin/azpr.js; do
   [ ! -e "$root/$rel" ] && [ ! -L "$root/$rel" ] || die "Conflicting integration file: $root/$rel"
 done
 
@@ -96,6 +96,7 @@ commands/pr-check.md
 commands/pr-review.md
 commands/pr-deep.md
 commands/pr-stop.md
+commands/pr-comment.md
 plugins/azpr.js
 TXT
 while IFS= read -r rel; do
@@ -105,10 +106,10 @@ while IFS= read -r rel; do
 done < "$stage/targets"
 
 mkdir -p "$stage/new/azpr" "$stage/new/plugins" "$stage/new/commands"
-cp "$src/src/runtime.mjs" "$src/src/plugin.js" "$stage/new/azpr/"
+cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/plugin.js" "$stage/new/azpr/"
 cp -R "$src/src/prompts" "$stage/new/azpr/prompts"
 printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "../azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
-for cmd in pr-check pr-review pr-deep pr-stop; do
+for cmd in pr-check pr-review pr-deep pr-stop pr-comment; do
   cp "$src/commands/$cmd.md" "$stage/new/commands/$cmd.md"
 done
 cp "$src/config/settings.schema.json" "$src/package.json" "$src/README.md" "$src/uninstall.sh" "$stage/new/azpr/"
