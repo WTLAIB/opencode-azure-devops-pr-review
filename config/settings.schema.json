@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Azure PR Review settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "models",
+    "azure",
+    "steps"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "freeA",
+        "freeB"
+      ],
+      "properties": {
+        "freeA": {
+          "type": "string",
+          "description": "Exact provider/model ID; paid slots may be an empty string."
+        },
+        "freeB": {
+          "type": "string",
+          "description": "Exact provider/model ID; paid slots may be an empty string."
+        },
+        "deep": {
+          "type": "string",
+          "description": "Exact provider/model ID; paid slots may be an empty string."
+        },
+        "final": {
+          "type": "string",
+          "description": "Exact provider/model ID; paid slots may be an empty string."
+        }
+      }
+    },
+    "azure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prefix",
+        "permission",
+        "readOnlyToolsVerified"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+        },
+        "permission": {
+          "enum": [
+            "ask",
+            "allow"
+          ]
+        },
+        "readOnlyToolsVerified": {
+          "type": "boolean"
+        },
+        "toolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fullToolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check",
+        "initial",
+        "deep",
+        "final"
+      ],
+      "properties": {
+        "check": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "initial": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "deep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "final": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    "auxiliaryModels": {
+      "const": "preserve",
+      "description": "Never change global auxiliary models."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "returnReport": {
+      "enum": [
+        "receipt",
+        "full"
+      ],
+      "default": "receipt"
+    },
+    "runTimeoutSeconds": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 7200,
+      "default": 1200
+    },
+    "maxStageCharacters": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 1000000,
+      "default": 250000
+    }
+  }
+}

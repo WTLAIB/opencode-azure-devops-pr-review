@@ -1,0 +1,10 @@
+OpenCode_Azure_PR_Review_Codex_Handoff.md
+*:Zone.Identifier
+settings.json
+team.json
+.env
+.env.*
+node_modules/
+coverage/
+*.log
+.DS_Store
