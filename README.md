@@ -8,6 +8,8 @@ Opt-in, multi-model pull request reviews inside OpenCode. The plugin uses your e
 
 Requires Linux or WSL, a POSIX shell, and an existing OpenCode installation with working model providers and Azure DevOps MCP. Installation needs no Python, jq, sudo, or npm packages. Node.js is needed only for development tests.
 
+CI runs the installation and offline tests on Ubuntu 22.04 and 24.04. The installer uses `/bin/sh`, standard file utilities from `coreutils`, and `grep`, normally present on Ubuntu. Git is only needed to clone the repository. No separate Node.js or Bun installation is required by this plugin's installer; your existing OpenCode and MCP setup may have their own requirements. Passing these tests does not validate live OpenCode/provider/MCP compatibility.
+
 Close OpenCode processes that use the same configuration directory, then run:
 
 ```sh

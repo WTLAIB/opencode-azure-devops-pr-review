@@ -114,7 +114,10 @@ test('manual @mention cannot grant private reviewer authorization',async t=>{
 });
 test('economy runs check, two independent initial reviewers, and free verification only',async t=>{
   const f=await fixture(t);const out=await f.command();assert.match(out,/] COMPLETE/);
-  assert.deepEqual(f.prompts().map(p=>p.body.agent),['azpr-check','azpr-functional','azpr-failure','azpr-verify-free']);
+  const roles=f.prompts().map(p=>p.body.agent);
+  assert.equal(roles[0],'azpr-check');
+  assert.deepEqual(roles.slice(1,-1).sort(),['azpr-failure','azpr-functional']);
+  assert.equal(roles.at(-1),'azpr-verify-free');
   assert.ok(f.prompts().every(p=>!p.body.model.modelID.startsWith('paid')));
   assert.equal(new Set(f.prompts().map(p=>p.path.id)).size,4);
   for(const p of f.prompts()) assert.notEqual(p.path.id,'ses_original');
@@ -122,7 +125,10 @@ test('economy runs check, two independent initial reviewers, and free verificati
 });
 test('deep runs three independent initial sessions and exactly one paid final stage',async t=>{
   const f=await fixture(t);const out=await f.command('pr-deep');assert.match(out,/] COMPLETE/);
-  assert.deepEqual(f.prompts().map(p=>p.body.agent),['azpr-check','azpr-functional','azpr-failure','azpr-deep','azpr-verify-paid']);
+  const roles=f.prompts().map(p=>p.body.agent);
+  assert.equal(roles[0],'azpr-check');
+  assert.deepEqual(roles.slice(1,-1).sort(),['azpr-deep','azpr-failure','azpr-functional']);
+  assert.equal(roles.at(-1),'azpr-verify-paid');
   const initial=f.prompts().slice(1,4);assert.equal(new Set(initial.map(p=>p.body.parts[0].text)).size,1);assert.ok(initial.every(p=>!p.body.parts[0].text.includes('PRIVATE_INITIAL_REPORT')));
 });
 test('check-only never enters an initial review stage',async t=>{
