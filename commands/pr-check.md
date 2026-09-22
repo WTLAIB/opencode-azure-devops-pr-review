@@ -1,7 +1,8 @@
 ---
-description: Check Azure PR source readiness
+description: Check Azure PR source readiness (URL followed by optional context)
 subtask: false
 ---
 <!-- azpr-optin:pr-check -->
 This explicit command is handled by the Azure PR Review plugin. If the plugin does not provide a receipt, report that it is unavailable. Do not simulate a review, delegate work, or switch models.
-$ARGUMENTS
+<!-- The unused positional placeholder prevents native shell/file expansion of arguments. The plugin reads raw command arguments directly. -->
+$9007199254740991

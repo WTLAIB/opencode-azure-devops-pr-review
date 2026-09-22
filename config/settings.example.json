@@ -7,24 +7,6 @@
     "deep": "",
     "final": ""
   },
-  "azure": {
-    "prefix": "ado",
-    "permission": "ask",
-    "readOnlyToolsVerified": false,
-    "toolNames": [
-      "repo_repository",
-      "repo_pull_request",
-      "repo_pull_request_thread",
-      "repo_branch",
-      "repo_file",
-      "repo_search_commits",
-      "search_code",
-      "wit_work_item",
-      "pipelines_build",
-      "pipelines_build_log"
-    ],
-    "fullToolNames": []
-  },
   "steps": {
     "check": 24,
     "initial": 60,

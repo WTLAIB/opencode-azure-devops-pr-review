@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync,
-  readdirSync, rmSync, chmodSync, statSync, symlinkSync,
+  readdirSync, rmSync, chmodSync, statSync, symlinkSync, renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -44,7 +44,7 @@ function install(s, args = [], extra = {}) {
   return run(join(pkg, 'install.sh'), ['--config-dir', s.root, ...args], extra);
 }
 function uninstall(s, args = []) {
-  return run(join(s.root, 'azpr/uninstall.sh'), ['--config-dir', s.root, ...args]);
+  return run(join(s.root, 'plugins/azpr/uninstall.sh'), ['--config-dir', s.root, ...args]);
 }
 function ok(result) {
   assert.equal(result.status, 0, result.stdout + result.stderr + (result.error ?? ''));
@@ -77,13 +77,60 @@ test('fresh installation preserves existing configuration and unrelated files', 
   ok(install(s));
   original(s);
   clean(s);
-  assert.ok(existsSync(join(s.root, 'azpr/runtime.mjs')));
-  assert.ok(existsSync(join(s.root, 'azpr/comments.mjs')));
-  assert.ok(existsSync(join(s.root, 'azpr/settings.schema.json')));
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/runtime.mjs')));
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/comments.mjs')));
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/request.mjs')));
+  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.equal(readFileSync(join(s.root,'plugins/azpr.js'),'utf8').includes('../'),false);
+  assert.deepEqual(readdirSync(join(s.root,'plugins')).filter(n=>/\.(js|ts)$/.test(n)).sort(),['another.js','azpr.js']);
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/settings.schema.json')));
   assert.ok(!existsSync(join(s.root, 'skills')));
   assert.ok(!existsSync(join(s.root, 'agents')));
   assert.deepEqual(readdirSync(join(s.root, 'commands')).sort(),
     ['my-command.md', 'pr-check.md', 'pr-comment.md', 'pr-deep.md', 'pr-review.md', 'pr-stop.md']);
+});
+
+test('replacement migrates sibling layout with byte-identical settings and a recoverable backup',()=>{
+  const s=setup(), file=profile(s);
+  ok(install(s,['--settings',file]));
+  renameSync(join(s.root,'plugins/azpr'),join(s.root,'azpr'));
+  writeFileSync(join(s.root,'plugins/azpr.js'),'// azpr-optin:plugin\nexport { AzurePrReview } from "../azpr/plugin.js";\n');
+  ok(install(s,['--replace']));
+  assert.ok(!existsSync(join(s.root,'azpr')));
+  assert.equal(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'),readFileSync(file,'utf8'));
+  assert.equal(readFileSync(join(backups(s,'replaced.')[0],'azpr/settings.json'),'utf8'),readFileSync(file,'utf8'));
+  original(s); clean(s);
+});
+test('failed migration restores the old layout and loader',()=>{
+  const s=setup(), file=profile(s);
+  ok(install(s,['--settings',file]));
+  renameSync(join(s.root,'plugins/azpr'),join(s.root,'azpr'));
+  const loader='// azpr-optin:plugin\nexport { AzurePrReview } from "../azpr/plugin.js";\n';
+  writeFileSync(join(s.root,'plugins/azpr.js'),loader);
+  const bin=join(s.temp,'bin'); mkdirSync(bin);
+  writeFileSync(join(bin,'mv'),'#!/bin/sh\ncase "$*" in *\'/new/plugins/azpr\'*) exit 71;; esac\nexec /bin/mv "$@"\n');
+  chmodSync(join(bin,'mv'),0o755);
+  bad(install(s,['--replace'],{env:{...process.env,PATH:bin+':'+process.env.PATH}}));
+  assert.ok(!existsSync(join(s.root,'plugins/azpr')));
+  assert.equal(readFileSync(join(s.root,'azpr/settings.json'),'utf8'),readFileSync(file,'utf8'));
+  assert.equal(readFileSync(join(s.root,'plugins/azpr.js'),'utf8'),loader);
+  original(s); clean(s);
+});
+test('ambiguous old/new profiles require explicit selection without moving either',()=>{
+  const s=setup(); ok(install(s));
+  mkdirSync(join(s.root,'azpr')); writeFileSync(join(s.root,'azpr/settings.json'),'old settings');
+  bad(install(s,['--replace']));
+  assert.equal(readFileSync(join(s.root,'azpr/settings.json'),'utf8'),'old settings');
+  assert.ok(existsSync(join(s.root,'plugins/azpr/settings.json')));
+  original(s); clean(s);
+});
+test('nested runtime symlink is refused without touching its destination',()=>{
+  const s=setup(), outside=join(s.temp,'outside'); mkdirSync(outside);
+  writeFileSync(join(outside,'settings.json'),'private');
+  symlinkSync(outside,join(s.root,'plugins/azpr'));
+  bad(install(s,['--replace']));
+  assert.equal(readFileSync(join(outside,'settings.json'),'utf8'),'private');
+  original(s); clean(s);
 });
 
 test('installed loader resolves the real plugin and registers roles from installed prompts', async () => {
@@ -107,17 +154,17 @@ test('installed loader resolves the real plugin and registers roles from install
 test('settings are copied literally with private permissions', () => {
   const s = setup(), file = profile(s);
   ok(install(s, ['--settings', file]));
-  assert.equal(readFileSync(join(s.root, 'azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
-  assert.equal(statSync(join(s.root, 'azpr/settings.json')).mode & 0o777, 0o600);
+  assert.equal(readFileSync(join(s.root, 'plugins/azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
+  assert.equal(statSync(join(s.root, 'plugins/azpr/settings.json')).mode & 0o777, 0o600);
   original(s);
 });
 
 test('duplicate installation refuses without replace', () => {
   const s = setup();
   ok(install(s));
-  const before = readFileSync(join(s.root, 'azpr/settings.json'), 'utf8');
+  const before = readFileSync(join(s.root, 'plugins/azpr/settings.json'), 'utf8');
   bad(install(s));
-  assert.equal(readFileSync(join(s.root, 'azpr/settings.json'), 'utf8'), before);
+  assert.equal(readFileSync(join(s.root, 'plugins/azpr/settings.json'), 'utf8'), before);
   original(s);
   clean(s);
 });
@@ -129,7 +176,7 @@ test('replacement backs up the integration and preserves chosen settings', () =>
   const saved = backups(s, 'replaced.');
   assert.equal(saved.length, 1);
   for (const root of [s.root, saved[0]]) {
-    assert.equal(readFileSync(join(root, 'azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
+    assert.equal(readFileSync(join(root, 'plugins/azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
   }
   original(s);
   clean(s);
@@ -140,7 +187,7 @@ test('explicit settings replace the installed model mapping', () => {
   ok(install(s));
   const file = profile(s);
   ok(install(s, ['--replace', '--settings', file]));
-  assert.equal(readFileSync(join(s.root, 'azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
+  assert.equal(readFileSync(join(s.root, 'plugins/azpr/settings.json'), 'utf8'), readFileSync(file, 'utf8'));
   original(s);
 });
 
@@ -151,9 +198,9 @@ test('replacement preserves a personal output language without prompt customizat
   writeFileSync(file,JSON.stringify(settings,null,2)+'\n');
   ok(install(s,['--settings',file]));
   ok(install(s,['--replace']));
-  assert.equal(JSON.parse(readFileSync(join(s.root,'azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
-  assert.equal(JSON.parse(readFileSync(join(backups(s,'replaced.')[0],'azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
-  assert.match(readFileSync(join(s.root,'azpr/prompts/final.md'),'utf8'),/configured outputLanguage/);
+  assert.equal(JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
+  assert.equal(JSON.parse(readFileSync(join(backups(s,'replaced.')[0],'plugins/azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
+  assert.match(readFileSync(join(s.root,'plugins/azpr/prompts/final.md'),'utf8'),/configured outputLanguage/);
   original(s); clean(s);
 });
 
@@ -192,7 +239,7 @@ test('symlinked integration directories are refused', () => {
   symlinkSync(external, join(s.root, 'commands'));
   bad(install(s));
   assert.deepEqual(readdirSync(external), []);
-  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.ok(!existsSync(join(s.root, 'plugins/azpr')));
   clean(s);
 });
 
@@ -202,7 +249,7 @@ test('alternate discovery directory conflicts are preserved even with replace', 
   writeFileSync(join(s.root, 'command/pr-review.md'), 'Unrelated command');
   bad(install(s, ['--replace']));
   assert.equal(readFileSync(join(s.root, 'command/pr-review.md'), 'utf8'), 'Unrelated command');
-  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.ok(!existsSync(join(s.root, 'plugins/azpr')));
   clean(s);
 });
 
@@ -211,14 +258,14 @@ test('existing install lock prevents concurrent changes', () => {
   mkdirSync(join(s.root, '.azpr-install.lock'));
   bad(install(s));
   assert.ok(existsSync(join(s.root, '.azpr-install.lock')));
-  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.ok(!existsSync(join(s.root, 'plugins/azpr')));
 });
 
 test('invalid command arguments cause no installation', () => {
   const s = setup();
   bad(install(s, ['--settings', join(s.temp, 'missing')]));
   bad(install(s, ['--unknown']));
-  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.ok(!existsSync(join(s.root, 'plugins/azpr')));
 });
 
 test('XDG paths with spaces work and settings are never executed', () => {
@@ -227,14 +274,14 @@ test('XDG paths with spaces work and settings are never executed', () => {
   ok(run(join(pkg, 'install.sh'), ['--settings', file], {
     cwd: s.temp, env: { ...process.env, XDG_CONFIG_HOME: xdg },
   }));
-  assert.equal(readFileSync(join(xdg, 'opencode/azpr/settings.json'), 'utf8'), '$(touch never-execute)\n');
+  assert.equal(readFileSync(join(xdg, 'opencode/plugins/azpr/settings.json'), 'utf8'), '$(touch never-execute)\n');
   assert.ok(!existsSync(join(s.temp, 'never-execute')));
 });
 
 test('failed replacement restores the original integration and settings', () => {
   const s = setup(), file = profile(s);
   ok(install(s, ['--settings', file]));
-  const paths = ['azpr/runtime.mjs', 'azpr/settings.json', 'plugins/azpr.js', 'commands/pr-review.md'];
+  const paths = ['plugins/azpr/runtime.mjs', 'plugins/azpr/settings.json', 'plugins/azpr.js', 'commands/pr-review.md'];
   const before = paths.map(path => readFileSync(join(s.root, path), 'utf8'));
   const bin = join(s.temp, 'bin');
   mkdirSync(bin);
@@ -251,7 +298,7 @@ test('uninstall preview changes nothing', () => {
   const s = setup();
   ok(install(s));
   ok(uninstall(s));
-  assert.ok(existsSync(join(s.root, 'azpr/runtime.mjs')));
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/runtime.mjs')));
   assert.ok(existsSync(join(s.root, 'plugins/azpr.js')));
   original(s);
   clean(s);
@@ -261,9 +308,9 @@ test('uninstall archives only this integration', () => {
   const s = setup();
   ok(install(s));
   ok(uninstall(s, ['--apply']));
-  assert.ok(!existsSync(join(s.root, 'azpr')));
+  assert.ok(!existsSync(join(s.root, 'plugins/azpr')));
   assert.ok(!existsSync(join(s.root, 'plugins/azpr.js')));
-  assert.ok(existsSync(join(backups(s, 'uninstalled.')[0], 'azpr/settings.json')));
+  assert.ok(existsSync(join(backups(s, 'uninstalled.')[0], 'plugins/azpr/settings.json')));
   original(s);
   clean(s);
 });
@@ -274,7 +321,7 @@ test('uninstall refuses a command replaced by another owner', () => {
   writeFileSync(join(s.root, 'commands/pr-review.md'), 'Another owner');
   bad(uninstall(s, ['--apply']));
   assert.equal(readFileSync(join(s.root, 'commands/pr-review.md'), 'utf8'), 'Another owner');
-  assert.ok(existsSync(join(s.root, 'azpr/runtime.mjs')));
+  assert.ok(existsSync(join(s.root, 'plugins/azpr/runtime.mjs')));
 });
 
 test('credentials and main config backups survive install and replacement', () => {

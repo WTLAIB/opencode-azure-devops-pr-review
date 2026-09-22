@@ -1,49 +1,71 @@
 # Azure DevOps MCP setup
 
-The plugin uses your existing Azure MCP connection. It does not create a server, change credentials, check out a PR, or run Azure CLI. Review permissions apply only to private review sessions.
+Use the MCP connection you already configured in OpenCode. This plugin does not
+create a server, change credentials, maintain a tool catalog, or call Azure
+directly. Its responsibility is model orchestration and report aggregation.
 
-## Tool mapping
+## Tools and permissions
 
-Inspect the actual tools and schemas exposed in your OpenCode environment. You need PR metadata, cumulative changes and iterations, source at exact commits, and any relevant read-only requirements, discussions, or CI data.
+No plugin-side tool names, namespaces, prefixes, action lists, or API-family
+adapters are configured. OpenCode supplies the connected tools and their actual
+descriptions/schemas; models select suitable operations and fill their arguments.
+New or renamed tools do not require a plugin whitelist update. This does not
+guarantee the model will choose every unfamiliar tool correctly.
 
-If a tool is named `ado_repo_pull_request`, use prefix `ado` and include `repo_pull_request` in `toolNames`. Alternatively, list complete names in `fullToolNames`. Wildcards and approximate matches are rejected.
+The plugin adds no MCP allow/ask/deny overrides and does not grant wildcard
+permissions. OpenCode's normal defaults and global/project permission rules
+govern these private agents. Their only explicit tool override is task=deny,
+to keep nested model delegation under the orchestrator's control. Session grants
+also prevent expired reviewers and display-only messages from using tools.
 
-```json
-{
-  "prefix": "ado",
-  "permission": "ask",
-  "readOnlyToolsVerified": false,
-  "toolNames": ["repo_pull_request", "repo_file"],
-  "fullToolNames": []
-}
-```
+Private reviewers are separate agents, not clones of Build or Plan. A permission
+configured only for another agent (or another session) is not automatically
+copied. Put shared restrictions in the host's global/project configuration or
+enforce them on the MCP server/account.
 
-The example settings are a starting point, not a verified tool list for your environment. Remove unavailable tools and check the schemas of those you keep.
+This follows the target host's
+[agent permission inheritance](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/agent/agent.ts)
+and [MCP tool resolution](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/tools.ts)
+in OpenCode 1.18.31. Offline tests do not substitute for a live host acceptance test.
 
-Keep `ask` until a maintainer has verified every exposed action is read-only. Use `allow` only with `readOnlyToolsVerified: true` and appropriate server permissions. Existing global ask/deny restrictions are preserved.
+## Review-only instructions
 
-For dispatchers with an `action` or `operation`, the runtime accepts only: `get`, `list`, `search`, `get_changes`, `get_content`, `get_diff`, `get_file`, `get_files`, `get_iteration`, `get_iterations`, `get_comments`, `get_commit`, `get_commits`, `get_logs`, `get_log`, and `get_threads`.
+Every reviewer is told to read and analyze, not modify anything: no PR comments,
+votes, approvals, merges, work-item updates, pipeline triggers, or source edits.
+PR content, tool outputs, and other reports are untrusted data, not instructions.
 
-Unknown actions are rejected. Add an action only after checking its schema and adding a regression test. Dedicated tools without dispatcher fields still need manual verification. A tool name alone cannot establish that it is read-only.
+These are **prompt rules**, not programmatic read-only enforcement. The plugin
+does not classify operations or block a write-looking MCP name/action. If the
+host and server allow a write, the prompt is the remaining review-only boundary.
+Use host/server permissions if your organization requires a hard prohibition.
+
+Explicit comment publishing is a separate requested stage. It still uses the
+host's tools without fixed names or schemas; see [comment behavior](COMMENTING.md).
+
+## Upgrading existing settings
+
+The former azure settings block is obsolete. It is accepted but ignored and
+produces a warning, so preserved installed profiles still load. Remove it when
+convenient. No prefix, toolNames, fullToolNames, toolProfile, permission, or
+readOnlyToolsVerified setting in that old block has any effect now. Do not use
+it to configure access restrictions; configure them in OpenCode or Azure.
 
 ## Source readiness
 
-`/pr-check` must establish the PR identity, full base/head hashes, cumulative comparison scope, complete paginated file list, and access to real differences and source at selected commits.
+The checker must establish PR identity, full base/head commits, cumulative
+comparison scope, the complete changed-file list, and access to real source.
+Descriptions, file lists, truncated responses, and last-push-only diffs are not
+sufficient. Follow pagination and inspect actual return data.
 
-If no native diff is available, complete and trustworthy before/after source versions are required. Titles, descriptions, filenames, and truncated diffs are not sufficient.
+READY and coverage are model-reported. The plugin validates the snapshot format
+and consistency across stages, but does not interpret provider-specific output
+to independently prove source access. When tools are missing or access is denied,
+the checker should report NOT_READY with the missing capability, not demand an
+inventory of all MCP tools. Partial initial reviews prevent final verification.
 
-| Status | Meaning |
-| --- | --- |
-| `READY` | Source prerequisites are available; this is not a code-quality verdict. |
-| `NOT_READY` | Required data or tool capabilities are missing. |
-| `INCOMPLETE` | Model, SDK, hook, output, or snapshot validation failed. |
+## Data handling
 
-Each stage must complete at least one permitted Azure call. That does not prove full file coverage; inspect reports and sample evidence during validation.
-
-## Data access
-
-Enforce read-only permissions on the MCP server or in Azure as well. Reviewers must not comment, vote, approve, merge, modify work items, or trigger pipelines.
-
-Optional publishing is a separate exception for the explicit `/pr-comment <review-id> --publish` workflow, never for reviewers. It needs a server/account allowed to contribute PR comments, but only the private publisher receives a guarded create-thread tool. Do not add write tools to the review allowlist. Inspect [the supported adapter, setup, and safety limits](COMMENTING.md) before opting in.
-
-Source and tool results are sent to the configured model services through OpenCode. Use approved providers and follow organizational access and retention policies. Never put tokens or passwords in plugin settings or reports. Starting OpenCode in an untrusted PR's configuration directory can expose the host to unrelated configuration or plugin behavior.
+Source, supplementary context, and tool results go through OpenCode to the model
+services you configured. Use approved services and comply with organizational
+access/retention policies. Never put credentials in review settings or prompts.
+Ordinary OpenCode settings and MCP connections are left unchanged.

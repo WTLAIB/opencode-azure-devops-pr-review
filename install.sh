@@ -29,7 +29,7 @@ while [ "$#" -gt 0 ]; do
     *) die "Unknown argument: $1" ;;
   esac
 done
-for file in src/runtime.mjs src/comments.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
+for file in src/runtime.mjs src/comments.mjs src/request.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
   [ -f "$src/$file" ] || die "Incomplete package: $file is missing."
 done
 if [ -n "$profile" ]; then
@@ -81,7 +81,7 @@ for role in check functional failure deep verify-free verify-paid comment-plan c
     [ ! -e "$path" ] && [ ! -L "$path" ] || die "Conflicting agent file: $path"
   done
 done
-for sub in commands command plugins plugin azpr azpr-backups; do
+for sub in commands command plugins plugin plugins/azpr azpr azpr-backups; do
   [ ! -L "$root/$sub" ] || die "Symlinked integration directory: $root/$sub"
 done
 # Alternate discovery directories must not shadow this installation.
@@ -92,6 +92,7 @@ done
 stage=$(mktemp -d "$root/.azpr-stage.XXXXXX")
 cat > "$stage/targets" <<'TXT'
 azpr
+plugins/azpr
 commands/pr-check.md
 commands/pr-review.md
 commands/pr-deep.md
@@ -105,23 +106,27 @@ while IFS= read -r rel; do
   fi
 done < "$stage/targets"
 
-mkdir -p "$stage/new/azpr" "$stage/new/plugins" "$stage/new/commands"
-cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/plugin.js" "$stage/new/azpr/"
-cp -R "$src/src/prompts" "$stage/new/azpr/prompts"
-printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "../azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
+mkdir -p "$stage/new/plugins/azpr" "$stage/new/commands"
+cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/request.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
+cp -R "$src/src/prompts" "$stage/new/plugins/azpr/prompts"
+printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "./azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
 for cmd in pr-check pr-review pr-deep pr-stop pr-comment; do
   cp "$src/commands/$cmd.md" "$stage/new/commands/$cmd.md"
 done
-cp "$src/config/settings.schema.json" "$src/package.json" "$src/README.md" "$src/uninstall.sh" "$stage/new/azpr/"
-cp -R "$src/docs" "$stage/new/azpr/docs"
+cp "$src/config/settings.schema.json" "$src/package.json" "$src/README.md" "$src/uninstall.sh" "$stage/new/plugins/azpr/"
+cp -R "$src/docs" "$stage/new/plugins/azpr/docs"
 if [ -n "$profile" ]; then
-  cp -- "$profile" "$stage/new/azpr/settings.json"
+  cp -- "$profile" "$stage/new/plugins/azpr/settings.json"
+elif [ "$replace" -eq 1 ] && [ -f "$root/plugins/azpr/settings.json" ] && [ -f "$root/azpr/settings.json" ]; then
+  die 'Both old and new settings exist. Choose the intended profile explicitly with --settings.'
+elif [ "$replace" -eq 1 ] && [ -f "$root/plugins/azpr/settings.json" ]; then
+  cp "$root/plugins/azpr/settings.json" "$stage/new/plugins/azpr/settings.json"
 elif [ "$replace" -eq 1 ] && [ -f "$root/azpr/settings.json" ]; then
-  cp "$root/azpr/settings.json" "$stage/new/azpr/settings.json"
+  cp "$root/azpr/settings.json" "$stage/new/plugins/azpr/settings.json"
 else
-  cp "$src/config/settings.example.json" "$stage/new/azpr/settings.json"
+  cp "$src/config/settings.example.json" "$stage/new/plugins/azpr/settings.json"
 fi
-chmod 600 "$stage/new/azpr/settings.json"
+chmod 600 "$stage/new/plugins/azpr/settings.json"
 
 : > "$stage/moved"
 : > "$stage/installed"
@@ -137,16 +142,18 @@ while IFS= read -r rel; do
   fi
 done < "$stage/targets"
 while IFS= read -r rel; do
+  # The former sibling runtime is archived but never reinstalled.
+  [ "$rel" != azpr ] || continue
   mkdir -p "$(dirname -- "$root/$rel")"
   printf '%s\n' "$rel" >> "$stage/installed"
   mv -- "$stage/new/$rel" "$root/$rel"
 done < "$stage/targets"
 success=1
-printf '\nAzure PR Review installed.\nSettings: %s\n' "$root/azpr/settings.json"
+printf '\nAzure PR Review installed (target host: OpenCode 1.18.31).\nSettings: %s\n' "$root/plugins/azpr/settings.json"
 [ -z "$backup" ] || printf 'Previous files preserved: %s\n' "$backup"
 cat <<'TXT'
 1. Configure exact freeA/freeB provider/model IDs; deep/final are optional.
-2. Match your existing Azure MCP tool names and read-only permissions.
+2. Use your existing OpenCode MCP connection and permissions; no tool mapping is required.
 3. Fully restart OpenCode and run /pr-check on a small, known PR.
 Settings have not been API-validated. The plugin refuses incomplete configuration.
 TXT

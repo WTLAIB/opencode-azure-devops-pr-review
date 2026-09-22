@@ -1,6 +1,6 @@
 # Human-readable Azure PR comments
 
-`/pr-comment` is a separate, opt-in workflow for turning a completed review into a small number of actionable inline discussions. Review commands remain read-only. This command uses `freeB` for planning and, only when explicitly requested, for publishing the saved preview. It does not rerun the reviewers or switch to paid slots. The slot name does not guarantee cost.
+`/pr-comment` is a separate, opt-in workflow for turning a completed review into a small number of actionable inline discussions. Review prompts instruct models not to modify anything; MCP permissions are governed by OpenCode. This command uses `freeB` for planning and, only when explicitly requested, for publishing the saved preview. It does not rerun the reviewers or switch to paid slots. The slot name does not guarantee cost.
 
 ## Policy and rationale
 
@@ -15,7 +15,7 @@ The following limits are project choices, not universal standards:
 | Rule | Default |
 | --- | --- |
 | Eligibility | Confirmed high/medium-impact defects only |
-| Volume | At most 5 create attempts per completed review; configurable from 1 to 10 |
+| Volume | At most 5 saved comments; configurable from 1 to 10; one publishing stage per review |
 | Comment size | At most 1,200 characters plus a small hidden deduplication marker |
 | Anchor | Smallest useful 1-5 line range in a changed HEAD file |
 | Structure | Short issue title; triggering condition and impact; correction or regression test |
@@ -38,75 +38,94 @@ The final verifier's `CONFIRMED` original findings and structured `newFindings` 
 
 ## Enable and use
 
-Before reviewing, set this in your **installed, private** `azpr/settings.json`, then restart OpenCode:
+In your private plugins/azpr/settings.json, set comments.enabled=true before
+reviewing and restart OpenCode. The default is false; preview is still available.
+Set outputLanguage (for example, zh-TW) to control both final-report and comment
+prose. Intermediate review output and structured keys stay in English.
 
-```json
-"comments": {
-  "enabled": true,
-  "maxComments": 5
-}
-```
-
-`enabled` defaults to `false`: previews work, publishing does not. Do not change settings between reviewing and publishing; settings changes require a restart, which clears the in-memory review cache.
-
-Run from the same original development conversation in the same OpenCode process:
+From the same original conversation/process:
 
 ```text
 /pr-review https://dev.azure.com/ORG/PROJECT/_git/REPO/pullrequest/123
-/pr-comment <review-id>
-/pr-comment <review-id> --publish
+/pr-comment <completed-review-id>
+/pr-comment <completed-review-id> --publish
 ```
 
-Replace `<review-id>` with the eight-character ID from the **completed review** receipt, not the preview command's ID. `/pr-deep` reports also work. `/pr-check`, stale, incomplete, unknown, and another conversation's reports do not.
+The preview shows bodies, locations, and skip reasons even in receipt mode.
+Inspect it before requesting publication. The publisher receives the saved
+content and coordinates, not a freshly generated plan. It is instructed to
+send the content exactly, without translation or relocation.
 
-The first comment command is read-only and returns the exact proposed bodies, locations, and skip reasons to your original conversation, even when `returnReport` is `receipt`. `--publish` uses that saved plan, not newly generated text. OpenCode may still ask permission for writes. There is no one-shot publish shortcut.
+The workflow does not start a publisher without explicit --publish. This is not
+a guarantee that a model cannot misuse a host-permitted tool during review or
+preview: read-only behavior there is a prompt instruction.
 
-Review the body and location of every previewed comment. If a human has since raised the same issue, refresh the preview before publishing. Empty plans do not create a summary thread. Success receipts include verified Azure thread IDs; a model's claim of success is insufficient. Cancel using `/pr-stop [comment-run-id]`. Already dispatched comments may still appear; cancellation does not delete them.
+## MCP calls
 
-Only the latest 20 completed reports are cached, in memory. OpenCode's normal session storage still contains reports and tool history; this is not ephemeral-data or retention protection. After a restart, run a new review; importing arbitrary old report text for publishing is intentionally unsupported.
+Models use the tools and schemas actually exposed by OpenCode. There is no fixed
+tool prefix, name, action list, read adapter, or create-thread adapter. The model
+must find suitable operations to read exact-commit source, enumerate all threads,
+check current PR identity/HEAD, and create an inline comment if authorized.
 
-## Azure MCP requirements
+A tool listing comments in one thread is not enough to verify all PR discussions.
+If a required capability is unavailable, the model must stop rather than guess,
+skip verification, or substitute a long general comment. OpenCode and the MCP
+server still enforce their own permissions; the plugin adds no MCP overrides.
 
-The adapter targets Microsoft's unified tool schemas, inspected at [this upstream revision](https://github.com/microsoft/azure-devops-mcp/blob/aacff1ea3dff23362d538cc61cc57d5f5dedc437/src/tools/repositories.ts). Check your installed MCP server before enabling it. Legacy differently named tools and arbitrary custom dispatchers are not automatically compatible.
+The target parser currently accepts canonical dev.azure.com and hosted
+organization.visualstudio.com PR URLs. This identifies the intended target;
+it does not independently verify the identity returned by an MCP operation.
+On-premises Azure URLs are not currently supported for the comment workflow.
 
-With `azure.prefix: "ado"`, these exact read tools must be in the existing Azure read allowlist:
+## What is enforced and what is instructed
 
-- `ado_repo_pull_request`: `get`, including identity, active status, and `lastMergeSourceCommit.commitId`.
-- `ado_repo_pull_request_thread`: unfiltered `list`, `fullResponse=true`, `top=100`, and sequential `skip` pages until the final short page.
-- `ado_repo_file`: `get_content` at the full reviewed SHA with `versionType=Commit`.
+The runtime checks plan structure: known confirmed finding IDs, maximum plan
+size, high/medium labels, body length, changed-file paths, 1-5 line ranges, anchor
+line count, and an explanation for every skipped eligible finding. It adds stable
+markers. These checks are not proof that source lines or findings are correct.
 
-The separate write tool is `ado_repo_pull_request_thread_write`. Do **not** put it in `azure.toolNames` or `azure.fullToolNames`; those remain read-only. The publisher alone receives this exact tool, capped at `ask` and respecting global denial. Runtime guards authorize only `action=create`, `status=Active`, and the exact preview arguments. Reply, edit, delete, resolve, vote, approve, merge, and pipeline/work-item changes are not authorized.
+Reading source, checking HEAD/identity, finding duplicate discussions, using only
+create operations, sending exact content to the intended PR, and verifying the
+actual create response are **model instructions**, not MCP-call guards.
 
-Tool names use the configured prefix. The MCP connection itself is organization-scoped; the adapter checks the returned repository web URL against the requested organization, project, repository, and PR before allowing writes. Canonical `https://dev.azure.com/...` and `https://ORG.visualstudio.com/...` URLs are supported; on-premises Azure DevOps Server URLs need a separately audited adapter.
+Before starting a publisher, the runtime marks the whole batch UNKNOWN. A valid
+publisher report with all planned IDs can produce MODEL_REPORTED_POSTED, showing
+the reported thread IDs. This is explicitly model-reported, not independent Azure
+verification. No completed tool call, a malformed report, missing posts, failure,
+or cancellation leaves an incomplete or uncertain result. Generic completed tool
+calls do not establish that a write happened or that it was correct.
 
-Use an Azure identity allowed to read source and contribute PR comments. Enforce the narrowest feasible permissions on the server/account; if the connection is completely read-only, preview works but publishing cannot. The plugin never installs an MCP server, changes credentials, or broadens global OpenCode permissions.
+Only one publishing attempt is allowed per completed review. After any attempt,
+inspect Azure before starting a new review. The plugin cannot identify which
+calls were writes and never retries the batch automatically. This is not an
+exactly-once guarantee: the model, host, or server could still retry operations.
+Prompts forbid blind retries. A push or new discussion can race the last check.
+Cancellation cannot undo already dispatched operations; no remote rollback or
+deletion is attempted.
 
-## Runtime checks and limits
+Completed reviews/previews are kept only in this process (latest 20 reviews).
+Restarting clears that cache, not OpenCode history. Empty plans start no publisher
+and do not request a summary thread.
 
-Before each create, the publisher must fetch all current discussions and re-read PR metadata. The runtime checks actual tool outputs, not the model's claimed HEAD. The HEAD must equal the reviewed source SHA and the PR must be active; metadata older than 60 seconds must be re-read. Complete exact-commit source must match the preview's exact anchor text. Unrecognized, errored, or reported-truncated output fails closed. Plain text, flattened MCP text envelopes, and the upstream randomized untrusted-content wrapper are supported.
+## Customization
 
-Each create is sequential. The runtime consumes its evidence before dispatch, prevents concurrent writes, allows no changed body or target, checks existing deterministic markers, and records an attempted finding before the request can be sent. A successful response must contain a thread ID and the expected content and anchor. An error, timeout, or unverifiable response leaves the attempt `UNKNOWN`. Automatic retries are blocked: inspect Azure, then explicitly run a new review if appropriate. Earlier successful posts remain; there is no rollback or automatic deletion. The attempt cap applies across refreshed previews of the same review.
-
-The upstream adapter supports right-side anchors. This version sends `threadContext` line coordinates without explicit iteration/change-tracking IDs; deleted-side-only findings are skipped. See Microsoft's [thread creation API](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/create?view=azure-devops-rest-7.1) for the underlying distinction. It verifies HEAD-file coordinates, not membership in a specific displayed diff hunk; the model must select the relevant changed code, and a live Azure smoke test must confirm rendering.
-
-The create API has no expected-HEAD/idempotency precondition in this adapter. A push or a new human comment can race the final read and create. The host/server may also retry internally. This is best-effort stale/duplicate prevention, not an atomic transaction or an exactly-once guarantee. The source HEAD check does not revalidate target-branch changes or the entire original review. Existing markers detect identical normalized evidence and locations; different wording across independent reviews still needs semantic inspection. No automated comment policy replaces human judgment or a merge gate.
-
-## Customization and updates
-
-Installed policy: `azpr/prompts/comment-policy.md`. Installed stage instructions: `azpr/prompts/comment-plan.md` and `comment-publish.md`. The review-wide `common.md` still prohibits writing. Change tone or team-specific policy locally, then restart; do not weaken the runtime's target, evidence, or authorization checks. Hard limits are enforced in `src/comments.mjs`; prompt edits alone cannot bypass them.
-
-Set top-level `outputLanguage` in your installed `azpr/settings.json` to choose the language of both final-report Markdown and human-facing comment prose. It defaults to `en`; use `zh-TW` for Traditional Chinese, `zh-CN` for Simplified Chinese, or another language tag such as `ja`. Comment skip reasons use the same language. Initial reviews, structured fields, status receipts, identifiers, source quotes, and `issue (high):` / `issue (medium):` labels stay unchanged. The runtime retains the configured language with the completed review and provides it to the comment stages; publishing always sends the exact saved preview, with no translation pass.
-
-Change the setting before reviewing and restart OpenCode. Settings changes invalidate the current process's workflow and restarting clears cached reports/previews, so changing language requires a new review and preview. The language is an instruction to the configured model, not a deterministic translation guarantee; inspect the generated text.
-
-Installation with `--replace` preserves settings, including `outputLanguage`, but replaces prompts, archiving old files under `azpr-backups/`. Migrate any old prompt-based language override to this setting rather than reapplying conflicting language instructions. Reapply unrelated policy customizations from the backup as needed. Keep personal settings and model mappings out of Git; the repository's example remains English by default.
+Installed instructions are in plugins/azpr/prompts/comment-policy.md,
+comment-plan.md, and comment-publish.md. Review-only instructions remain in
+common.md. Use outputLanguage for localization rather than translating prompts.
+Changing installed settings requires a restart; updating replaces prompt files
+and archives old copies. Never commit private settings, model IDs, or PR data.
 
 ## Acceptance test before real use
 
-1. Use a disposable/test PR and an approved account/provider. Record OpenCode and MCP versions.
-2. Set `outputLanguage`, restart, and verify final-report prose and preview bodies use it while intermediate reviews stay English. Preview must create zero threads.
-3. Publish one known issue and inspect the line placement and returned thread ID in Azure.
-4. Repeat publishing, update the PR source, and add an equivalent human comment in separate tests: each must stop or skip appropriately, never silently duplicate or move the issue.
-5. Deny the write permission or cancel; inspect Azure before retrying any uncertain request.
+1. Use a disposable PR, OpenCode 1.18.31, and approved model/MCP services.
+2. Verify host asks/denies remain in effect for all private stages.
+3. Confirm the final report and preview use outputLanguage and the requested
+   review context. Inspect actual tool history: review and preview should make
+   no modifications, but this is not guaranteed by the plugin.
+4. Publish one saved comment. Check its actual Azure target, text, line anchor,
+   marker, and thread ID; do not rely solely on MODEL_REPORTED_POSTED.
+5. Test unavailable tools, stale HEAD, existing discussions, cancellation, and
+   denied writes. The model should stop; the workflow must not retry a batch.
 
-Offline tests cover the adapter and workflow with fixtures. They do not establish live Azure compatibility or successful publication in your organization.
+Offline tests exercise orchestration and report/plan validation with mocks, not
+real-model policy compliance, Azure rendering, or live server compatibility.

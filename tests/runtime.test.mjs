@@ -23,7 +23,7 @@ async function fixture(t, opts={}) {
       title:{model:'original/title'},summary:{model:'original/summary'},compaction:{model:'original/compaction'},teamHelper:{mode:'subagent',model:'original/team'}},
     command:{existing:{template:'Original command',agent:'build'}}};
   for(const name of ['pr-check','pr-review','pr-deep','pr-stop','pr-comment']) {
-    cfg.command[name]={description:name,subtask:false,template:`<!-- azpr-optin:${name} -->\n$ARGUMENTS`};
+    cfg.command[name]={description:name,subtask:false,template:`<!-- azpr-optin:${name} -->\n$9007199254740991`};
   }
   if(opts.config) opts.config(cfg);
   const baseline=jclone(cfg);
@@ -52,36 +52,36 @@ async function fixture(t, opts={}) {
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
       if(!opts.skipAzure && !role.startsWith('azpr-comment-')) {
-        const tool='ado_repo_pull_request'; const callID=`read-${id}`;
-        await hooks['tool.execute.before']({sessionID:id,tool,callID},{args:{action:'get'}});
-        if(!opts.skipAzureAfter) await hooks['tool.execute.after']({sessionID:id,tool,callID,args:{action:'get'}},{title:'fixture read',output:'fixture code',metadata:{}});
+        const tool=opts.readTool ?? 'ado_repo_pull_request'; const callID=`read-${id}`;
+        const args = opts.readTool ? {repositoryId:'repo',project:'proj',pullRequestId:123} : {action:'get'};
+        await hooks['tool.execute.before']({sessionID:id,tool,callID},{args});
+        if(!opts.skipAzureAfter) await hooks['tool.execute.after']({sessionID:id,tool,callID,args},{title:'fixture read',output:'fixture code',metadata:opts.readMetadata ?? {}});
       }
       let result;
       if(role.startsWith('azpr-comment-')) {
-        let seq = 0;
-        const invoke = async (tool, args, result, response = {}) => {
-          const input = { sessionID: id, tool, callID: `${id}-comment-${++seq}`, args };
-          await hooks['tool.execute.before'](input, {args});
+        let seq=0;
+        const invoke=async(tool,args,result,response={})=>{
+          const input={sessionID:id,tool,callID:`${id}-comment-${++seq}`,args};
+          await hooks['tool.execute.before'](input,{args});
+          if(opts.hostDeny===tool) throw new Error('Mock OpenCode host permission denied.');
           calls.push({kind:'tool',tool,args});
-          await hooks['tool.execute.after'](input, {output: typeof result === 'string' ? result : JSON.stringify(result),metadata:{},...response});
+          await hooks['tool.execute.after'](input,{output:JSON.stringify(result),metadata:{},...response});
+          return seq+100;
         };
-        const evidence = async () => {
-          const {repositoryId,project,pullRequestId} = packet.target;
-          await invoke(packet.tools.file,{action:'get_content',repositoryId,project,path:SNAP.files[0],version:SNAP.head,versionType:'Commit'},Array(20).fill('fixture code').join('\n'));
-          await invoke(packet.tools.threads,{action:'list',repositoryId,project,pullRequestId,top:100,skip:0,fullResponse:true},opts.commentThreads ?? []);
-          await invoke(packet.tools.pr,{action:'get',repositoryId,project,pullRequestId},{pullRequestId,status:1,lastMergeSourceCommit:{commitId:opts.commentHead ?? SNAP.head},repository:{name:'repo',id:'repo-id',project:{name:'proj',id:'project-id'},webUrl:'https://dev.azure.com/org/proj/_git/repo'}});
-        };
-        if (role === 'azpr-comment-plan') {
-          await evidence();
-          const count = Math.min(opts.planCount ?? 1,packet.maxComments);
+        if (!opts.noCommentTools) await invoke('custom_mcp_inspect',{url:packet.target,at:packet.snapshot.head},{source:'fixture code',threads:[]});
+        if(role==='azpr-comment-plan'){
+          const count=Math.min(opts.planCount ?? 1,packet.maxComments);
           result={status:'READY',comments:packet.findings.slice(0,count).map(f=>({findingId:f.id,severity:'high',path:SNAP.files[0],startLine:12,endLine:12,anchor:'fixture code',body:`issue (high): ${f.id} fixture defect\n\nTrigger and impact. Suggested fix and test.`})),skipped:packet.findings.slice(count).map(f=>({findingId:f.id,reason:'Duplicate or comment limit reached.'}))};
         } else {
-          for (const comment of packet.comments) {
-            await evidence();
-            if (opts.beforeWrite) await opts.beforeWrite({hooks,role,id,model,packet,invoke,calls});
-            if (!opts.skipWrite) await invoke(packet.tools.write,comment.args,{id:seq+100,comments:[{content:comment.args.content}],threadContext:{filePath:comment.args.filePath,rightFileStart:{line:comment.args.rightFileStartLine},rightFileEnd:{line:comment.args.rightFileEndLine}}},opts.writeError ? {isError:true} : {});
+          const posted=[];
+          for(const comment of packet.comments){
+            if(opts.beforeWrite) await opts.beforeWrite({hooks,role,id,model,packet,invoke,calls});
+            if(!opts.skipWrite && !opts.noCommentTools){
+              const threadId=await invoke('custom_mcp_annotate',{target:packet.target,text:comment.content,line:comment.startLine},{id:seq+101},opts.writeError?{isError:true}:{});
+              if(!opts.writeError) posted.push({findingId:comment.findingId,threadId});
+            }
           }
-          result={status:'DONE'};
+          result={status:opts.writeError?'INCOMPLETE':'DONE',posted};
         }
       }
       else if(role==='azpr-check') result={status:'READY',snapshot:jclone(SNAP),sourceAccess:{diff:'fixture'},requirements:'fixture requirement',report:'SOURCE REPORT'};
@@ -111,8 +111,12 @@ test('configuration preserves every original model, agent, permission, MCP and c
   const f=await fixture(t);const restored=jclone(f.cfg);for(const name of Object.keys(ROLES)) delete restored.agent[name];
   assert.deepEqual(restored,f.baseline);assert.equal(f.calls.length,0);
 });
-test('all private reviewers deny Task/Skill and are hidden primary agents',async t=>{
-  const f=await fixture(t);for(const name of Object.keys(ROLES)){assert.equal(f.cfg.agent[name].mode,'primary');assert.equal(f.cfg.agent[name].hidden,true);assert.equal(f.cfg.agent[name].permission.task,'deny');assert.equal(f.cfg.agent[name].permission.skill,'deny');}
+test('private agents inherit host tool permissions and only disable nested Task delegation',async t=>{
+  const f=await fixture(t);
+  for(const name of Object.keys(ROLES)){
+    assert.equal(f.cfg.agent[name].mode,'primary'); assert.equal(f.cfg.agent[name].hidden,true);
+    assert.deepEqual(f.cfg.agent[name].permission,{task:'deny'});
+  }
 });
 test('ordinary Plan/Build hooks are no-ops even after the settings file is deleted',async t=>{
   const f=await fixture(t);await rm(join(f.dir,'settings.json'));
@@ -161,6 +165,65 @@ test('deep runs three independent initial sessions and exactly one paid final st
 test('check-only never enters an initial review stage',async t=>{
   const f=await fixture(t);assert.match(await f.command('pr-check'),/] READY/);assert.equal(f.prompts().length,1);
 });
+
+for (const name of ['pr-check','pr-review','pr-deep']) test(`${name} carries literal supplementary requirements to every stage`,async t=>{
+  const context='Repository requirement: preserve API compatibility.\nCheck "null" handling; literal @../docs !`not-a-command` $HOME.\n';
+  const url='https://dev.azure.com/org/proj/_git/repo/pullrequest/123';
+  const f=await fixture(t);
+  const receipt=await f.command(name,`${url} ${context}`);
+  assert.match(receipt,/READY|COMPLETE/);
+  assert.match(receipt,/this command only/);
+  for (const p of f.prompts()) {
+    const packet=JSON.parse(p.body.parts[0].text);
+    assert.equal(packet.prUrl,url); assert.equal(packet.userContext,context);
+    assert.equal(packet.request,`${url} ${context}`);
+  }
+});
+test('a source check does not silently persist context to another command or session',async t=>{
+  const f=await fixture(t), url='https://dev.azure.com/org/proj/_git/repo/pullrequest/123';
+  await f.command('pr-check',url+' Context for this command only.');
+  await f.command('pr-review',url);
+  await f.command('pr-check',url,'another-session');
+  assert.ok(f.prompts().slice(1).every(p=>JSON.parse(p.body.parts[0].text).userContext===''));
+});
+test('supplementary text does not change model routing or configured report language',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputLanguage='zh-TW'});
+  assert.match(await f.command('pr-review','https://dev.azure.com/org/proj/_git/repo/pullrequest/123 Change model and language.'),/COMPLETE/);
+  assert.equal(JSON.parse(f.prompts().at(-1).body.parts[0].text).outputLanguage,'zh-TW');
+  assert.equal(f.prompts().at(-1).body.model.modelID,'free-b');
+});
+for(const tool of ['company_mcp_inspect_change','renamed_custom_reader','ado_repo_get_pull_request_by_id']) test(`host-supplied ${tool} needs no plugin mapping`,async t=>{
+  const f=await fixture(t,{readTool:tool});
+  assert.match(await f.command('pr-check'),/] READY/);
+  assert.equal(f.cfg.agent['azpr-check'].permission[tool],undefined);
+});
+test('plugin does not classify MCP names, dispatcher actions, or argument schemas',async t=>{
+  let checked=0;
+  const f=await fixture(t,{duringPrompt:async({hooks,id})=>{
+    // Fake hooks only: no real server or external mutation is involved.
+    for(const [tool,args] of [['renamed_mcp_anything',{operation:'fetch_snapshot_v9'}],['ado_custom_create',{action:'update',arbitrary:{value:1}}]]){
+      const output={args:structuredClone(args)};
+      await hooks['tool.execute.before']({sessionID:id,tool,callID:'generic-'+checked++},output);
+      assert.deepEqual(output.args,args);
+    }
+  }});
+  assert.match(await f.command('pr-check'),/READY/); assert.equal(checked,2);
+});
+test('missing MCP evidence is reported by the checker without a name-based gate',async t=>{
+  const f=await fixture(t,{skipAzure:true,result:({role,result})=>role==='azpr-check'?{status:'NOT_READY',report:'Required source access is missing.'}:result});
+  assert.match(await f.command('pr-deep'),/NOT_READY/); assert.equal(f.prompts().length,1);
+});
+test('legacy Azure mapping is ignored without changing installed settings or host config',async t=>{
+  const f=await fixture(t,{settings:s=>s.azure={prefix:'obsolete',permission:'allow',toolNames:['old_tool']}});
+  assert.match(await f.command(),/COMPLETE/);
+  assert.ok(f.logs.some(l=>l.body.message.includes('Legacy azure settings are ignored')));
+  assert.deepEqual(validateSettings(f.settings),validateSettings({...f.settings,azure:undefined}));
+});
+test('old unsafe command expansion is rejected with reinstallation guidance',async t=>{
+  const f=await fixture(t,{config:c=>c.command['pr-check'].template='<!-- azpr-optin:pr-check -->\n$ARGUMENTS'});
+  await assert.rejects(f.command('pr-check'),/unsafe native argument expansion/);
+  assert.equal(f.prompts().length,0);
+});
 test('completed sessions cannot be resumed or retasked',async t=>{
   const f=await fixture(t);await f.command('pr-deep');for(const p of f.prompts()) {
     await assert.rejects(f.hooks['chat.params']({sessionID:p.path.id,agent:p.body.agent,model:{providerID:'fixture',id:p.body.model.modelID}},{}),/no active/);
@@ -171,14 +234,14 @@ test('paid reviewer remains blocked in other sessions while deep review is activ
   let checked=false;const f=await fixture(t,{duringPrompt:async ({hooks,role})=>{if(role!=='azpr-deep')return;await assert.rejects(hooks['chat.params']({agent:role,sessionID:'unrelated',model:{providerID:'fixture',id:'paid-deep'}},{}),/no active/);checked=true;}});
   await f.command('pr-deep');assert.equal(checked,true);
 });
-test('reviewer cannot edit files, run shell, use a skill or start other reviewers',async t=>{
-  let checked=0;const f=await fixture(t,{duringPrompt:async({hooks,role,id})=>{if(role!=='azpr-functional')return;for(const tool of ['bash','edit','read','skill','task','other_mcp_read']) {await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool,callID:'blocked'},{args:{}}),/Only the exact/);checked++;}}});
-  await f.command();assert.equal(checked,6);
+test('review rules say not to modify; nested model orchestration remains blocked in code',async t=>{
+  const f=await fixture(t,{duringPrompt:async({hooks,id})=>{
+    await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'task',callID:'nested'},{args:{subagent_type:'explore'}}),/Nested Task/);
+  }});
+  await f.command();
+  for(const name of Object.keys(ROLES).filter(r=>!r.startsWith('azpr-comment-'))) assert.match(f.cfg.agent[name].prompt,/review-only task: read and analyze, do not modify anything/);
 });
-test('read dispatcher rejects an explicit write action',async t=>{
-  const f=await fixture(t,{duringPrompt:async({hooks,role,id})=>{if(role!=='azpr-check')return;await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'ado_repo_pull_request',callID:'w'},{args:{action:'update'}}),/non-read/);}});
-  assert.match(await f.command('pr-check'),/] READY/);
-});
+
 test('a model change during the authorized session is rejected',async t=>{
   const f=await fixture(t,{duringPrompt:async({hooks,role,id})=>{await assert.rejects(hooks['chat.params']({sessionID:id,agent:role,model:{providerID:'other',id:'expensive'}},{}),/Model mismatch/);}});await f.command();
 });
@@ -215,7 +278,7 @@ test('post-load command override is rejected before creating sessions',async t=>
 test('NOT_READY never spends paid model calls',async t=>{
   const f=await fixture(t,{result:({result,role})=>role==='azpr-check'?{status:'NOT_READY',report:'Diff missing'}:result});assert.match(await f.command('pr-deep'),/] NOT_READY/);assert.equal(f.prompts().length,1);
 });
-for(const [label,opts] of [['missing message hook',{skipMessageHook:true}],['missing params hook',{skipParamsHook:true}],['no Azure read',{skipAzure:true}],['Azure read did not finish',{skipAzureAfter:true}],['malformed JSON',{invalidJSON:true}],['model error',{responseError:true}]]) test(`${label} cannot pass preflight and spend paid calls`,async t=>{
+for(const [label,opts] of [['missing message hook',{skipMessageHook:true}],['missing params hook',{skipParamsHook:true}],['malformed JSON',{invalidJSON:true}],['model error',{responseError:true}]]) test(`${label} cannot pass preflight and spend paid calls`,async t=>{
   const f=await fixture(t,opts);assert.match(await f.command('pr-deep'),/INCOMPLETE/);assert.equal(f.prompts().length,1);
 });
 test('PARTIAL initial reviewer prevents paid final stage',async t=>{
@@ -243,8 +306,10 @@ test('second review from the same origin is rejected rather than double billed',
   let release,started;const wait=new Promise(r=>release=r);const ready=new Promise(r=>started=r);
   const f=await fixture(t,{duringPrompt:async({role})=>{if(role==='azpr-check'){started();await wait;}}});const running=f.command();await ready;await assert.rejects(f.command('pr-deep'),/already running/);await f.command('pr-stop','');release();await running;
 });
-test('global Azure deny is not relaxed by private agent configuration',async t=>{
-  const f=await fixture(t,{config:c=>c.permission.ado_repo_pull_request='deny'});assert.equal(f.cfg.agent['azpr-check'].permission.ado_repo_pull_request,'deny');assert.match(await f.command(),/INCOMPLETE/);
+test('global asks, denies and nested patterns are left intact for the host to enforce',async t=>{
+  const f=await fixture(t,{config:c=>c.permission={'*':'deny','custom_*':'ask',specific_tool:{'*':'deny',safe:'ask'}}});
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
+  for(const role of Object.keys(ROLES)) assert.deepEqual(f.cfg.agent[role].permission,{task:'deny'});
 });
 test('SDK create failure cannot prompt a model or grant a reviewer',async t=>{
   const f=await fixture(t,{createError:true});assert.match(await f.command(),/INCOMPLETE/);assert.equal(f.prompts().length,0);
@@ -288,7 +353,7 @@ test('failed stage revokes its grant and requests abort without touching the dev
 
 const reviewId = receipt => /\[AZPR ([a-f0-9]{8})\]/.exec(receipt)[1];
 const enableComments = s => { s.comments.enabled = true; };
-const writes = f => f.calls.filter(c => c.kind === 'tool' && c.tool.endsWith('_write'));
+const writes = f => f.calls.filter(c => c.kind === 'tool' && c.tool==='custom_mcp_annotate');
 
 test('comment preview is visible, read-only, and uses freeB even after deep review', async t => {
   const f=await fixture(t), id=reviewId(await f.command('pr-deep'));
@@ -299,56 +364,55 @@ test('comment preview is visible, read-only, and uses freeB even after deep revi
   assert.equal(f.prompts().at(-1).body.model.modelID,'free-b');
   await assert.rejects(f.command('pr-comment',id+' --publish'),/comments.enabled/);
 });
-test('explicit publish creates only saved preview content and reports observed thread ID', async t => {
-  const f=await fixture(t,{settings:enableComments}), id=reviewId(await f.command());
+test('publisher uses host tools without a fixed name or saved API arguments',async t=>{
+  const f=await fixture(t,{settings:enableComments}),id=reviewId(await f.command());
   await assert.rejects(f.command('pr-comment',id+' --publish'),/Preview first/);
   await f.command('pr-comment',id);
   const out=await f.command('pr-comment',id+' --publish');
-  assert.match(out,/] POSTED/); assert.match(out,/thread=103/); assert.equal(writes(f).length,1);
-  assert.equal(writes(f)[0].args.pullRequestId,123);
-  assert.equal(f.prompts().at(-1).body.model.modelID,'free-b');
-  await assert.rejects(f.command('pr-comment',id+' --publish'),/already attempted/);
+  assert.match(out,/] MODEL_REPORTED_POSTED/); assert.match(out,/not independently verified/);
+  assert.equal(writes(f).length,1);
+  const packet=JSON.parse(f.prompts().at(-1).body.parts[0].text);
+  assert.equal(packet.tools,undefined); assert.equal(packet.comments[0].args,undefined);
+  assert.equal(writes(f)[0].args.text,packet.comments[0].content);
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/already had a publication attempt/);
 });
-test('multiple writes require fresh PR metadata and all thread pages for each comment', async t => {
-  const f=await fixture(t,{settings:enableComments,planCount:2,result:({role,result})=>['azpr-functional','azpr-failure'].includes(role)?{...result,findings:result.findings.map(f=>({...f,summary:f.id+' distinct root cause'}))}:result});
-  const id=reviewId(await f.command()); await f.command('pr-comment',id);
-  const out=await f.command('pr-comment',id+' --publish');
-  assert.match(out,/] POSTED/); assert.equal(writes(f).length,2);
-  const kinds=f.calls.filter(c=>c.kind==='tool').slice(-8).map(c=>c.tool);
-  assert.deepEqual(kinds.slice(0,4),kinds.slice(4));
-});
-test('review and preview roles never receive comment writes; global write deny remains denied', async t => {
-  const f=await fixture(t,{settings:enableComments,config:c=>c.permission.ado_repo_pull_request_thread_write='deny'});
-  for (const role of ['azpr-check','azpr-functional','azpr-verify-free','azpr-comment-plan']) assert.equal(f.cfg.agent[role].permission.ado_repo_pull_request_thread_write,undefined);
-  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_repo_pull_request_thread_write,'deny');
-  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_wit_work_item,undefined);
+test('host permission denial remains a failed publication attempt',async t=>{
+  const f=await fixture(t,{settings:enableComments,hostDeny:'custom_mcp_annotate',config:c=>c.permission.custom_mcp_annotate='deny'});
   const id=reviewId(await f.command()); await f.command('pr-comment',id);
   assert.match(await f.command('pr-comment',id+' --publish'),/INCOMPLETE/); assert.equal(writes(f).length,0);
+  assert.equal(f.cfg.permission.custom_mcp_annotate,'deny');
+  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.custom_mcp_annotate,undefined);
 });
-test('a publisher claiming DONE without a tool write is not reported as posted', async t => {
-  const f=await fixture(t,{settings:enableComments,skipWrite:true}), id=reviewId(await f.command());
-  await f.command('pr-comment',id);
-  assert.match(await f.command('pr-comment',id+' --publish'),/INCOMPLETE/); assert.equal(writes(f).length,0);
-});
-test('unknown create result stays unknown and blocks automatic retry', async t => {
-  const f=await fixture(t,{settings:enableComments,writeError:true}), id=reviewId(await f.command());
+test('DONE without reported entries stays incomplete and blocks a second attempt',async t=>{
+  const f=await fixture(t,{settings:enableComments,skipWrite:true}),id=reviewId(await f.command());
   await f.command('pr-comment',id);
   const out=await f.command('pr-comment',id+' --publish');
-  assert.match(out,/INCOMPLETE/); assert.match(out,/UNKNOWN/); assert.equal(writes(f).length,1);
-  await assert.rejects(f.command('pr-comment',id+' --publish'),/uncertain/);
+  assert.match(out,/INCOMPLETE/); assert.match(out,/UNKNOWN/);
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/publication attempt/);
 });
-test('source head changed after preview blocks all writes', async t => {
-  const opts={settings:enableComments}, f=await fixture(t,opts), id=reviewId(await f.command());
-  await f.command('pr-comment',id); opts.commentHead='c'.repeat(40);
-  const out=await f.command('pr-comment',id+' --publish'); assert.match(out,/stale/); assert.equal(writes(f).length,0);
-});
-test('new duplicate threads after preview block writes', async t => {
-  const opts={settings:enableComments}, f=await fixture(t,opts), id=reviewId(await f.command());
+test('DONE without any completed tool call cannot count as model-reported publication',async t=>{
+  const opts={settings:enableComments},f=await fixture(t,opts),id=reviewId(await f.command());
   await f.command('pr-comment',id);
-  opts.beforeWrite=async({packet})=>{opts.commentThreads=[{id:89,comments:[{content:packet.comments[0].args.content}]}];};
-  // Put the duplicate in the evidence response before any create is attempted.
-  opts.beforePrompt=async({role,packet})=>{if(role==='azpr-comment-publish') opts.commentThreads=[{id:89,comments:[{content:packet.comments[0].args.content}]}];};
-  assert.match(await f.command('pr-comment',id+' --publish'),/Duplicate/); assert.equal(writes(f).length,0);
+  opts.noCommentTools=true;
+  opts.result=({role,result,packet})=>role==='azpr-comment-publish'?{status:'DONE',posted:packet.comments.map(c=>({findingId:c.findingId,threadId:'invented'}))}:result;
+  assert.match(await f.command('pr-comment',id+' --publish'),/did not complete any tool/);
+});
+test('failed tool results remain uncertain with no automatic retry',async t=>{
+  const f=await fixture(t,{settings:enableComments,writeError:true}),id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish');
+  assert.match(out,/INCOMPLETE/); assert.match(out,/UNKNOWN/);
+  await assert.rejects(f.command('pr-comment',id),/publication attempt/);
+});
+test('partial publication preserves model-reported IDs and marks other entries unknown',async t=>{
+  const f=await fixture(t,{settings:enableComments,planCount:2,result:({role,result})=>{
+    if(['azpr-functional','azpr-failure'].includes(role)) return {...result,findings:result.findings.map(f=>({...f,summary:f.id+' distinct cause'}))};
+    if(role==='azpr-comment-publish') return {status:'INCOMPLETE',posted:result.posted.slice(0,1)};
+    return result;
+  }});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish');
+  assert.match(out,/] INCOMPLETE/); assert.match(out,/F-1: MODEL_REPORTED_POSTED/); assert.match(out,/R-1: UNKNOWN/);
 });
 test('confirmed verifier discoveries are eligible; unconfirmed findings are excluded', async t => {
   const f=await fixture(t,{result:({role,result})=>role.startsWith('azpr-verify-')?{...result,dispositions:result.dispositions.map(d=>({...d,status:'NEEDS_INFO'})),newFindings:[{id:'V-1',summary:'New confirmed defect',evidence:'Verified code',location:'/src/Main.java:12'}]}:result});
@@ -384,10 +448,10 @@ test('configured language accompanies the report into comment planning and publi
   assert.match(f.cfg.agent['azpr-comment-plan'].prompt,/outputLanguage: zh-TW/);
   assert.match(f.cfg.agent['azpr-comment-publish'].prompt,/outputLanguage: zh-TW/);
   assert.match(f.cfg.agent['azpr-comment-publish'].prompt,/Do not paraphrase, translate/);
-  assert.match(await f.command('pr-comment',id+' --publish'),/] POSTED/);
+  assert.match(await f.command('pr-comment',id+' --publish'),/] MODEL_REPORTED_POSTED/);
   const payload=JSON.parse(f.prompts().at(-1).body.parts[0].text);
   assert.equal(payload.outputLanguage,'zh-TW');
-  assert.equal(writes(f)[0].args.content,payload.comments[0].args.content);
+  assert.equal(writes(f)[0].args.text,payload.comments[0].content);
 });
 
 test('outputLanguage defaults to English when omitted and matches the schema/example', async t => {
@@ -452,7 +516,7 @@ test('cancellation during the async tool settings check cannot dispatch a write'
   let f, raceCheck;
   f=await fixture(t,{settings:enableComments,beforeWrite:async({hooks,id,packet})=>{
     raceCheck=(async()=>{
-      const pending=assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:packet.tools.write,callID:'cancel-race'}, {args:packet.comments[0].args}),/expired/);
+      const pending=assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'custom_mcp_annotate',callID:'cancel-race'}, {args:{text:packet.comments[0].content}}),/expired/);
       await f.command('pr-stop','');
       await pending;
     })();
@@ -464,10 +528,8 @@ test('cancellation during the async tool settings check cannot dispatch a write'
   assert.ok(raceCheck); await raceCheck; assert.equal(writes(f).length,0);
 });
 
-test('comment settings reject typos and invalid caps; publisher asks even under global allow', async t => {
+test('comment settings retain local opt-in and plan caps, not MCP permissions',async t=>{
   const f=await fixture(t,{settings:enableComments});
-  assert.equal(f.cfg.agent['azpr-comment-publish'].permission.ado_repo_pull_request_thread_write,'ask');
-  for (const patch of [{maxComments:0},{maxComments:11},{maxComments:1.5},{enabled:'true'},{permission:'allow'}]) {
-    assert.throws(()=>validateSettings({...f.settings,comments:{...f.settings.comments,...patch}}));
-  }
+  assert.deepEqual(f.cfg.agent['azpr-comment-publish'].permission,{task:'deny'});
+  for(const patch of [{maxComments:0},{maxComments:11},{maxComments:1.5},{enabled:'true'},{permission:'allow'}]) assert.throws(()=>validateSettings({...f.settings,comments:{...f.settings.comments,...patch}}));
 });

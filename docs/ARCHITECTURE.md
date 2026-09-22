@@ -4,9 +4,14 @@
 
 The local plugin controls a fixed workflow through the OpenCode-provided Session SDK. It does not use nested Task orchestration, a global review skill, an external model SDK, or a separate launcher.
 
-The source entry is `src/plugin.js`, which imports the runtime beside it. Installation creates a small `plugins/azpr.js` loader that re-exports `azpr/plugin.js`. Runtime code, prompts, settings, and the uninstaller live under `azpr/`.
+The source entry is `src/plugin.js`, which imports the runtime beside it. Installation creates a small `plugins/azpr.js` loader that re-exports `./azpr/plugin.js`. Runtime code, prompts, settings, and the uninstaller live under `plugins/azpr/`. The loader does not import through a parent directory. OpenCode 1.18.31 scans top-level plugin `.js`/`.ts` files; nested helpers are not separate entries.
 
 A source check runs first. Initial reviewers then run concurrently in separate child sessions, each receiving the same request and snapshot but no other initial review. Final verification starts only after all initial reviews complete successfully.
+
+Command input is parsed into `prUrl` and literal `userContext`, while retaining
+the original request. All stages receive those fields directly; context is never
+replaced by the checker's summary or inherited from earlier commands. Receipt
+diagnostics identify the failing workflow phase without echoing supplementary text.
 
 ## Authorization
 
@@ -26,23 +31,40 @@ Initial finding IDs use `F-`, `R-`, or `D-` prefixes. Every original ID must hav
 
 The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
-Every stage must observe message and parameter hooks and at least one completed allowed Azure tool call. This detects missing integration hooks and completely unsupported evidence claims, but does not establish completeness of source coverage or truth of model-reported evidence.
+Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
 
 ## Tools and reports
 
-Private reviewers deny shell, local file access, editing, Task, Skill, public web, and unlisted tools. Exact Azure tool names are combined with existing global ask/deny restrictions. Dispatcher actions are restricted separately. Server-side permissions remain necessary; see [Azure setup](AZURE_MCP.md).
+Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Generic tool hooks retain only lifecycle checks and completed-call bookkeeping, never semantic read/write classification. See [MCP ownership and limitations](AZURE_MCP.md).
 
 The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report.
 
-The top-level `outputLanguage` (default `en`) is validated as a language tag and canonicalized. Only the two final-verifier roles and two comment roles receive a generated language instruction and an input language field. Completed reviews retain that language for later comments. It controls final-report Markdown and comment prose, not intermediate review output, structured fields, code identifiers, or status receipts. Full-report receipts instruct the original agent not to translate the enclosed report. The publisher sends saved comment bodies unchanged. Language quality is model-dependent; no language detector or additional translation call is used.
+The top-level `outputLanguage` (default `en`) is validated as a language tag and canonicalized. Only the two final-verifier roles and two comment roles receive a generated language instruction and an input language field. Completed reviews retain that language for later comments. It controls final-report Markdown and comment prose, not intermediate review output, structured fields, code identifiers, or status receipts. Full-report receipts instruct the original agent not to translate the enclosed report. The publisher receives unchanged saved bodies and is instructed to send them verbatim. Language quality is model-dependent; no language detector or additional translation call is used.
 
 Cancellation revokes grants before requesting session abort and never aborts the parent development session. A request already sent to a provider may still be billed. The host's UI disconnect or Ctrl+C behavior is not guaranteed to propagate cancellation. A wall-clock timeout provides an additional limit.
 
 ## Explicit comment boundary
 
-Completed reviews are cached in memory (latest 20). `/pr-comment <review-id>` creates a read-only plan; `--publish` requires that saved plan, the original conversation, and `comments.enabled`. `src/comments.mjs` validates the supported unified MCP adapter's actual tool results and freezes the allowed write target/content/anchor. Only the publisher role can request the exact thread-write tool, only with `create`; permissions remain capped at `ask` and global restrictions. Reviewer prompts keep their write prohibition; comment stages have their own narrowly scoped policy.
+Completed reviews are cached in memory (latest 20). Preview validates confirmed
+finding IDs, body length, severity, changed-file coordinates, anchor shape,
+coverage of eligible IDs, and a deterministic marker. It does not inspect MCP
+outputs to verify source, HEAD, identity, or duplicates: those are model tasks.
 
-Attempt bookkeeping occurs before dispatch. Uncertain results block automatic retries and are never labeled posted. `/pr-stop` and timeouts revoke comment grants as well. No on-disk report cache is added; OpenCode sessions still retain their ordinary history. See [comment policy and race/adapter limitations](COMMENTING.md).
+Publishing requires a saved plan, the original conversation, comments.enabled,
+and explicit --publish. The entire batch is marked UNKNOWN before the publisher
+starts. The publisher chooses actual host tools and maps the saved content and
+coordinates to their schemas. The plugin validates the returned report shape;
+it never equates a model claim with an independently verified provider response.
+The status MODEL_REPORTED_POSTED includes model-reported thread IDs. A publisher
+with no completed tool calls cannot produce this status, but completed generic
+calls alone do not prove any comment was created.
+
+One publication attempt is allowed per completed review, including failures or
+cancellations. This prevents orchestrator-level blind retries, not retries inside
+a model turn or the host/server. Prompts prohibit those too, without guaranteeing
+compliance. Empty plans start no publisher. No rollback or remote deletion is
+performed. OpenCode still retains its normal history; there is no new disk cache.
+See [comment limitations](COMMENTING.md).
 
 ## Host and cost limits
 
@@ -52,18 +74,28 @@ The host may run the original model after the command hook returns, and auxiliar
 
 Private sessions do not copy the parent conversation, but they still run inside OpenCode. Other plugins, project configuration, provider behavior, and host version differences can affect them. The plugin does not provide OS isolation, enterprise DLP, protection from malicious local code, or a guarantee that code is safe to merge.
 
-PR files, comments, requirements, and other reviewer reports are untrusted data. Custom command templates may support shell/file expansion before plugin hooks execute; use trusted URLs and your own context as command arguments.
+PR files, comments, requirements, and other reviewer reports are untrusted data.
+In 1.18.31, native command substitution, shell expansion, and file resolution run
+BEFORE `command.execute.before`. Removing the argument placeholder alone is not
+safe: the host appends arguments when no placeholder exists. Installed templates
+therefore use the deliberately unreachable positional placeholder `$9007199254740991`.
+It expands to empty, suppresses implicit argument append, and keeps raw context
+out of native shell/file parsing. The plugin reads `input.arguments` directly.
+The index is JavaScript's maximum safe integer, beyond a realizable argument
+array (including before the plugin checks its 16,000-character input limit).
+An offline transcription test covers this host behavior; revalidate it before
+changing host versions. Do not replace the template with `$ARGUMENTS` or `$1`.
 
 ## Interface references
 
-These references describe the intended integration. They are not a certification of compatibility with your installed OpenCode version. Pin the actual host version when auditing behavior; upstream development branches can change.
+The host compatibility baseline is **OpenCode 1.18.31**. The source references below are pinned to it; they are not a live certification of compatibility with your providers, MCP server, or TUI.
 
 - [Plugins](https://opencode.ai/docs/plugins/)
 - [Session SDK](https://opencode.ai/docs/sdk/)
 - [Commands](https://opencode.ai/docs/commands/)
 - [Agents](https://opencode.ai/docs/agents/)
 - [Keybinds](https://opencode.ai/docs/keybinds/)
-- [Plugin hook types](https://github.com/anomalyco/opencode/blob/dev/packages/plugin/src/index.ts)
-- [Session prompt implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/prompt.ts)
-- [Task implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/task.ts)
-- [SDK request/response types](https://github.com/anomalyco/opencode/blob/dev/packages/sdk/js/src/gen/types.gen.ts)
+- [Plugin hook types](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/plugin/src/index.ts)
+- [Session prompt implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts)
+- [Task implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/tool/task.ts)
+- [SDK request/response types](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/sdk/js/src/gen/types.gen.ts)
