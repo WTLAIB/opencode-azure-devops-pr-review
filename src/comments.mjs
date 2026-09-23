@@ -70,7 +70,7 @@ export function validateCommentPlan(result, review, maxComments) {
     const tag = marker(review, finding, c);
     if (markers.has(tag)) fail('Duplicate finding in this plan; select one representative.');
     markers.add(tag);
-    return { ...c, marker: tag, content: `${c.body.trim()}\n\n${tag}` };
+    return { ...c, marker: tag, content: `${c.body.trim()}${review.attribution ? `\n\n---\n${review.attribution}` : ''}\n\n${tag}` };
   });
   for (const s of result.skipped) {
     exactKeys(s, ['findingId', 'reason']);

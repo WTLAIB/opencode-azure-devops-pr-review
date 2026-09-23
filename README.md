@@ -114,7 +114,28 @@ Only final-report Markdown, comment prose, and comment skip explanations are loc
 
 With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
 
-Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context.
+Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; the child-session report and optional debug `report.md` preserve the runtime's version.
+
+Every final review report includes a runtime-generated stage/model ledger, initial finding counts, and original finding dispositions/merge targets. It explains the method: independent initial reviews followed by source verification and duplicate merging, not majority voting. Only invoked review stages are listed; unused paid slots are absent. These are the selected OpenCode provider/model IDs, not independent proof of a provider's backend model. Host auxiliary models and the original chat model are not included.
+
+Saved inline comments also contain an AI/model attribution footer and a notice that posting through a user's account is not human approval. This intentionally discloses the selected model IDs to PR readers; check that your company permits it before publishing. The complete footer is shown in the preview and passed unchanged to the publisher. Generated provenance/footer labels support English, Traditional Chinese, and Simplified Chinese (other language tags use English for these fixed labels; model-authored report/comment prose still follows the configured language).
+
+### Output reliability and private debug files
+
+By default, `structuredOutput: true` uses OpenCode 1.18.31's native JSON-schema output mechanism. This improves envelope reliability without selecting another model or automatically rerunning a failed stage. A provider must support the host's tool-based structured output. If it cannot, set `structuredOutput: false` and restart to use JSON text; a single fenced JSON response is supported, but malformed/truncated JSON is never silently repaired. Snapshot and finding checks apply to both transports. Host/provider-internal retries are outside this plugin's control.
+
+Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):
+
+```json
+"outputLanguage": "zh-TW",
+"returnReport": "full",
+"structuredOutput": true,
+"debug": { "enabled": true, "directory": "" }
+```
+
+Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE_HOME:-~/.local/state}/opencode/azpr-debug/`. To save in the active project instead, use `"directory": ".azpr-debug"`. An absolute directory is also supported; `~` is not expanded. Each command gets a unique private directory, printed in its receipt. Debug files include each stage's input, role instructions, visible output, model errors, validated result, session/model IDs, and the final report. They do not include private reasoning fields, full tool traffic, provider configuration, or HTTP headers. See [debug files and failed-session inspection](docs/DEBUGGING.md).
+
+**Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
 Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds; iteration and time limits are not spending caps.
 

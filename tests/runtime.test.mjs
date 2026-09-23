@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, cp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, cp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,10 +93,12 @@ async function fixture(t, opts={}) {
       if(opts.result) result=await opts.result({result,role,packet,id,calls});
       const info={role:'assistant',id:`msg_${sequence}`,agent:role,modelID:model.modelID,providerID:model.providerID};
       if(opts.responseError) info.error={name:'APIError'};
-      return {data:{info,parts:[{type:'text',text:opts.invalidJSON?'bad envelope':JSON.stringify(result)}]}};
+      const answer={info,parts:[{type:'text',text:opts.invalidJSON?'bad envelope':JSON.stringify(result)}]};
+      return opts.answer ? opts.answer({answer,result,role,o}) : {data:answer};
     }
   }};
-  hooks=await createAzurePrReviewPlugin({client},dir);
+  if(opts.client) opts.client(client,calls);
+  hooks=await createAzurePrReviewPlugin({client,directory:dir},dir);
   await hooks.config(cfg);
   const command=async (name='pr-review',args='https://dev.azure.com/org/proj/_git/repo/pullrequest/123',origin='ses_original')=>{
     const out={parts:[{type:'text',text:'placeholder'}]};
@@ -106,6 +108,103 @@ async function fixture(t, opts={}) {
   const prompts=()=>calls.filter(c=>c.kind==='prompt' && !c.body.noReply);
   return {hooks,cfg,baseline,settings,dir,client,calls,logs,toasts,sessions,command,prompts};
 }
+
+test('receipt and full use identical stage requests, schemas, and role instructions', async t => {
+  const receipt=await fixture(t), full=await fixture(t,{settings:s=>s.returnReport='full'});
+  await receipt.command('pr-deep'); await full.command('pr-deep');
+  const bodies=f=>f.prompts().map(p=>p.body).sort((a,b)=>a.agent.localeCompare(b.agent));
+  assert.deepEqual(bodies(receipt),bodies(full));
+  for(const role of Object.keys(ROLES)) assert.equal(receipt.cfg.agent[role].prompt,full.cfg.agent[role].prompt);
+});
+test('native structured results work for review, comment preview, and publication without extra model calls', async t => {
+  const f=await fixture(t,{settings:enableComments,answer:({answer,result,o})=>{
+    assert.equal(o.body.format.type,'json_schema'); assert.equal(o.body.format.retryCount,0);
+    return {data:{...answer,info:{...answer.info,structured:result},parts:[]}};
+  }});
+  const id=reviewId(await f.command()); await f.command('pr-comment',id);
+  assert.match(await f.command('pr-comment',id+' --publish'),/] MODEL_REPORTED_POSTED/);
+  assert.equal(f.prompts().length,6);
+});
+test('text-only compatibility is explicit and never selects a fallback model', async t => {
+  const f=await fixture(t,{settings:s=>s.structuredOutput=false,answer:({answer})=>({data:{...answer,parts:[{type:'text',text:`Result:\n\`\`\`json\n${answer.parts[0].text}\n\`\`\``}]}})});
+  assert.match(await f.command(),/] COMPLETE/);
+  assert.equal(f.prompts().length,4);
+  assert.ok(f.prompts().every(p=>p.body.format===undefined));
+  assert.doesNotMatch(f.cfg.agent['azpr-check'].prompt,/# Output transport/);
+});
+for(const mode of ['receipt','full']) test(`malformed ${mode} source output remains incomplete with session diagnostics and no paid retry`, async t => {
+  const f=await fixture(t,{invalidJSON:true,settings:s=>s.returnReport=mode});
+  const out=await f.command('pr-deep');
+  assert.match(out,/] INCOMPLETE/); assert.match(out,/characters=12; finish=unknown/);
+  assert.match(out,/session=ses_fixture_1/); assert.match(out,/opencode export <sessionID>/);
+  assert.equal(f.prompts().length,1);
+});
+test('debug captures every stage, final report, and failures in both return modes', async t => {
+  for(const returnReport of ['receipt','full']) {
+    const f=await fixture(t,{settings:s=>{s.debug={enabled:true,directory:'.azpr-debug'};s.returnReport=returnReport;s.outputLanguage='zh-TW';}});
+    const out=await f.command('pr-deep');
+    const path=/Private debug directory: ([^\n]+)/.exec(out)[1];
+    assert.ok(path.startsWith(join(f.dir,'.azpr-debug')));
+    const names=await readdir(path);
+    assert.equal(names.filter(n=>n.endsWith('.request.json')).length,5);
+    assert.equal(names.filter(n=>n.endsWith('.response.json')).length,5);
+    assert.equal(names.filter(n=>n.endsWith('.result.json')).length,5);
+    const result=JSON.parse(await readFile(join(path,'result.json'),'utf8'));
+    assert.equal(result.status,'COMPLETE'); assert.equal(result.stages.length,5);
+    assert.ok(result.stages.every(s=>s.startedAt && s.endedAt && s.sessionID && s.model));
+    assert.match(await readFile(join(path,'report.md'),'utf8'),/AI 審查來源/);
+    assert.match(await readFile(join(path,'report.md'),'utf8'),/fixture\/paid-deep/);
+    assert.match(await readFile(join(path,'02-azpr-functional.response.json'),'utf8'),/PRIVATE_INITIAL_REPORT_F/);
+  }
+  const bad=await fixture(t,{invalidJSON:true,settings:s=>s.debug={enabled:true,directory:'.azpr-debug'}});
+  const path=/Private debug directory: ([^\n]+)/.exec(await bad.command())[1];
+  const response=JSON.parse(await readFile(join(path,'01-azpr-check.response.json'),'utf8'));
+  assert.equal(response.text,'bad envelope');
+  const result=JSON.parse(await readFile(join(path,'01-azpr-check.result.json'),'utf8'));
+  assert.equal(result.status,'FAILED'); assert.match(result.error,/required JSON/);
+});
+test('transport errors recover the last visible session message using read-only SDK calls', async t => {
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},answer:()=>({error:{name:'APIError',message:'Connection ended'}}),client:(client,calls)=>{
+    client.session.messages=async o=>{calls.push({kind:'messages',...o});return {data:[{info:{role:'assistant',id:'msg_last',error:{name:'MessageOutputLengthError'},finish:'length'},parts:[{type:'text',text:'partial last response'},{type:'reasoning',text:'DO_NOT_SAVE_REASONING'}]}]};};
+  }});
+  const out=await f.command(), path=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  assert.match(out,/] INCOMPLETE/); assert.equal(f.prompts().length,1);
+  const reads=f.calls.filter(c=>c.kind==='messages');assert.equal(reads.length,1);assert.equal(reads[0].path.id,'ses_fixture_1');assert.equal(reads[0].query.limit,10);
+  const last=await readFile(join(path,'01-azpr-check.last-message.json'),'utf8');
+  assert.match(last,/partial last response/);assert.doesNotMatch(last,/DO_NOT_SAVE_REASONING/);
+  assert.match(await readFile(join(path,'01-azpr-check.transport-error.json'),'utf8'),/Connection ended/);
+});
+test('full provenance is derived from used stages and exposes merges without private initial reports', async t => {
+  const f=await fixture(t,{settings:s=>{s.returnReport='full';s.outputLanguage='zh-TW';},result:({role,result})=>role.startsWith('azpr-verify-')?{...result,dispositions:[{id:'F-1',status:'CONFIRMED',reason:'checked'},{id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'duplicate'}]}:result});
+  const out=await f.command();
+  assert.match(out,/AI 審查來源/);assert.match(out,/功能初審.*fixture\/free-a.*1/);assert.match(out,/最終驗證.*fixture\/free-b/);
+  assert.match(out,/R-1 \| MERGED \| F-1/);assert.match(out,/不是多數決/);assert.match(out,/不代表人工核准/);
+  assert.doesNotMatch(out,/paid-deep|paid-final|PRIVATE_INITIAL_REPORT/);
+  assert.match(out,/outputLanguage=zh-TW/);assert.doesNotMatch(out,/Present only this status receipt in English/);
+});
+test('saved preview and posted content include the same runtime AI/model attribution', async t => {
+  const f=await fixture(t,{settings:s=>{enableComments(s);s.outputLanguage='zh-TW';}});
+  const id=reviewId(await f.command('pr-deep')), preview=await f.command('pr-comment',id);
+  assert.match(preview,/AI 輔助審查/);assert.match(preview,/不代表人工核准/);
+  for(const slot of ['freeA','freeB','deep','final']) assert.ok(preview.includes(f.settings.models[slot]));
+  assert.match(preview,/留言整理／發佈/);
+  await f.command('pr-comment',id+' --publish');
+  const saved=JSON.parse(f.prompts().at(-1).body.parts[0].text).comments[0].content;
+  assert.ok(preview.includes(saved));assert.equal(writes(f)[0].args.text,saved);
+});
+test('invalid debug and structured-output settings fail before model invocation', async t => {
+  const f=await fixture(t);
+  for(const debug of [null,true,{enabled:'true'},{enabled:true,directory:'~/debug'},{enabled:true,directory:'bad\npath'},{enabled:true,unknown:true}]) assert.throws(()=>validateSettings({...f.settings,debug}),/debug/);
+  for(const structuredOutput of [null,'yes',1]) assert.throws(()=>validateSettings({...f.settings,structuredOutput}),/structuredOutput/);
+  const legacy={...f.settings}; delete legacy.debug; delete legacy.structuredOutput;
+  assert.equal(validateSettings(legacy).debug.enabled,false);assert.equal(validateSettings(legacy).structuredOutput,true);
+});
+test('debug path failure is visible but does not invalidate a successful review', async t => {
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'settings.json'}});
+  const out=await f.command();
+  assert.match(out,/] COMPLETE/);assert.match(out,/Debug warning:/);assert.equal(f.prompts().length,4);
+  assert.equal(JSON.parse(await readFile(join(f.dir,'settings.json'),'utf8')).version,1);
+});
 
 test('configuration preserves every original model, agent, permission, MCP and command',async t=>{
   const f=await fixture(t);const restored=jclone(f.cfg);for(const name of Object.keys(ROLES)) delete restored.agent[name];

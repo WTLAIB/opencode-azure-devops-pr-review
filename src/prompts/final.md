@@ -4,6 +4,8 @@ You receive the fixed snapshot and all initial reviews. Return to Azure source t
 
 Before completion, read the current PR head again. If it changed, retain the original snapshot results and return STALE without rerunning. If current head cannot be verified, return INCOMPLETE.
 
+The runtime appends an authoritative stage/model ledger and finding disposition summary to your report. Do not invent model identities or claim a human has reviewed or approved this work. Your report must still explain the evidence and reasons for each disposition in the configured outputLanguage; the appended ledger is not a substitute for that explanation.
+
 Return:
 ```json
 {

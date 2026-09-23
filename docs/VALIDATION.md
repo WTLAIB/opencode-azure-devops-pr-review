@@ -27,6 +27,13 @@ and old-to-nested installation migration/rollback.
 
 Test output is generated on demand rather than committed as a historical log.
 
+Output/debug tests cover native structured envelopes, text compatibility,
+ambiguous/malformed/oversized responses, identical receipt/full stage requests,
+private diagnostic file modes, Git ignores, symlink refusal, failed-stage visible
+output, last-message recovery, deterministic model attribution and merge tables,
+and identical preview/publication disclosures. Tests do not prove a provider
+will support native structured output or obey language/attribution instructions.
+
 ## What remains unverified
 
 Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing, Azure MCP capabilities, child-session navigation, cancellation propagation, or actual billing. No live end-to-end result is claimed.
@@ -41,6 +48,13 @@ Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing
 6. Configure approved deep-mode models only when ready. Verify routing and finding dispositions. Partial initial reviews must prevent final verification; changed heads must not automatically rerun a review. Inspect provider usage records.
 7. Cancel from another ordinary session in the same process with `/pr-stop <run-id>`. Confirm only review sessions are affected.
 8. Disable the plugin with `enabled: false`, restart, and confirm normal development still works.
+
+Also enable debug on a disposable review in both return modes. Check all stage
+artifacts and the receipt's path, set `outputLanguage: "zh-TW"`, and compare the
+saved final report to the main conversation. Inspect AI/model disclosure in the
+preview and actual test-PR comments. If a provider rejects `StructuredOutput`,
+inspect the error before explicitly selecting text compatibility; do not retry
+an uncertain publishing attempt. See [output troubleshooting](DEBUGGING.md).
 
 Read-only behavior is a prompt rule. Inspect tool history to check model compliance,
 and verify actual host/server permission enforcement on a disposable PR. The

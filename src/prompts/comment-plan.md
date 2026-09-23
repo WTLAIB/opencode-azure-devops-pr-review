@@ -28,4 +28,4 @@ Return exactly this JSON envelope (example values are placeholders):
 }
 ```
 
-If verification fails, return status INCOMPLETE with empty comments/skipped; do not claim READY. No publishable plan will be saved. The body limit is 1,200 characters; anchors and skip explanations stay local. The runtime supplies the deduplication marker, not you.
+If verification fails, return status INCOMPLETE with empty comments/skipped; do not claim READY. No publishable plan will be saved. The body limit is 1,200 characters; anchors and skip explanations stay local. The runtime appends the AI/model disclosure and deduplication marker outside that body limit; do not generate your own attribution footer. It will be visible in the saved preview.

@@ -29,7 +29,7 @@ while [ "$#" -gt 0 ]; do
     *) die "Unknown argument: $1" ;;
   esac
 done
-for file in src/runtime.mjs src/comments.mjs src/request.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
+for file in src/runtime.mjs src/comments.mjs src/request.mjs src/output.mjs src/diagnostics.mjs src/attribution.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
   [ -f "$src/$file" ] || die "Incomplete package: $file is missing."
 done
 if [ -n "$profile" ]; then
@@ -107,7 +107,7 @@ while IFS= read -r rel; do
 done < "$stage/targets"
 
 mkdir -p "$stage/new/plugins/azpr" "$stage/new/commands"
-cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/request.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
+cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/request.mjs" "$src/src/output.mjs" "$src/src/diagnostics.mjs" "$src/src/attribution.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
 cp -R "$src/src/prompts" "$stage/new/plugins/azpr/prompts"
 printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "./azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
 for cmd in pr-check pr-review pr-deep pr-stop pr-comment; do

@@ -25,7 +25,7 @@ Configuration fingerprints prevent route changes during a run. Editing settings 
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. Snapshot validation requires a repository, positive PR ID, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no failed stage is automatically rerun. Snapshot validation requires a repository, positive PR ID, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order.
 
 Initial finding IDs use `F-`, `R-`, or `D-` prefixes. Every original ID must have exactly one final disposition: `CONFIRMED`, `NEEDS_INFO`, `REJECTED`, or `MERGED`. Merged items reference another original ID. Confirmed final-verifier discoveries use `V-` IDs in both the report and the structured `newFindings` array. Without that structured entry they cannot be automatically published.
 
@@ -37,7 +37,7 @@ Every stage must observe message and parameter hooks. Source access, coverage, a
 
 Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Generic tool hooks retain only lifecycle checks and completed-call bookkeeping, never semantic read/write classification. See [MCP ownership and limitations](AZURE_MCP.md).
 
-The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report.
+The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 
 The top-level `outputLanguage` (default `en`) is validated as a language tag and canonicalized. Only the two final-verifier roles and two comment roles receive a generated language instruction and an input language field. Completed reviews retain that language for later comments. It controls final-report Markdown and comment prose, not intermediate review output, structured fields, code identifiers, or status receipts. Full-report receipts instruct the original agent not to translate the enclosed report. The publisher receives unchanged saved bodies and is instructed to send them verbatim. Language quality is model-dependent; no language detector or additional translation call is used.
 
@@ -63,8 +63,20 @@ One publication attempt is allowed per completed review, including failures or
 cancellations. This prevents orchestrator-level blind retries, not retries inside
 a model turn or the host/server. Prompts prohibit those too, without guaranteeing
 compliance. Empty plans start no publisher. No rollback or remote deletion is
-performed. OpenCode still retains its normal history; there is no new disk cache.
+performed. OpenCode still retains its normal history; there is no resumable disk cache.
 See [comment limitations](COMMENTING.md).
+
+## Optional local diagnostics
+
+With `debug.enabled=true`, each run writes private diagnostic artifacts outside
+the project by default, or to an explicitly selected location. Inputs, visible
+answers, model errors, stage records, and rendered reports are preserved; private
+reasoning and full tool traffic are not. A failed request with no answer can
+read back the last child-session assistant message using the existing SDK,
+bounded to five seconds and without resuming a model. Unique directories,
+exclusive files, owner-only modes, and per-run Git ignores reduce accidental
+overwrites and commits. Debug write failure is nonfatal and visible in receipts.
+This is not DLP or automatic secret redaction. See [diagnostics](DEBUGGING.md).
 
 ## Host and cost limits
 

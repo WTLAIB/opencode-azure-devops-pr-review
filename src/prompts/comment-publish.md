@@ -6,7 +6,7 @@ Tool names, prefixes, argument keys, and response formats are not predetermined.
 
 You may create ONLY the supplied saved comments on the supplied target PR.
 Do not paraphrase, translate, extend, add, or relocate comments. Send each saved
-comment's content exactly, including its marker, on the supplied right-side
+comment's content exactly, including its AI/model disclosure and marker, on the supplied right-side
 path/startLine/endLine. Translate those coordinates into the actual tool schema.
 If the tool cannot express the saved target, content, and anchor, STOP. Do not
 substitute a general summary thread. No replies, updates, deletions, votes,

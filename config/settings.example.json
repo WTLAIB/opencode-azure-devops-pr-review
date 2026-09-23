@@ -20,6 +20,11 @@
   "auxiliaryModels": "preserve",
   "enabled": true,
   "returnReport": "receipt",
+  "structuredOutput": true,
+  "debug": {
+    "enabled": false,
+    "directory": ""
+  },
   "outputLanguage": "en",
   "runTimeoutSeconds": 1200,
   "maxStageCharacters": 250000

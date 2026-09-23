@@ -16,7 +16,7 @@ The following limits are project choices, not universal standards:
 | --- | --- |
 | Eligibility | Confirmed high/medium-impact defects only |
 | Volume | At most 5 saved comments; configurable from 1 to 10; one publishing stage per review |
-| Comment size | At most 1,200 characters plus a small hidden deduplication marker |
+| Comment size | At most 1,200 body characters, plus runtime AI/model disclosure and a hidden deduplication marker |
 | Anchor | Smallest useful 1-5 line range in a changed HEAD file |
 | Structure | Short issue title; triggering condition and impact; correction or regression test |
 | Language | Shared `outputLanguage` for the final report and comment prose; identifiers and machine-readable labels unchanged |
@@ -51,10 +51,20 @@ From the same original conversation/process:
 /pr-comment <completed-review-id> --publish
 ```
 
-The preview shows bodies, locations, and skip reasons even in receipt mode.
+The preview shows complete saved content (body, AI/model disclosure, marker), locations, and skip reasons even in receipt mode.
 Inspect it before requesting publication. The publisher receives the saved
 content and coordinates, not a freshly generated plan. It is instructed to
 send the content exactly, without translation or relocation.
+
+Every saved comment includes the review stages' selected provider/model IDs,
+the model assigned to comment preparation/publication, and a notice that it is
+AI-generated rather than human approval. This is an intentional disclosure to
+PR readers, including when the MCP uses a personal account. Check company
+policy before publishing. The runtime generates attribution from invoked review
+stages, not from the planner's prose; unused configured models are not listed.
+The method is independent reviews plus source verification/duplicate merging,
+not majority voting. The publisher is instructed to preserve the entire footer.
+Exact remote content still depends on model/MCP compliance; inspect Azure.
 
 The workflow does not start a publisher without explicit --publish. This is not
 a guarantee that a model cannot misuse a host-permitted tool during review or
@@ -103,9 +113,11 @@ Prompts forbid blind retries. A push or new discussion can race the last check.
 Cancellation cannot undo already dispatched operations; no remote rollback or
 deletion is attempted.
 
-Completed reviews/previews are kept only in this process (latest 20 reviews).
+Completed reviews/previews are actionable only in this process (latest 20 reviews).
 Restarting clears that cache, not OpenCode history. Empty plans start no publisher
 and do not request a summary thread.
+Optional debug files preserve a private diagnostic copy but cannot restore a
+publication authorization or plan after restart.
 
 ## Customization
 
