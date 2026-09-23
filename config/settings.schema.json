@@ -13,31 +13,72 @@
       "type": "string"
     },
     "version": {
-      "const": 1
+      "const": 2
     },
     "models": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "freeA",
-        "freeB"
+        "review"
       ],
       "properties": {
-        "freeA": {
-          "type": "string",
-          "description": "Exact provider/model ID; paid slots may be an empty string."
+        "_help": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Documentation only; never forwarded as model instructions.",
+          "properties": {
+            "functional": {
+              "type": "string"
+            },
+            "risk": {
+              "type": "string"
+            },
+            "verifier": {
+              "type": "string"
+            }
+          }
         },
-        "freeB": {
-          "type": "string",
-          "description": "Exact provider/model ID; paid slots may be an empty string."
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "functional",
+            "risk",
+            "verifier"
+          ],
+          "properties": {
+            "functional": {
+              "type": "string",
+              "description": "Exact provider/model ID for independent correctness review. Select for code comprehension, project language, boundary behavior, and regressions."
+            },
+            "risk": {
+              "type": "string",
+              "description": "Exact provider/model ID for independent risk review, source checks, and comments. Select for cross-path failure analysis and reliable MCP tool use. Standalone /pr-check uses review.risk."
+            },
+            "verifier": {
+              "type": "string",
+              "description": "Exact provider/model ID for source-based verification, counterevidence, duplicate merging, and the final report. Select for evidence judgment, long context, and instruction following, not just summarization."
+            }
+          }
         },
         "deep": {
-          "type": "string",
-          "description": "Exact provider/model ID; paid slots may be an empty string."
-        },
-        "final": {
-          "type": "string",
-          "description": "Exact provider/model ID; paid slots may be an empty string."
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional deep profile. Missing or empty roles disable deep mode; it never falls back to review models.",
+          "properties": {
+            "functional": {
+              "type": "string",
+              "description": "Exact provider/model ID for independent correctness review. Select for code comprehension, project language, boundary behavior, and regressions. May be empty; deep runs only when all three IDs are configured."
+            },
+            "risk": {
+              "type": "string",
+              "description": "Exact provider/model ID for independent risk review, source checks, and comments. Select for cross-path failure analysis and reliable MCP tool use. Standalone /pr-check uses review.risk. May be empty; deep runs only when all three IDs are configured."
+            },
+            "verifier": {
+              "type": "string",
+              "description": "Exact provider/model ID for source-based verification, counterevidence, duplicate merging, and the final report. Select for evidence judgment, long context, and instruction following, not just summarization. May be empty; deep runs only when all three IDs are configured."
+            }
+          }
         }
       }
     },
@@ -63,12 +104,14 @@
         "initial": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 500
+          "maximum": 500,
+          "description": "Iteration budget for each of the two normal-mode initial reviewers."
         },
         "deep": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 500
+          "maximum": 500,
+          "description": "Iteration budget for each of the two deep-mode initial reviewers."
         },
         "final": {
           "type": "integer",
@@ -136,7 +179,9 @@
     "debug": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
       "properties": {
         "enabled": {
           "type": "boolean",

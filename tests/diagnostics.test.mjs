@@ -11,7 +11,7 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return { directory };
 }
-const run = { id: '01234567', mode: 'economy', origin: 'ses_test' };
+const run = { id: '01234567', mode: 'review', profile: 'review', origin: 'ses_test' };
 const settings = { debug: { enabled: true, directory: '.azpr-debug' }, outputLanguage: 'zh-TW', returnReport: 'receipt', structuredOutput: true };
 test('debug off makes no files or directories', async t => {
   const context = await fixture(t);

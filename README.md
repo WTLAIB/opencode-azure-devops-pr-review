@@ -8,7 +8,7 @@ Opt-in, multi-model pull request reviews inside OpenCode. The plugin uses your e
 
 ## Install
 
-Requires Linux or WSL, a POSIX shell, and an existing OpenCode installation with working model providers and Azure DevOps MCP. Installation needs no Python, jq, sudo, or npm packages. Node.js is needed only for development tests.
+Requires Linux or WSL, a POSIX shell, Python 3 (standard library only, for installation-time JSON merging), and an existing OpenCode installation with working model providers and Azure DevOps MCP. Installation needs no pip packages, jq, sudo, or npm packages. Node.js is needed only for development tests. Running the installed plugin does not require Python.
 
 CI runs the installation and offline tests on Ubuntu 22.04 and 24.04. The installer uses `/bin/sh`, standard file utilities from `coreutils`, and `grep`, normally present on Ubuntu. Git is only needed to clone the repository. No separate Node.js or Bun installation is required by this plugin's installer; your existing OpenCode and MCP setup may have their own requirements. Passing these tests does not validate live OpenCode/provider/MCP compatibility.
 
@@ -23,7 +23,7 @@ sh install.sh
 Edit the settings file printed by the installer. By default it is at `~/.config/opencode/plugins/azpr/settings.json`; `XDG_CONFIG_HOME` and `--config-dir` can change that location.
 
 1. Run `opencode models` to find the exact provider/model IDs.
-2. Configure `freeA` and `freeB`. Leave `deep` and `final` empty until you want deep reviews.
+2. Configure `models.review.functional`, `risk`, and `verifier`. Leave the three `models.deep` values empty until you want deep reviews. The `models._help` entries explain each role and model-selection criteria directly in the settings file.
 3. Confirm your existing OpenCode MCP connection can read the PR. No tool-name mapping, prefix, or plugin allowlist is required; host permissions apply.
 4. Fully restart OpenCode and try `/pr-check` on a small, known PR.
 
@@ -33,9 +33,9 @@ See [Azure MCP setup](docs/AZURE_MCP.md) and [validation](docs/VALIDATION.md) be
 
 | Command | Workflow |
 | --- | --- |
-| `/pr-check <Azure PR URL> [context]` | Check access to complete PR changes and source at fixed commits. |
+| `/pr-check <Azure PR URL> [context]` | Check complete PR changes and fixed-commit source with `models.review.risk`. |
 | `/pr-review <Azure PR URL> [context]` | Source check, two independent initial reviewers, then evidence verification. |
-| `/pr-deep <Azure PR URL> [context]` | Source check, three independent initial reviewers, then deep-mode verification. |
+| `/pr-deep <Azure PR URL> [context]` | Source check, two independent initial reviewers, then final verification, using the deep profile and deeper analysis instructions. |
 | `/pr-comment <review-id> [--publish]` | Preview concise inline feedback; explicitly publish that saved preview. |
 | `/pr-stop [run-id]` | Revoke the run's grants and request cancellation of its review sessions. |
 
@@ -64,7 +64,7 @@ prevent native argument expansion before the plugin handles this text.
 
 ### Optional PR comments
 
-The workflow never starts a publishing stage automatically; reviewer prompts prohibit modifications. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a complete review, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use `freeB`; they do not rerun a paid review.
+The workflow never starts a publishing stage automatically; reviewer prompts prohibit modifications. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a complete review, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use the originating review's `risk` model: `models.review.risk` or `models.deep.risk`. They do not rerun the review, even if another mode has since completed.
 
 The shared `outputLanguage` setting controls the final report and comment prose. The default policy posts at most five confirmed, actionable defects as short inline threads, with no long summary or cosmetic nits. The runtime validates the saved plan's format and passes it unchanged to the publisher. The model chooses tools from OpenCode and is instructed to verify HEAD, anchors, and duplicates, then create only the saved comments. There are no hardcoded MCP names, action filters, or provider-specific response adapters. No votes, approvals, merges, or existing-thread edits are authorized by the prompts. Publishing requires host/server permission and is disabled by default. A success receipt is explicitly `MODEL_REPORTED_POSTED`, not independently verified by the plugin. See [comment policy, setup, and limitations](docs/COMMENTING.md).
 
@@ -85,20 +85,21 @@ own agents; they do not inherit another agent's private permission overrides.
 
 ## Model roles
 
-Models are local configuration, not hardcoded workflow choices.
+Configure three roles under `models.review` and the same three under `models.deep`. Models are local configuration, not hardcoded workflow choices. The example's `models._help` strings and schema descriptions explain the roles; `_help` is documentation only, never model instructions. The file remains ordinary JSON, without JSONC comments.
 
-| Setting | Responsibility |
-| --- | --- |
-| `freeA` | Functional correctness, edge cases, and regressions. |
-| `freeB` | Source check, failure scenarios, economy-mode verification, and explicit comment planning/publishing. |
-| `deep` | Independent deep review in `/pr-deep`. |
-| `final` | Final verification in `/pr-deep`. |
+| Role in either profile | Responsibility | Selection criteria |
+| --- | --- | --- |
+| `functional` | Independent correctness review: requirements, boundaries, state changes, API compatibility, and regressions. | Strong code comprehension in the repository's languages. |
+| `risk` | Independent failure/risk review: exceptions, retries, concurrency, authorization, and data consistency. Also the profile's source checks and comments. | Evidence-based cross-path reasoning and reliable MCP tool use. |
+| `verifier` | Recheck both initial reports against source, seek counterevidence, merge duplicates, and write the final report. | Strong evidence judgment, long-context handling, and instruction following; not just summarization. |
 
-The slot names do not guarantee pricing. Use services approved for the PR's data and check their actual costs. Never commit your model mappings, internal endpoints, credentials, or review output.
+Every role needs reliable tool use and structured output. Use services approved for the PR's data and check actual cost and latency; neither mode implies a pricing tier. The same model ID may fill multiple roles or both profiles. Sessions stay separate, but model diversity and independent reasoning quality are not guaranteed. Never commit your private model mappings, internal endpoints, credentials, or review output.
 
-Initial reviewers run concurrently without seeing each other's results. The final verifier receives every initial report and must check the source again. It must account for every original finding as confirmed, requiring information, rejected, or merged. It does not decide by majority vote.
+Both modes run a source check, **two independent initial reviews**, and one final verification stage. Initial reviewers run concurrently on the full cumulative PR without seeing each other's results. They use `F-` and `R-` finding IDs. The final verifier receives both reports and must check the source again, accounting for every original finding as confirmed, requiring information, rejected, or merged. It does not decide by majority vote.
 
-A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. Incomplete initial reviews prevent final verification. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns a paid review.
+Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.check` (24), `steps.final` (100), and the run timeout. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
+
+A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. It uses that mode's `risk` model; standalone `/pr-check` uses `models.review.risk`. Incomplete initial reviews prevent final verification. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns the review.
 
 ## Reports and cancellation
 
@@ -110,13 +111,13 @@ Set the top-level `outputLanguage` in your installed `plugins/azpr/settings.json
 
 The default is `en` (English), including when the field is omitted. Other examples are `zh-CN` (Simplified Chinese), `ja` (Japanese), and `zh-Hant-TW` (Traditional Chinese with an explicit script). Use a language tag, not a language name or free-form instruction. Change it before starting a review, then restart OpenCode. To use another language after a preview, restart and run a new review/preview; the publisher is instructed not to translate an already saved preview.
 
-Only final-report Markdown, comment prose, and comment skip explanations are localized. Intermediate reviews, structured fields, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to both final-verifier roles and both comment roles; actual language quality depends on the model. No translation model or extra review stage is added.
+Only final-report Markdown, comment prose, and comment skip explanations are localized. Intermediate reviews, structured fields, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to the final-verifier and comment roles in each profile; actual language quality depends on the model. No translation model or extra review stage is added.
 
 With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
 
 Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; the child-session report and optional debug `report.md` preserve the runtime's version.
 
-Every final review report includes a runtime-generated stage/model ledger, initial finding counts, and original finding dispositions/merge targets. It explains the method: independent initial reviews followed by source verification and duplicate merging, not majority voting. Only invoked review stages are listed; unused paid slots are absent. These are the selected OpenCode provider/model IDs, not independent proof of a provider's backend model. Host auxiliary models and the original chat model are not included.
+Every final review report includes its mode, a runtime-generated stage/model ledger, initial finding counts, and original finding dispositions/merge targets. It explains the method: independent initial reviews followed by source verification and duplicate merging, not majority voting. Only invoked review stages are listed; the other profile's models are absent. These are the selected OpenCode provider/model IDs, not independent proof of a provider's backend model. Host auxiliary models and the original chat model are not included.
 
 Saved inline comments also contain an AI/model attribution footer and a notice that posting through a user's account is not human approval. This intentionally discloses the selected model IDs to PR readers; check that your company permits it before publishing. The complete footer is shown in the preview and passed unchanged to the publisher. Generated provenance/footer labels support English, Traditional Chinese, and Simplified Chinese (other language tags use English for these fixed labels; model-authored report/comment prose still follows the configured language).
 
@@ -144,18 +145,33 @@ The original conversation and OpenCode's title, summary, or compaction models ca
 ## Update, disable, or uninstall
 
 ```sh
-# Back up existing integration files; preserve installed settings.
+# Convert installed settings and replace integration files, without a backup.
 sh install.sh --replace
 
 # Explicitly replace settings with a trusted local profile.
 sh install.sh --replace --settings /path/to/team.json
 ```
 
-Replacement archives the installed integration and preserves its settings, including `outputLanguage`, unless an explicit profile is supplied. Prompts are replaced: migrate any old prompt-based language override to `outputLanguage` and reapply unrelated policy customizations from the backup before restarting. Conflicting commands or agents require manual resolution.
+Replacement directly converts settings to schema `version: 2`, then adds missing fields from the new example, including nested fields and role guidance. Old model IDs are moved using this explicit mapping; no new model is selected:
+
+| New setting | Previous value |
+| --- | --- |
+| `models.review.functional` | `models.freeA` |
+| `models.review.risk` | `models.freeB` |
+| `models.review.verifier` | `models.freeB` |
+| `models.deep.functional` | `models.freeA` |
+| `models.deep.risk` | `models.deep` (the former single-model string) |
+| `models.deep.verifier` | `models.final` |
+
+The old model keys are removed. Deep no longer adds a third initial reviewer; its former deep model becomes the risk reviewer. Other existing values, including language, `false`, empty strings, `null`, arrays, and custom fields, are preserved. For example, `debug.enabled: true` stays true while a missing `debug.directory` is added. Invalid existing values are not silently repaired; unknown/custom fields remain but may be rejected by the plugin's startup validation. Installation prints changed field names, never private model values. JSON is reformatted only when conversion or missing-field insertion is needed; repeated unchanged installations retain formatting.
+
+**Installation keeps no persistent backup.** It prepares the converted profile before replacing files and temporarily holds the previous integration for rollback if a normal installation step fails. After success, those temporary files are removed. If automatic restoration fails, it retains emergency recovery files and prints their path. This is not power-loss-safe storage or a historical archive. Existing backups from older installers are left untouched.
+
+`--settings FILE` selects that file as the conversion/merge base instead of the installed profile; the source file is not edited. Malformed JSON, duplicate keys, non-object profiles, unsupported versions, or ambiguous mixed model layouts stop installation before existing files are moved. Model access is not API-validated; the plugin still checks settings at startup. Ensure `python3 --version` works first. Prompts are replaced without a retained copy: manually save any policy customization you want to keep before installing, and use `outputLanguage` for language preferences. Conflicting commands or agents require manual resolution.
 
 The runtime, prompts, and settings now live together under `plugins/azpr/`;
 `plugins/azpr.js` is the only top-level plugin entry. `--replace` migrates the old
-sibling `azpr/` layout and archives it. If both layouts contain settings, select
+sibling `azpr/` layout and removes it after success. If both layouts contain settings, select
 one explicitly with `--settings`. Do not flatten all runtime files into `plugins/`
 or keep duplicate top-level loaders. See [traversal diagnostics](docs/VALIDATION.md#directory-traversal-diagnostics).
 
@@ -168,7 +184,7 @@ sh ~/.config/opencode/plugins/azpr/uninstall.sh
 sh ~/.config/opencode/plugins/azpr/uninstall.sh --apply
 ```
 
-The installer does not edit your main OpenCode configuration, providers, MCP connections, or credentials. Backups remain under `azpr-backups/` in the configuration directory. Restart OpenCode after updates or removal.
+The installer does not edit your main OpenCode configuration, providers, MCP connections, or credentials. Uninstall remains an explicit archival operation under `azpr-backups/`; the no-backup behavior applies to installation/replacement. Restart OpenCode after updates or removal.
 
 ## Repository layout
 
@@ -177,6 +193,7 @@ The installer does not edit your main OpenCode configuration, providers, MCP con
 | `src/` | Plugin entry, runtime, and private reviewer prompts. |
 | `commands/` | Explicit command templates. |
 | `config/` | One settings example and one JSON schema. |
+| `scripts/` | Installation-time settings migration and missing-default merge (Python standard library). |
 | `tests/` | Mock workflow tests and real shell installation tests. |
 | `docs/` | Architecture, Azure setup, and environment validation. |
 | `install.sh`, `uninstall.sh` | Installation and archival removal. |

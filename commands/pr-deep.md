@@ -1,5 +1,5 @@
 ---
-description: Run a deep PR review in isolated sessions
+description: Run a deep PR review with two independent reviewers and a verifier
 subtask: false
 ---
 <!-- azpr-optin:pr-deep -->

@@ -1,6 +1,6 @@
 # Human-readable Azure PR comments
 
-`/pr-comment` is a separate, opt-in workflow for turning a completed review into a small number of actionable inline discussions. Review prompts instruct models not to modify anything; MCP permissions are governed by OpenCode. This command uses `freeB` for planning and, only when explicitly requested, for publishing the saved preview. It does not rerun the reviewers or switch to paid slots. The slot name does not guarantee cost.
+`/pr-comment` is a separate, opt-in workflow for turning a completed review into a small number of actionable inline discussions. Review prompts instruct models not to modify anything; MCP permissions are governed by OpenCode. Planning and explicit publication use the originating review's risk model: `models.review.risk` or `models.deep.risk`. This profile stays attached to the saved review even if another mode runs afterward. Comments do not rerun the reviewers or switch profiles. Check the selected model's actual cost; no role implies a pricing tier.
 
 ## Policy and rationale
 
@@ -125,7 +125,8 @@ Installed instructions are in plugins/azpr/prompts/comment-policy.md,
 comment-plan.md, and comment-publish.md. Review-only instructions remain in
 common.md. Use outputLanguage for localization rather than translating prompts.
 Changing installed settings requires a restart; updating replaces prompt files
-and archives old copies. Never commit private settings, model IDs, or PR data.
+without retaining old copies. Save any policy customization you want to keep
+before updating. Never commit private settings, model IDs, or PR data.
 
 ## Acceptance test before real use
 

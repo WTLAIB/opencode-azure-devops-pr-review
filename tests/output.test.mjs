@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseJSONReport, stageFormat } from '../src/output.mjs';
+import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
 const settings = { maxStageCharacters: 1000 };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
@@ -23,15 +24,15 @@ test('text compatibility accepts JSON or one fenced object, not broken or ambigu
   assert.throws(() => parseJSONReport({ info: {}, parts: [{ type: 'reasoning', text: '{"status":"READY"}' }] }, settings), /Empty/);
 });
 test('every stage has an object schema and zero automatic output retries', () => {
-  for (const role of ['azpr-check','azpr-functional','azpr-failure','azpr-deep','azpr-verify-free','azpr-verify-paid','azpr-comment-plan','azpr-comment-publish']) {
+  for (const role of Object.keys(ROLES)) {
     const format = stageFormat(role);
     assert.equal(format.type, 'json_schema'); assert.equal(format.retryCount, 0);
     assert.equal(format.schema.type, 'object'); assert.ok(format.schema.required.includes('status'));
     assert.equal(format.schema.additionalProperties, false);
   }
-  assert.ok(stageFormat('azpr-functional').schema.properties.findings.items.properties.severity);
-  assert.ok(stageFormat('azpr-verify-free').schema.properties.dispositions.items.properties.mergedInto);
-  assert.ok(stageFormat('azpr-check').schema.properties.status.enum.includes('NOT_READY'));
+  assert.ok(stageFormat('azpr-review-functional').schema.properties.findings.items.properties.severity);
+  assert.ok(stageFormat('azpr-review-verifier').schema.properties.dispositions.items.properties.mergedInto);
+  assert.ok(stageFormat('azpr-review-check').schema.properties.status.enum.includes('NOT_READY'));
 });
 test('diagnostic projection excludes reasoning, tool payloads, headers, and unknown metadata', () => {
   const value = diagnosticResponse({ info: { id: 'msg_1', finish: 'length', error: { name: 'APIError', data: { message: 'actual error', responseHeaders: { authorization: 'SECRET_HEADER' }, responseBody: 'SECRET_BODY' } }, metadata: 'SECRET_METADATA' }, parts: [

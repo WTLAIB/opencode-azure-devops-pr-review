@@ -34,7 +34,7 @@ export async function createDiagnostics(settings, context, run) {
         await writeFile(join(directory, name), typeof value === 'string' ? value : JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
       } catch { log.warnings.push(`Could not save ${name}; inspect the OpenCode session instead.`); }
     };
-    await log.write('run.json', { id: run.id, origin: run.origin, mode: run.mode, sourceReview: run.review?.id,
+    await log.write('run.json', { id: run.id, origin: run.origin, mode: run.mode, profile: run.profile, sourceReview: run.review?.id,
       startedAt: new Date().toISOString(), project: context.directory, outputLanguage: settings.outputLanguage,
       returnReport: settings.returnReport, structuredOutput: settings.structuredOutput,
       privacy: 'Private review data. May contain source, PR details, model IDs, or secrets echoed by the model. Do not upload or commit. No automatic retention cleanup.' });

@@ -11,7 +11,7 @@ The old generic "required JSON envelope" message could mean plain Markdown,
 surrounding commentary, malformed JSON, or an incomplete response. Without that
 session's actual output, the cause cannot be determined. New failures include
 available finish/error names and character counts, without dumping source into
-the receipt. Do not resolve these failures by automatically repeating paid work
+the receipt. Do not resolve these failures by automatically repeating reviews
 or a publishing attempt.
 
 ## Inspect an existing failed session
@@ -79,14 +79,19 @@ printed in its receipt:
 
 | File | Contents |
 | --- | --- |
-| `run.json` | Run ID, origin, mode, language, project, start time; no provider configuration. |
-| `NN-azpr-ROLE.request.json` | Input payload, role instructions, selected model/session, and schema. |
-| `NN-azpr-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-ROLE.result.json` | Parsed/validated stage result or error, model/session IDs, timestamps. |
-| `NN-azpr-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
-| `NN-azpr-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
+| `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time; no provider configuration. |
+| `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, selected model/session, and schema. |
+| `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
+| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated stage result or error, profile, model/session IDs, timestamps. |
+| `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
+| `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
 | `report.md` | Runtime final report, including model attribution and dispositions; or the comment preview/publication receipt. Absent if no report was produced. |
+
+A complete normal or deep review has four stage records: source check, functional
+initial review, risk initial review, and final verification. `MODE` is `review`
+or `deep`; the two initial file numbers may vary because the sessions start
+concurrently. A comment command uses the originating review's profile.
 
 Response text and structured-output previews are limited to
 `maxStageCharacters`; truncation is explicitly flagged and the full host session

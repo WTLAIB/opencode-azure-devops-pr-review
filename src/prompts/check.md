@@ -37,4 +37,4 @@ On success return:
 }
 ```
 
-When differences, exact-commit source, or complete pagination are unavailable, or there are no reviewable changes, return `{"status":"NOT_READY","report":"Specific missing data or capability"}`. Do not fabricate a snapshot or invoke paid models. READY means data is accessible, not that the code is correct.
+When differences, exact-commit source, or complete pagination are unavailable, or there are no reviewable changes, return `{"status":"NOT_READY","report":"Specific missing data or capability"}`. Do not fabricate a snapshot or start other reviewers. READY means data is accessible, not that the code is correct.

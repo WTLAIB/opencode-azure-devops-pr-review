@@ -11,11 +11,12 @@ replace=0
 usage() {
   cat <<'TXT'
 Usage: sh install.sh [--settings FILE] [--replace] [--config-dir DIR]
-  --settings    Copy a trusted JSON profile without executing it.
-  --replace     Back up this integration before replacement; preserve installed
-                settings unless --settings is explicitly supplied.
+  --settings    Select a trusted JSON profile; convert roles and add missing defaults.
+  --replace     Convert settings and replace this integration without keeping backups.
+                Preserve values and add missing defaults unless --settings selects another profile.
   --config-dir  OpenCode configuration directory (default: XDG_CONFIG_HOME/opencode).
-No npm install, Python, jq, sudo, or network access is required.
+Python 3 (standard library only) is required to merge JSON safely.
+No npm install, pip packages, jq, sudo, or network access is required.
 TXT
 }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -29,7 +30,8 @@ while [ "$#" -gt 0 ]; do
     *) die "Unknown argument: $1" ;;
   esac
 done
-for file in src/runtime.mjs src/comments.mjs src/request.mjs src/output.mjs src/diagnostics.mjs src/attribution.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
+command -v python3 >/dev/null 2>&1 || die 'Python 3 is required for safe JSON settings merging. Install python3 and retry; no installation files were changed.'
+for file in scripts/merge-settings.py src/runtime.mjs src/comments.mjs src/config.mjs src/output.mjs src/diagnostics.mjs src/attribution.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
   [ -f "$src/$file" ] || die "Incomplete package: $file is missing."
 done
 if [ -n "$profile" ]; then
@@ -41,11 +43,11 @@ root=$(CDPATH= cd -- "$root" && pwd -P)
 lock=$root/.azpr-install.lock
 mkdir "$lock" 2>/dev/null || die "Installation lock exists: $lock"
 stage=
-backup=
 success=0
 
 cleanup() {
   rc=$?
+  recovery_required=0
   trap - EXIT HUP INT TERM
   if [ "$success" -ne 1 ] && [ -n "$stage" ] && [ -d "$stage" ]; then
     if [ -f "$stage/installed" ]; then
@@ -53,16 +55,23 @@ cleanup() {
         [ -n "$rel" ] && rm -rf -- "$root/$rel"
       done < "$stage/installed"
     fi
-    if [ -n "$backup" ] && [ -f "$stage/moved" ]; then
+    if [ -f "$stage/moved" ]; then
       while IFS= read -r rel; do
-        if [ -e "$backup/$rel" ] || [ -L "$backup/$rel" ]; then
+        if [ -e "$stage/previous/$rel" ] || [ -L "$stage/previous/$rel" ]; then
           mkdir -p "$(dirname -- "$root/$rel")"
-          mv -- "$backup/$rel" "$root/$rel" || printf 'Restore manually: %s\n' "$backup/$rel" >&2
+          if ! mv -- "$stage/previous/$rel" "$root/$rel"; then
+            recovery_required=1
+            printf 'Restore manually: %s\n' "$stage/previous/$rel" >&2
+          fi
         fi
       done < "$stage/moved"
     fi
   fi
-  [ -z "$stage" ] || rm -rf -- "$stage"
+  if [ "$recovery_required" -eq 0 ]; then
+    [ -z "$stage" ] || rm -rf -- "$stage"
+  else
+    printf 'Automatic recovery failed; emergency files retained: %s\n' "$stage" >&2
+  fi
   rmdir "$lock" 2>/dev/null || true
   exit "$rc"
 }
@@ -71,17 +80,14 @@ trap 'exit 130' HUP INT TERM
 
 # Refuse conflicts rather than trying to rewrite JSONC.
 for config in "$root/opencode.json" "$root/opencode.jsonc" "$root/config.json"; do
-  if [ -f "$config" ] && grep -Eq '"(pr-check|pr-review|pr-deep|pr-stop|pr-comment|azpr-(check|functional|failure|deep|verify-free|verify-paid|comment-plan|comment-publish))"[[:space:]]*:' "$config"; then
+  if [ -f "$config" ] && grep -Eq '"(pr-check|pr-review|pr-deep|pr-stop|pr-comment|azpr-[^"]+)"[[:space:]]*:' "$config"; then
     die "Reserved command/agent keys appear in $config. Resolve them manually."
   fi
 done
-for role in check functional failure deep verify-free verify-paid comment-plan comment-publish; do
-  for sub in agent agents; do
-    path=$root/$sub/azpr-$role.md
-    [ ! -e "$path" ] && [ ! -L "$path" ] || die "Conflicting agent file: $path"
-  done
+for path in "$root"/agent/azpr-*.md "$root"/agents/azpr-*.md; do
+  [ ! -e "$path" ] && [ ! -L "$path" ] || die "Conflicting agent file: $path"
 done
-for sub in commands command plugins plugin plugins/azpr azpr azpr-backups; do
+for sub in commands command plugins plugin plugins/azpr azpr; do
   [ ! -L "$root/$sub" ] || die "Symlinked integration directory: $root/$sub"
 done
 # Alternate discovery directories must not shadow this installation.
@@ -102,12 +108,12 @@ plugins/azpr.js
 TXT
 while IFS= read -r rel; do
   if [ -e "$root/$rel" ] || [ -L "$root/$rel" ]; then
-    [ "$replace" -eq 1 ] || die "Target exists: $root/$rel. Use --replace to back up and replace it."
+    [ "$replace" -eq 1 ] || die "Target exists: $root/$rel. Use --replace to convert settings and replace it without a backup."
   fi
 done < "$stage/targets"
 
 mkdir -p "$stage/new/plugins/azpr" "$stage/new/commands"
-cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/request.mjs" "$src/src/output.mjs" "$src/src/diagnostics.mjs" "$src/src/attribution.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
+cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/config.mjs" "$src/src/output.mjs" "$src/src/diagnostics.mjs" "$src/src/attribution.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
 cp -R "$src/src/prompts" "$stage/new/plugins/azpr/prompts"
 printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "./azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
 for cmd in pr-check pr-review pr-deep pr-stop pr-comment; do
@@ -116,33 +122,30 @@ done
 cp "$src/config/settings.schema.json" "$src/package.json" "$src/README.md" "$src/uninstall.sh" "$stage/new/plugins/azpr/"
 cp -R "$src/docs" "$stage/new/plugins/azpr/docs"
 if [ -n "$profile" ]; then
-  cp -- "$profile" "$stage/new/plugins/azpr/settings.json"
+  settings_source=$profile
 elif [ "$replace" -eq 1 ] && [ -f "$root/plugins/azpr/settings.json" ] && [ -f "$root/azpr/settings.json" ]; then
   die 'Both old and new settings exist. Choose the intended profile explicitly with --settings.'
 elif [ "$replace" -eq 1 ] && [ -f "$root/plugins/azpr/settings.json" ]; then
-  cp "$root/plugins/azpr/settings.json" "$stage/new/plugins/azpr/settings.json"
+  settings_source=$root/plugins/azpr/settings.json
 elif [ "$replace" -eq 1 ] && [ -f "$root/azpr/settings.json" ]; then
-  cp "$root/azpr/settings.json" "$stage/new/plugins/azpr/settings.json"
+  settings_source=$root/azpr/settings.json
 else
-  cp "$src/config/settings.example.json" "$stage/new/plugins/azpr/settings.json"
+  settings_source=$src/config/settings.example.json
 fi
+python3 -I "$src/scripts/merge-settings.py" "$src/config/settings.example.json" "$settings_source" "$stage/new/plugins/azpr/settings.json"
 chmod 600 "$stage/new/plugins/azpr/settings.json"
 
 : > "$stage/moved"
 : > "$stage/installed"
 while IFS= read -r rel; do
   if [ -e "$root/$rel" ] || [ -L "$root/$rel" ]; then
-    if [ -z "$backup" ]; then
-      mkdir -p "$root/azpr-backups"
-      backup=$(mktemp -d "$root/azpr-backups/replaced.XXXXXX")
-    fi
-    mkdir -p "$(dirname -- "$backup/$rel")"
+    mkdir -p "$(dirname -- "$stage/previous/$rel")"
     printf '%s\n' "$rel" >> "$stage/moved"
-    mv -- "$root/$rel" "$backup/$rel"
+    mv -- "$root/$rel" "$stage/previous/$rel"
   fi
 done < "$stage/targets"
 while IFS= read -r rel; do
-  # The former sibling runtime is archived but never reinstalled.
+  # The former sibling runtime is removed after successful replacement.
   [ "$rel" != azpr ] || continue
   mkdir -p "$(dirname -- "$root/$rel")"
   printf '%s\n' "$rel" >> "$stage/installed"
@@ -150,9 +153,9 @@ while IFS= read -r rel; do
 done < "$stage/targets"
 success=1
 printf '\nAzure PR Review installed (target host: OpenCode 1.18.31).\nSettings: %s\n' "$root/plugins/azpr/settings.json"
-[ -z "$backup" ] || printf 'Previous files preserved: %s\n' "$backup"
+printf 'No installation backup is retained after success. Existing older backups are untouched.\n'
 cat <<'TXT'
-1. Configure exact freeA/freeB provider/model IDs; deep/final are optional.
+1. Configure models.review.functional/risk/verifier. Configure all three models.deep roles to enable /pr-deep.
 2. Use your existing OpenCode MCP connection and permissions; no tool mapping is required.
 3. Fully restart OpenCode and run /pr-check on a small, known PR.
 Settings have not been API-validated. The plugin refuses incomplete configuration.

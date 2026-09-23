@@ -10,8 +10,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
-import { parseReviewRequest } from './request.mjs';
-import { parseJSONReport, stageFormat } from './output.mjs';
+import { COMMANDS, ROLES, roleFor, commentRole, languagePrompt, validateSettings } from './config.mjs';
+import { parseJSONReport, stageFormat, parseReviewRequest, validateSnapshot, initialEnvelope, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution } from './attribution.mjs';
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -20,21 +20,8 @@ const OWN = 'azpr-optin';
 // positional index prevents both explicit expansion and implicit argument append.
 const ARGUMENT_SENTINEL = '$9007199254740991';
 const BAD_MODEL = 'azpr-unconfigured/setup-required';
-const COMMANDS = { 'pr-check': 'check', 'pr-review': 'economy', 'pr-deep': 'deep', 'pr-stop': 'stop', 'pr-comment': 'comment' };
-export const ROLES = {
-  'azpr-check': ['freeB', 'check', 'check'],
-  'azpr-functional': ['freeA', 'functional', 'initial'],
-  'azpr-failure': ['freeB', 'failure', 'initial'],
-  'azpr-deep': ['deep', 'deep', 'deep'],
-  'azpr-verify-free': ['freeB', 'final', 'final'],
-  'azpr-verify-paid': ['final', 'final', 'final'],
-  'azpr-comment-plan': ['freeB', 'comment-plan', 'final'],
-  'azpr-comment-publish': ['freeB', 'comment-publish', 'final'],
-};
-const commentRole = name => name.startsWith('azpr-comment-');
 const ownRole = (name) => typeof name === 'string' && name.startsWith('azpr-');
 const AUXILIARY = new Set(['title', 'summary', 'compaction']);
-const sha = (v) => typeof v === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(v);
 const text = (v) => typeof v === 'string' && v.trim().length > 0;
 const clone = (v) => JSON.parse(JSON.stringify(v));
 function errorText(e) { return e instanceof Error ? e.message : 'OpenCode SDK operation failed.'; }
@@ -51,119 +38,9 @@ function data(response, label) {
   return response.data;
 }
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-function keys(value, allowed, at) {
-  if (!isObject(value)) throw new Error(`${at} must be a JSON object.`);
-  for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) throw new Error(`Unknown setting ${at}.${key}; check for a typo.`);
-  }
-}
-function model(value, at, optional = false) {
-  if (optional && value === '') return '';
-  if (typeof value !== 'string' || value.length > 512 ||
-      !/^[A-Za-z0-9][A-Za-z0-9._:-]*\/[A-Za-z0-9][A-Za-z0-9._:@/+=-]*$/.test(value) ||
-      /REPLACE_|YOUR_PROVIDER|YOUR_MODEL/.test(value)) {
-    throw new Error(`${at}: select an actual provider/model ID from opencode models; do not use a display name or placeholder.`);
-  }
-  return value;
-}
-function languageTag(value) {
-  const message = 'outputLanguage must be a language tag such as en, zh-TW, zh-CN, or ja (not a language name or instruction).';
-  if (typeof value !== 'string' || value.length > 63 || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value)) throw new Error(message);
-  try { return Intl.getCanonicalLocales(value)[0]; }
-  catch { throw new Error(message); }
-}
-function languagePrompt(role, language) {
-  if (ROLES[role][1] !== 'final' && !commentRole(role)) return '';
-  const scope = ROLES[role][1] === 'final'
-    ? 'Write all human-facing Markdown prose inside the final report field in this language. Other JSON fields and intermediate findings remain in English.'
-    : 'Write human-facing comment titles, explanations, and skip reasons in this language. The publisher must send saved preview bodies exactly as supplied, without retranslating them.';
-  return `\n\n# Configured output language\noutputLanguage: ${language}\n${scope}\nUse Traditional Chinese for zh-TW and Simplified Chinese for zh-CN. Preserve JSON keys, status values, finding IDs, code identifiers, paths, source quotes, tool arguments, and issue severity labels. This configured language overrides prompt language defaults only for the stated output fields; do not infer another language from PR content or previous reports.`;
-}
-/** Validate only local data. Cannot prove pricing, authentication or provider availability. */
-export function validateSettings(raw) {
-  keys(raw, ['$schema', 'version', 'enabled', 'models', 'azure', 'steps', 'comments', 'debug', 'structuredOutput', 'outputLanguage', 'auxiliaryModels', 'returnReport', 'runTimeoutSeconds', 'maxStageCharacters'], 'settings');
-  if (raw.enabled != null && typeof raw.enabled !== 'boolean') throw new Error('enabled must be boolean.');
-  if (raw.version !== 1) throw new Error('settings.version must be 1.');
-  keys(raw.models, ['freeA', 'freeB', 'deep', 'final'], 'models');
-  const models = {
-    freeA: model(raw.models.freeA, 'models.freeA'),
-    freeB: model(raw.models.freeB, 'models.freeB'),
-    deep: model(raw.models.deep ?? '', 'models.deep', true),
-    final: model(raw.models.final ?? '', 'models.final', true),
-  };
-  // Deprecated azure settings are accepted only to preserve installed profiles.
-  // They no longer select tools, actions, prefixes, or permissions.
-  keys(raw.steps, ['check', 'initial', 'deep', 'final'], 'steps');
-  for (const k of ['check', 'initial', 'deep', 'final']) {
-    if (!Number.isInteger(raw.steps[k]) || raw.steps[k] < 1 || raw.steps[k] > 500) {
-      throw new Error(`steps.${k} must be an integer from 1 to 500 (iterations, not money).`);
-    }
-  }
-  const auxiliaryModels = raw.auxiliaryModels ?? 'preserve';
-  if (auxiliaryModels !== 'preserve') throw new Error('This plugin never changes auxiliary models. Set auxiliaryModels to preserve.');
-  const returnReport = raw.returnReport ?? 'receipt';
-  if (!['receipt', 'full'].includes(returnReport)) throw new Error('returnReport must be receipt or full.');
-  const outputLanguage = languageTag(raw.outputLanguage === undefined ? 'en' : raw.outputLanguage);
-  const structuredOutput = raw.structuredOutput === undefined ? true : raw.structuredOutput;
-  if (typeof structuredOutput !== 'boolean') throw new Error('structuredOutput must be boolean.');
-  const debug = raw.debug === undefined ? { enabled: false, directory: '' } : raw.debug;
-  keys(debug, ['enabled', 'directory'], 'debug');
-  if (typeof debug.enabled !== 'boolean' || (debug.directory !== undefined &&
-      (typeof debug.directory !== 'string' || /[\0\r\n]/.test(debug.directory) || debug.directory.startsWith('~')))) throw new Error('debug requires enabled (boolean) and an optional directory path; use an absolute path or a project-relative path, not ~.');
-  const runTimeoutSeconds = raw.runTimeoutSeconds ?? 1200;
-  if (!Number.isInteger(runTimeoutSeconds) || runTimeoutSeconds < 10 || runTimeoutSeconds > 7200) throw new Error('runTimeoutSeconds must be 10..7200.');
-  const maxStageCharacters = raw.maxStageCharacters ?? 250000;
-  if (!Number.isInteger(maxStageCharacters) || maxStageCharacters < 1000 || maxStageCharacters > 1000000) throw new Error('maxStageCharacters must be 1000..1000000.');
-  const comments = raw.comments ?? { enabled: false, maxComments: 5 };
-  keys(comments, ['enabled', 'maxComments'], 'comments');
-  if (typeof comments.enabled !== 'boolean' || !Number.isInteger(comments.maxComments) || comments.maxComments < 1 || comments.maxComments > 10) throw new Error('comments requires enabled (boolean) and maxComments (1..10).');
-  return { models, steps: { ...raw.steps }, comments: { ...comments }, structuredOutput, debug: { enabled: debug.enabled, directory: debug.directory ?? '' },
-    enabled: raw.enabled !== false, outputLanguage, returnReport, runTimeoutSeconds, maxStageCharacters, auxiliaryModels, deepReady: Boolean(models.deep && models.final) };
-}
 // Do not override MCP permissions: new agents inherit host defaults and global
 // permission rules in OpenCode 1.18.31. Only nested model delegation is disabled.
 export function rolePermission() { return { task: 'deny' }; }
-function validateSnapshot(s) {
-  if (!isObject(s) || !text(s.repository) || !Number.isInteger(s.prId) || s.prId < 1 ||
-      !sha(s.base) || !sha(s.head) || s.scope !== 'cumulative' || !Array.isArray(s.files) ||
-      s.files.length === 0 || !s.files.every(text) || new Set(s.files).size !== s.files.length) {
-    throw new Error('Missing full base/head SHA, cumulative PR scope or complete unique file list.');
-  }
-  return { repository: s.repository, prId: s.prId, base: s.base.toLowerCase(), head: s.head.toLowerCase(), scope: s.scope, files: [...s.files] };
-}
-function snapshotKey(s) { return JSON.stringify(validateSnapshot(s)); }
-function initialEnvelope(result, expected, prefix) {
-  if (!['COMPLETE', 'PARTIAL'].includes(result.status) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
-  if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
-  const ids = new Set();
-  for (const finding of result.findings) {
-    if (!isObject(finding) || typeof finding.id !== 'string' || !new RegExp(`^${prefix}-[1-9][0-9]*$`).test(finding.id) ||
-        ids.has(finding.id) || !text(finding.summary) || !text(finding.evidence) || !text(finding.location)) throw new Error('Invalid/duplicate finding ID or missing evidence/location.');
-    ids.add(finding.id);
-  }
-  return result;
-}
-function finalEnvelope(result, expected, originals) {
-  if (!['COMPLETE', 'INCOMPLETE', 'STALE'].includes(result.status) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
-  if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Final reviewer used a different snapshot.');
-  const ids = new Set(originals.map(f => f.id));
-  const accounted = new Set();
-  for (const item of result.dispositions) {
-    if (!isObject(item) || !ids.has(item.id) || accounted.has(item.id) || !['CONFIRMED','NEEDS_INFO','REJECTED','MERGED'].includes(item.status) || !text(item.reason)) {
-      throw new Error('Final review has an invalid/missing disposition or silently changed a finding ID.');
-    }
-    if (item.status === 'MERGED' && (!ids.has(item.mergedInto) || item.mergedInto === item.id)) throw new Error('Merged finding must reference another original finding.');
-    accounted.add(item.id);
-  }
-  if (accounted.size !== ids.size) throw new Error('Final reviewer omitted one or more original findings.');
-  if (result.newFindings != null) initialEnvelope({ status: 'COMPLETE', snapshot: result.snapshot, findings: result.newFindings, report: result.report }, expected, 'V');
-  if (!sha(result.currentHead)) {
-    if (result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
-  } else if (result.currentHead.toLowerCase() !== expected.head) {
-    result = { ...result, status: 'STALE' }; // No automatic paid rerun.
-  } else if (result.status === 'STALE') throw new Error('STALE verdict contradicts reported head; require manual verification.');
-  return result;
-}
 /** Session/command-scoped integration; baseDirectory is injectable only for offline tests. */
 export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DEFAULT_DIR) {
   const settingsPath = join(baseDirectory, 'settings.json');
@@ -191,7 +68,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (!g || !g.run.active || g.role !== agent) throw new Error('[AZPR] This private reviewer has no active command-scoped authorization. Use /pr-review or /pr-deep.');
     checkRole(agent);
     if (actualModel !== g.model) throw new Error('[AZPR] Model mismatch; no fallback or manual reviewer model switching.');
-    if (['deep','final'].includes(ROLES[agent][0]) && g.run.mode !== 'deep') throw new Error('[AZPR] Paid role denied outside /pr-deep.');
+    if (ROLES[agent].mode !== g.run.profile) throw new Error('[AZPR] Reviewer profile mismatch; modes cannot share or switch private agents.');
     return g;
   }
   async function bounded(promise, signal) {
@@ -219,7 +96,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     checkRole(role);
     const input = JSON.stringify(payload);
     if (input.length > state.settings.maxStageCharacters * 4) throw new Error('Review input is too large; split the PR instead of silently truncating evidence.');
-    const idModel = state.settings.models[ROLES[role][0]];
+    const spec = ROLES[role];
+    if (spec.mode !== run.profile) throw new Error('[AZPR] Reviewer profile mismatch before invocation.');
+    const idModel = state.settings.models[spec.mode][spec.slot];
     if (!idModel) throw new Error('Required model is not configured.');
     const title = `[AZPR ${run.id}] ${label}`;
     const made = data(await bounded(context.client.session.create({ body: { parentID: run.origin, title }, signal: run.controller.signal }), run.controller.signal), 'session.create');
@@ -228,7 +107,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     seenSessions.add(made.id);
     const g = { run, role, model: idModel, messages: 0, calls: 0, toolCalls: new Set(), completedTools: new Set() };
     grants.set(made.id, g);
-    const record = { role, model: idModel, sessionID: made.id, title, status: 'RUNNING', startedAt: new Date().toISOString() };
+    const record = { role, profile: spec.mode, stage: spec.stage, model: idModel, sessionID: made.id, title, status: 'RUNNING', startedAt: new Date().toISOString() };
     run.stages.push(record);
     const stem = `${String(run.stages.length).padStart(2, '0')}-${role}`;
     const format = state.settings.structuredOutput ? stageFormat(role) : undefined;
@@ -244,7 +123,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       receivedAnswer = true;
       if (state.settings.debug.enabled) await run.debug.write(`${stem}.response.json`, diagnosticResponse(answer, state.settings.maxStageCharacters));
       if (!run.active) throw new Error('Review stopped before output validation.');
-      if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for paid review.');
+      if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
       const result = validate(parseJSONReport(answer, state.settings));
       record.completedTools = g.completedTools.size;
       record.status = result.status ?? 'INVALID';
@@ -323,7 +202,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (review.attempts.size) throw new Error('[AZPR] This review already had a publication attempt. Inspect Azure before starting a new review; automatic retry is disabled.');
     if (sourceRuns.has(input.sessionID) || commentLocks.has(targetKey(review.target))) throw new Error('[AZPR] A review/comment command is already running for this session or PR.');
     for (const fn of ['create','prompt','abort']) if (typeof context.client?.session?.[fn] !== 'function') throw new Error(`[AZPR] OpenCode Session SDK ${fn} is unavailable.`);
-    const run = { id: randomUUID().slice(0,8), origin: input.sessionID, mode: 'comment', review, active: true, controller: new AbortController(), stages: [] };
+    const run = { id: randomUUID().slice(0,8), origin: input.sessionID, mode: 'comment', profile: review.profile, review, active: true, controller: new AbortController(), stages: [] };
     runs.set(run.id, run); sourceRuns.set(run.origin, run.id); commentLocks.add(targetKey(review.target));
     const timer = setTimeout(() => { void abortRun(run, 'Comment time limit reached.'); }, state.settings.runTimeoutSeconds * 1000);
     timer.unref?.();
@@ -343,14 +222,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         // Mark the whole saved batch uncertain BEFORE any publisher can run.
         // Generic MCP calls cannot be classified reliably without an adapter.
         if (publish) for (const c of review.plan.comments) review.attempts.set(c.marker, { findingId: c.findingId, state: 'UNKNOWN' });
-        const result = await stage(run, publish ? 'azpr-comment-publish' : 'azpr-comment-plan', payload, publish ? 'Publish comments' : 'Preview comments');
+        const result = await stage(run, roleFor(run.profile, publish ? 'comment-publish' : 'comment-plan'), payload, publish ? 'Publish comments' : 'Preview comments');
         if (publish) {
           if (!run.stages.at(-1).completedTools) throw new Error('Publisher did not complete any tool call. Publication remains unverified; inspect Azure.');
           const allReported = recordPublishResult(result, review);
           status = allReported ? 'MODEL_REPORTED_POSTED' : 'INCOMPLETE';
           report = 'Publication results below are model-reported, not independently verified by this plugin. Inspect Azure before taking further action.';
         } else {
-          review.attribution = commentAttribution(review.provenance, review.outputLanguage, state.settings.models.freeB);
+          review.attribution = commentAttribution(review.provenance, review.outputLanguage, state.settings.models[review.profile].risk);
           review.plan = validateCommentPlan(result, review, remaining);
           status = 'PREVIEW';
           report = review.plan.comments.map(c => `### ${c.findingId} — ${c.path}:${c.startLine}-${c.endLine}\n\n${c.content}`).join('\n\n');
@@ -391,10 +270,10 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (!text(input.sessionID) || !text(input.arguments) || input.arguments.length > 16000) throw new Error(`[AZPR] Usage: /${input.command} <Azure PR URL> [your context]`);
     const request = parseReviewRequest(input.arguments);
     // Only explicit command events grant access; matching text in chat/MCP results does not.
-    if (mode === 'deep' && !state.settings.deepReady) throw new Error('[AZPR] Both paid models must be configured before /pr-deep.');
-    if (sourceRuns.has(input.sessionID)) throw new Error('[AZPR] A review is already running from this session. Use /pr-stop rather than duplicate paid work.');
+    if (mode === 'deep' && !state.settings.deepReady) throw new Error('[AZPR] All three models.deep roles must be configured before /pr-deep. No fallback to review models.');
+    if (sourceRuns.has(input.sessionID)) throw new Error('[AZPR] A review is already running from this session. Use /pr-stop before starting another.');
     for (const fn of ['create','prompt','abort']) if (typeof context.client?.session?.[fn] !== 'function') throw new Error(`[AZPR] OpenCode Session SDK ${fn} is unavailable; no review was started.`);
-    const run = { id: randomUUID().slice(0,8), origin: input.sessionID, mode, userContext: request.userContext, active: true, controller: new AbortController(), stages: [] };
+    const run = { id: randomUUID().slice(0,8), origin: input.sessionID, mode, profile: mode === 'deep' ? 'deep' : 'review', userContext: request.userContext, active: true, controller: new AbortController(), stages: [] };
     runs.set(run.id, run); sourceRuns.set(run.origin, run.id);
     const timer = setTimeout(() => { void abortRun(run, 'Run time limit reached.'); }, state.settings.runTimeoutSeconds * 1000);
     timer.unref?.();
@@ -403,29 +282,29 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     try {
       run.debug = await createDiagnostics(state.settings, context, run);
       run.phase = 'source check';
-      const pre = await stage(run, 'azpr-check', request, 'Source check');
+      const pre = await stage(run, roleFor(run.profile, 'check'), request, 'Source check');
       if (!['READY','NOT_READY'].includes(pre.status)) throw new Error('Preflight returned an invalid status.');
       if (pre.status !== 'READY') { status = 'NOT_READY'; report = typeof pre.report === 'string' ? pre.report : ''; }
       else {
         const snapshot = validateSnapshot(pre.snapshot);
         if (mode === 'check') { status = 'READY'; report = pre.report ?? ''; }
         else {
-          const candidates = [['azpr-functional','F'], ['azpr-failure','R'], ...(mode === 'deep' ? [['azpr-deep','D']] : [])];
+          const candidates = ['functional', 'risk'].map(kind => roleFor(run.profile, kind));
           run.phase = 'initial reviews';
           const packet = { ...request, snapshot, sourceAccess: pre.sourceAccess ?? {}, requirements: pre.requirements ?? '' };
-          const first = await Promise.allSettled(candidates.map(([role,prefix]) => stage(run, role, packet, `Initial ${prefix}`, result => initialEnvelope(result, snapshot, prefix))));
+          const first = await Promise.allSettled(candidates.map(role => stage(run, role, packet, ROLES[role].label, result => initialEnvelope(result, snapshot, ROLES[role].prefix))));
           const failed = first.find(r => r.status === 'rejected');
           if (failed) throw new Error(`Initial review incomplete: ${errorText(failed.reason)}`);
           const reviews = first.map(r => r.value);
-          if (reviews.some(r => r.status !== 'COMPLETE')) throw new Error('At least one initial reviewer reported PARTIAL; final paid review was not started.');
+          if (reviews.some(r => r.status !== 'COMPLETE')) throw new Error('At least one initial reviewer reported PARTIAL; final verification was not started.');
           const allFindings = reviews.flatMap(r => r.findings);
-          const role = mode === 'deep' ? 'azpr-verify-paid' : 'azpr-verify-free';
+          const role = roleFor(run.profile, 'verifier');
           run.phase = 'final verification';
           const verified = await stage(run, role, { ...packet, reviews, outputLanguage: state.settings.outputLanguage }, 'Final report', result => finalEnvelope(result, snapshot, allFindings));
           const provenance = reviewProvenance(run);
           status = verified.status; report = `${verified.report}\n\n---\n\n${provenanceReport(provenance, verified, state.settings.outputLanguage)}`;
           if (status === 'COMPLETE') {
-            completed.set(run.id, { id: run.id, origin: run.origin, request: input.arguments, snapshot, outputLanguage: state.settings.outputLanguage, provenance, findings: clone(allFindings), final: clone(verified), attempts: new Map(), plan: null });
+            completed.set(run.id, { id: run.id, origin: run.origin, profile: run.profile, request: input.arguments, snapshot, outputLanguage: state.settings.outputLanguage, provenance, findings: clone(allFindings), final: clone(verified), attempts: new Map(), plan: null });
             if (completed.size > 20) completed.delete(completed.keys().next().value);
           }
         }
@@ -462,18 +341,20 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         }
         const common = await readFile(join(baseDirectory, 'prompts', 'common.md'), 'utf8');
         const commentPolicy = await readFile(join(baseDirectory, 'prompts', 'comment-policy.md'), 'utf8');
+        const deepScope = await readFile(join(baseDirectory, 'prompts', 'deep.md'), 'utf8');
         const agents = {};
-        for (const [role,[slot,file,step]] of Object.entries(ROLES)) {
+        for (const [role,spec] of Object.entries(ROLES)) {
           if (Object.hasOwn(config.agent ?? {}, role)) throw new Error(`Private agent name conflict: ${role}`);
-          const prompt = await readFile(join(baseDirectory, 'prompts', `${file}.md`), 'utf8');
+          const prompt = await readFile(join(baseDirectory, 'prompts', `${spec.prompt}.md`), 'utf8');
           const permission = rolePermission();
           agents[role] = {
             description: 'Private command-scoped reviewer; not callable with Task or @mention.',
-            mode: 'primary', hidden: true, model: settings.models[slot] || BAD_MODEL,
-            ...(['deep','final'].includes(slot) && !settings.deepReady ? { disable: true } : {}),
-            ...(role === 'azpr-comment-publish' && !settings.comments.enabled ? { disable: true } : {}),
+            mode: 'primary', hidden: true, model: settings.models[spec.mode][spec.slot] || BAD_MODEL,
+            ...(spec.mode === 'deep' && !settings.deepReady ? { disable: true } : {}),
+            ...(spec.stage === 'comment-publish' && !settings.comments.enabled ? { disable: true } : {}),
             prompt: (commentRole(role) ? commentPolicy : common) + '\n\n' + prompt + languagePrompt(role, settings.outputLanguage) +
-              (settings.structuredOutput ? '\n\n# Output transport\nAfter completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. This overrides instructions to print a JSON text/code block. The output schema describes the envelope, not an MCP tool restriction.' : ''), steps: settings.steps[step], permission,
+              (spec.mode === 'deep' && ['initial','final'].includes(spec.format) ? '\n\n' + deepScope : '') +
+              (settings.structuredOutput ? '\n\n# Output transport\nAfter completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. This overrides instructions to print a JSON text/code block. The output schema describes the envelope, not an MCP tool restriction.' : ''), steps: settings.steps[spec.step], permission,
           };
         }
         // ONLY add our private agents. No global permissions/model, built-in agent,

@@ -9,13 +9,15 @@ npm test
 npm run check
 ```
 
-Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, independent initial sessions, paid-stage restrictions, snapshot consistency, complete finding dispositions, stale heads, cancellation, and display-only reports.
+Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, two independent initial sessions in both modes, incomplete-profile refusal, snapshot consistency, complete finding dispositions, stale heads, cancellation, and display-only reports. Concurrent normal/deep tests verify static model bindings; comment tests verify the cached originating profile survives later reviews in another mode. Guidance-only settings never reach model instructions.
 
 Comment tests cover saved-plan validation, explicit publishing, arbitrary MCP tool names/arguments, host-denial simulations, confirmed-only eligibility, caps, whole-batch uncertainty bookkeeping, cancellation, and honest model-reported publication labels. They do not assert a programmatic read-only MCP boundary or parse provider-specific responses. No test posts to Azure.
 
 Language tests cover the default, language-tag validation/canonicalization, final-only localization in both review modes, propagation to comment preview/publishing, unchanged saved comment bodies, restart requirements, and settings preservation across installer replacement. They check routing and instructions with mocks, not real-model translation quality.
 
-Installer tests execute the real shell scripts in disposable directories. They cover fresh installs, the actual installed plugin import, replacement backups, settings preservation, rollback after an injected failure, conflicts, symlinks, locks, and archival uninstall.
+Installer tests execute the real shell scripts in disposable directories. They cover fresh installs, the actual installed plugin import, no-backup replacement, settings preservation, rollback after an injected failure, emergency file retention if restoration also fails, conflicts, symlinks, locks, and archival uninstall. Existing historical backups remain untouched.
+
+Settings migration tests cover all four old model slots mapped to two three-role profiles, installed agent loading after conversion, nested missing defaults, explicit partial profiles, legacy directory migration, preserved non-model false/empty/null/array/custom values, repeated-install idempotence, private file permissions, and rejection of malformed/duplicate-key/non-object JSON, unsupported versions, or ambiguous mixed layouts before replacement. Python 3 standard library is required for these installer tests and for installation, not for plugin execution.
 
 Compatibility tests target OpenCode **1.18.31**: a pure transcription of its
 pre-hook command substitution checks that literal context cannot reach native
@@ -42,10 +44,10 @@ Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing
 
 1. Confirm `opencode --version` is **1.18.31**, and record normal Plan/Build model and tool behavior. Other host versions require a new compatibility audit. Do not share credential-bearing debug configuration.
 2. Confirm ordinary chat does not create private review sessions. Existing agents should still edit files and use their original tools and subagents.
-3. Leave deep/final slots empty initially. Deep mode must refuse to start. Run `/pr-check` against a small known PR and verify complete cumulative changes, pagination, and exact-commit source access.
-4. Run economy mode. Inspect actual session/model IDs for source check, both independent initial reviews, and final verification. The parent development conversation must not be copied into them.
+3. Leave the `models.deep` roles empty initially. Deep mode must refuse to start. Run `/pr-check` against a small known PR and verify `models.review.risk` routing, complete cumulative changes, pagination, and exact-commit source access.
+4. Run normal review mode. Inspect actual session/model IDs for source check, both independent initial reviews, and the separately configured verifier. The parent development conversation must not be copied into them.
 5. Inspect the final report through child-session navigation. Completed private sessions must refuse reuse.
-6. Configure approved deep-mode models only when ready. Verify routing and finding dispositions. Partial initial reviews must prevent final verification; changed heads must not automatically rerun a review. Inspect provider usage records.
+6. Configure all three approved `models.deep` roles only when ready. Verify exactly two initial reviews, deeper analysis instructions, routing, and finding dispositions. Partial initial reviews must prevent final verification; changed heads must not automatically rerun a review. Inspect provider usage records. Run a normal review afterward and confirm comments for the earlier deep review still use `models.deep.risk`.
 7. Cancel from another ordinary session in the same process with `/pr-stop <run-id>`. Confirm only review sessions are affected.
 8. Disable the plugin with `enabled: false`, restart, and confirm normal development still works.
 
@@ -83,7 +85,8 @@ Do not disable host path protections or grant unrestricted filesystem access.
 Close OpenCode, run `sh install.sh --replace`, check the printed settings path,
 and restart. Only `plugins/azpr.js` should be the top-level AZPR plugin entry;
 helpers stay in `plugins/azpr/`. Do not keep additional manually copied loaders.
-Old files/settings are recoverable under `azpr-backups/`; unrelated files are not
+Replacement converts settings directly and retains no backup after success;
+older existing `azpr-backups/` directories are left untouched. Unrelated files are not
 automatically removed. If you flattened files manually, inspect duplicate entries
 before changing them. Never delete the entire plugins directory.
 

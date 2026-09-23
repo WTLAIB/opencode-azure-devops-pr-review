@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseReviewRequest } from '../src/request.mjs';
-import { validateSettings } from '../src/runtime.mjs';
+import { parseReviewRequest } from '../src/output.mjs';
+import { validateSettings } from '../src/config.mjs';
 
 // Pure transcription of v1.18.31 command() argument substitution, BEFORE shell
 // expansion/resolvePromptParts and command.execute.before. No shell is invoked.
@@ -44,7 +44,7 @@ test('request parser preserves Unicode, multiline text, quotes, and literal meta
 });
 test('MCP mapping is absent from new settings and obsolete profiles are ignored',async()=>{
   const s=JSON.parse(await readFile(new URL('../config/settings.example.json',import.meta.url),'utf8'));
-  s.models={freeA:'fixture/a',freeB:'fixture/b'};
+  s.models={review:{functional:'fixture/a',risk:'fixture/b',verifier:'fixture/c'}};
   assert.equal(Object.hasOwn(s,'azure'),false);
   const normalized=validateSettings(s);
   assert.equal(Object.hasOwn(normalized,'tools'),false);
@@ -55,7 +55,7 @@ test('MCP mapping is absent from new settings and obsolete profiles are ignored'
   assert.equal(schema.properties.azure.deprecated,true);
 });
 test('production source contains no fixed MCP tool names or dispatcher whitelist',async()=>{
-  for(const file of ['runtime.mjs','comments.mjs','request.mjs']){
+  for(const file of ['runtime.mjs','comments.mjs','config.mjs','output.mjs']){
     const source=await readFile(new URL('../src/'+file,import.meta.url),'utf8');
     assert.doesNotMatch(source,/SUPPORTED_READ_TOOLS|READ_ACTIONS|repo_get_pull_request|repo_pull_request_thread|commentTools|CommentGate/);
   }
