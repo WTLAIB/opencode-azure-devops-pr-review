@@ -17,6 +17,8 @@ Usage: sh install.sh [--settings FILE] [--replace] [--config-dir DIR]
   --config-dir  OpenCode configuration directory (default: XDG_CONFIG_HOME/opencode).
 Python 3 (standard library only) is required to merge JSON safely.
 No npm install, pip packages, jq, sudo, or network access is required.
+README.md, docs/, uninstall.sh, and config/settings.schema.json are optional.
+Installed module metadata is generated; the source package.json is not required.
 TXT
 }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -31,9 +33,19 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 command -v python3 >/dev/null 2>&1 || die 'Python 3 is required for safe JSON settings merging. Install python3 and retry; no installation files were changed.'
-for file in scripts/merge-settings.py src/runtime.mjs src/comments.mjs src/config.mjs src/output.mjs src/diagnostics.mjs src/attribution.mjs src/plugin.js config/settings.example.json config/settings.schema.json package.json; do
-  [ -f "$src/$file" ] || die "Incomplete package: $file is missing."
-done
+runtime_files='runtime.mjs comments.mjs config.mjs output.mjs diagnostics.mjs attribution.mjs plugin.js'
+prompt_names='common check functional risk deep final comment-policy comment-plan comment-publish'
+command_names='pr-check pr-review pr-deep pr-stop pr-comment'
+require_file() { [ -f "$src/$1" ] && [ -r "$src/$1" ] || die "Incomplete package: $1 is missing or unreadable."; }
+for file in scripts/merge-settings.py config/settings.example.json; do require_file "$file"; done
+for file in $runtime_files; do require_file "src/$file"; done
+for name in $prompt_names; do require_file "src/prompts/$name.md"; done
+for name in $command_names; do require_file "commands/$name.md"; done
+copy_optional() {
+  if [ -f "$src/$1" ]; then
+    cp "$src/$1" "$stage/new/plugins/azpr/" || printf 'WARNING: Could not copy optional file: %s\n' "$1" >&2
+  fi
+}
 if [ -n "$profile" ]; then
   [ -f "$profile" ] && [ -r "$profile" ] || die 'The settings file is not readable.'
 fi
@@ -112,15 +124,19 @@ while IFS= read -r rel; do
   fi
 done < "$stage/targets"
 
-mkdir -p "$stage/new/plugins/azpr" "$stage/new/commands"
-cp "$src/src/runtime.mjs" "$src/src/comments.mjs" "$src/src/config.mjs" "$src/src/output.mjs" "$src/src/diagnostics.mjs" "$src/src/attribution.mjs" "$src/src/plugin.js" "$stage/new/plugins/azpr/"
-cp -R "$src/src/prompts" "$stage/new/plugins/azpr/prompts"
+mkdir -p "$stage/new/plugins/azpr/prompts" "$stage/new/commands"
+for file in $runtime_files; do cp "$src/src/$file" "$stage/new/plugins/azpr/"; done
+for name in $prompt_names; do cp "$src/src/prompts/$name.md" "$stage/new/plugins/azpr/prompts/"; done
+# The .js entry needs module metadata, not the repository's development manifest.
+printf '%s\n' '{"type":"module","private":true}' > "$stage/new/plugins/azpr/package.json"
 printf '%s\n' '// azpr-optin:plugin' 'export { AzurePrReview } from "./azpr/plugin.js";' > "$stage/new/plugins/azpr.js"
-for cmd in pr-check pr-review pr-deep pr-stop pr-comment; do
+for cmd in $command_names; do
   cp "$src/commands/$cmd.md" "$stage/new/commands/$cmd.md"
 done
-cp "$src/config/settings.schema.json" "$src/package.json" "$src/README.md" "$src/uninstall.sh" "$stage/new/plugins/azpr/"
-cp -R "$src/docs" "$stage/new/plugins/azpr/docs"
+for file in config/settings.schema.json README.md uninstall.sh; do copy_optional "$file"; done
+if [ -d "$src/docs" ]; then
+  cp -R "$src/docs" "$stage/new/plugins/azpr/docs" || printf 'WARNING: Could not copy optional docs directory.\n' >&2
+fi
 if [ -n "$profile" ]; then
   settings_source=$profile
 elif [ "$replace" -eq 1 ] && [ -f "$root/plugins/azpr/settings.json" ] && [ -f "$root/azpr/settings.json" ]; then

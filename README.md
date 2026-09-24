@@ -29,6 +29,58 @@ Edit the settings file printed by the installer. By default it is at `~/.config/
 
 See [Azure MCP setup](docs/AZURE_MCP.md) and [validation](docs/VALIDATION.md) before enabling reviews for a team.
 
+### Manual copying without Git
+
+The installer needs only these **24 files**, preserving the relative paths below.
+Copy raw UTF-8 text from the same revision, use LF line endings, and keep the
+original extensions (not `.txt`). No Git checkout or npm installation is needed.
+
+```text
+install.sh
+config/settings.example.json
+scripts/merge-settings.py
+commands/pr-check.md
+commands/pr-review.md
+commands/pr-deep.md
+commands/pr-comment.md
+commands/pr-stop.md
+src/plugin.js
+src/runtime.mjs
+src/config.mjs
+src/output.mjs
+src/comments.mjs
+src/diagnostics.mjs
+src/attribution.mjs
+src/prompts/common.md
+src/prompts/check.md
+src/prompts/functional.md
+src/prompts/risk.md
+src/prompts/deep.md
+src/prompts/final.md
+src/prompts/comment-policy.md
+src/prompts/comment-plan.md
+src/prompts/comment-publish.md
+```
+
+Run `sh install.sh` in that folder, or `sh install.sh --replace` to migrate an
+existing installation. The installer checks all required files before replacing
+anything. The Markdown files in `commands/` and `src/prompts/` are operational
+instructions, not optional documentation; all are required even if you initially
+use only normal reviews.
+
+`README.md`, `docs/`, `uninstall.sh`, and `config/settings.schema.json` are optional:
+they are copied if supplied, and copy failures only warn. The schema provides
+editor hints, not runtime validation; omitting it can produce an editor warning
+about the settings file's `$schema` reference but does not prevent reviews.
+The installer generates the minimal installed `package.json` module declaration,
+so the repository's `package.json` is not needed for manual installation.
+Tests, CI files, Git metadata, private settings, handoff documents, and debug logs
+are not part of this package.
+
+Replacement installs only the supplied optional files; it does not retain old
+copies when they are omitted. If you want the installed uninstall command later,
+include `uninstall.sh` now or obtain the matching script when needed.
+
 ## Commands
 
 | Command | Workflow |
@@ -99,7 +151,7 @@ Both modes run a source check, **two independent initial reviews**, and one fina
 
 Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.check` (24), `steps.final` (100), and the run timeout. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
 
-A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. It uses that mode's `risk` model; standalone `/pr-check` uses `models.review.risk`. Incomplete initial reviews prevent final verification. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns the review.
+A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. It uses that mode's `risk` model; standalone `/pr-check` uses `models.review.risk`. A snapshot whose PR ID differs from the URL is rejected. Incomplete initial reviews prevent final verification, and circular finding merges cannot produce a complete report. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns the review.
 
 ## Reports and cancellation
 
@@ -140,6 +192,12 @@ Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE
 
 Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds; iteration and time limits are not spending caps.
 
+If OpenCode does not acknowledge an abort, the receipt warns that remote work may
+still be running or billed; the plugin's grants are revoked regardless. Cancelling
+during final-report display does not leave a completed review available for
+comments. A cancelled/failed comment preview cannot be published; preview again
+explicitly when appropriate. An uncertain publication attempt must not be retried.
+
 The original conversation and OpenCode's title, summary, or compaction models can still incur their usual costs.
 
 ## Update, disable, or uninstall
@@ -175,7 +233,7 @@ sibling `azpr/` layout and removes it after success. If both layouts contain set
 one explicitly with `--settings`. Do not flatten all runtime files into `plugins/`
 or keep duplicate top-level loaders. See [traversal diagnostics](docs/VALIDATION.md#directory-traversal-diagnostics).
 
-Set `enabled: false` and restart OpenCode to disable review execution. To remove the integration, use the installed uninstaller:
+Set `enabled: false` and restart OpenCode to disable review execution. If you included the optional `uninstall.sh`, remove the integration using the installed uninstaller:
 
 ```sh
 # Preview first.

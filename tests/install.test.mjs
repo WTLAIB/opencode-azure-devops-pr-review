@@ -3,14 +3,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync,
-  readdirSync, rmSync, chmodSync, statSync, symlinkSync, renameSync,
+  readdirSync, rmSync, chmodSync, statSync, symlinkSync, renameSync, cpSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { COMMANDS, PROMPTS } from '../src/config.mjs';
 
 const pkg = dirname(dirname(fileURLToPath(import.meta.url)));
+const requiredFiles = [
+  'install.sh', 'scripts/merge-settings.py', 'config/settings.example.json',
+  ...['plugin.js','runtime.mjs','config.mjs','output.mjs','comments.mjs','diagnostics.mjs','attribution.mjs'].map(name=>'src/'+name),
+  ...['common','check','functional','risk','deep','final','comment-policy','comment-plan','comment-publish'].map(name=>'src/prompts/'+name+'.md'),
+  ...['pr-check','pr-review','pr-deep','pr-comment','pr-stop'].map(name=>'commands/'+name+'.md'),
+];
 const roots = [];
 test.after(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
@@ -41,7 +48,22 @@ function run(path, args = [], extra = {}) {
   });
 }
 function install(s, args = [], extra = {}) {
-  return run(join(pkg, 'install.sh'), ['--config-dir', s.root, ...args], extra);
+  return run(join(s.source ?? pkg, 'install.sh'), ['--config-dir', s.root, ...args], extra);
+}
+function minimalSource(s) {
+  s.source=join(s.temp,'manual source');
+  for(const file of requiredFiles) {
+    mkdirSync(dirname(join(s.source,file)),{recursive:true});
+    cpSync(join(pkg,file),join(s.source,file));
+  }
+}
+async function installedAgents(s) {
+  const module=await import(pathToFileURL(join(s.root,'plugins/azpr.js')).href);
+  const hooks=await module.AzurePrReview({}),config={command:{}};
+  for(const name of ['pr-check','pr-review','pr-deep','pr-stop','pr-comment']) config.command[name]={subtask:false,template:readFileSync(join(s.root,'commands',name+'.md'),'utf8')};
+  await hooks.config(config);
+  assert.equal(Object.keys(config.agent).length,12);
+  return config.agent;
 }
 function uninstall(s, args = []) {
   return run(join(s.root, 'plugins/azpr/uninstall.sh'), ['--config-dir', s.root, ...args]);
@@ -71,6 +93,16 @@ function backups(s, prefix) {
   return readdirSync(root).filter(name => name.startsWith(prefix)).map(name => join(root, name));
 }
 
+test('manual copy list, installer, and runtime catalogs cannot silently drift apart',()=>{
+  const readme=readFileSync(join(pkg,'README.md'),'utf8');
+  const section=readme.slice(readme.indexOf('### Manual copying without Git'));
+  const listed=/```text\n([\s\S]*?)\n```/.exec(section)[1].trim().split('\n');
+  assert.deepEqual(listed.sort(),[...requiredFiles].sort());
+  const runtime=readdirSync(join(pkg,'src')).filter(name=>/\.(mjs|js)$/.test(name)).map(name=>'src/'+name);
+  const operational=[...runtime,...PROMPTS.map(name=>'src/prompts/'+name+'.md'),...Object.keys(COMMANDS).map(name=>'commands/'+name+'.md')];
+  assert.deepEqual(operational.sort(),requiredFiles.filter(file=>file.startsWith('src/') || file.startsWith('commands/')).sort());
+});
+
 test('fresh installation preserves existing configuration and unrelated files', () => {
   const s = setup();
   ok(install(s));
@@ -87,6 +119,55 @@ test('fresh installation preserves existing configuration and unrelated files', 
   assert.ok(!existsSync(join(s.root, 'agents')));
   assert.deepEqual(readdirSync(join(s.root, 'commands')).sort(),
     ['my-command.md', 'pr-check.md', 'pr-comment.md', 'pr-deep.md', 'pr-review.md', 'pr-stop.md']);
+  for(const optional of ['README.md','docs/ARCHITECTURE.md','uninstall.sh']) assert.ok(existsSync(join(s.root,'plugins/azpr',optional)));
+});
+
+test('24-file manual package installs and loads every role without optional source files',async()=>{
+  const s=setup();minimalSource(s);assert.equal(requiredFiles.length,24);
+  ok(install(s,['--settings',profile(s)]));
+  for(const optional of ['README.md','docs','uninstall.sh','settings.schema.json']) assert.ok(!existsSync(join(s.root,'plugins/azpr',optional)));
+  assert.deepEqual(JSON.parse(readFileSync(join(s.root,'plugins/azpr/package.json'),'utf8')),{type:'module',private:true});
+  const agents=await installedAgents(s);
+  assert.equal(agents['azpr-review-functional'].model,'team/functional');
+  assert.equal(agents['azpr-deep-verifier'].model,'team/deep-verifier');
+  const before=readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8');
+  ok(install(s,['--replace']));assert.equal(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'),before);
+  original(s);clean(s);
+});
+test('minimal package replaces a full install and migrates legacy settings without optional files',async()=>{
+  const s=setup();ok(install(s,['--settings',profile(s)]));
+  const file=join(s.root,'plugins/azpr/settings.json'),old=JSON.parse(readFileSync(file,'utf8'));
+  old.version=1;old.models={freeA:'team/a',freeB:'team/b',deep:'team/deep',final:'team/final'};old.outputLanguage='zh-TW';
+  writeFileSync(file,JSON.stringify(old));minimalSource(s);
+  ok(install(s,['--replace']));
+  const settings=JSON.parse(readFileSync(file,'utf8'));
+  assert.equal(settings.version,2);assert.equal(settings.outputLanguage,'zh-TW');
+  assert.deepEqual(settings.models.deep,{functional:'team/a',risk:'team/deep',verifier:'team/final'});
+  const agents=await installedAgents(s);assert.equal(agents['azpr-deep-verifier'].model,'team/final');
+  assert.ok(!existsSync(join(s.root,'plugins/azpr/uninstall.sh')));
+  assert.ok(!existsSync(join(s.root,'azpr-backups')));original(s);clean(s);
+});
+test('every required runtime, prompt, command, or migration file is checked before replacement',()=>{
+  const s=setup();ok(install(s,['--settings',profile(s)]));minimalSource(s);
+  const paths=['plugins/azpr/settings.json','plugins/azpr/runtime.mjs','plugins/azpr.js','commands/pr-check.md'];
+  const before=paths.map(path=>readFileSync(join(s.root,path),'utf8'));
+  for(const file of requiredFiles.filter(file=>file!=='install.sh')) {
+    const path=join(s.source,file);renameSync(path,path+'.held');
+    try {
+      const result=install(s,['--replace']);bad(result);assert.ok(result.stderr.includes(file+' is missing or unreadable'));
+      assert.deepEqual(paths.map(path=>readFileSync(join(s.root,path),'utf8')),before);
+      clean(s);
+    } finally { renameSync(path+'.held',path); }
+  }
+  original(s);
+});
+test('optional copy failures warn but do not prevent a working install',async()=>{
+  const s=setup(),bin=join(s.temp,'optional-copy-bin');mkdirSync(bin);
+  writeFileSync(join(bin,'cp'),'#!/bin/sh\ncase "$*" in */README.md*|*/docs*|*/uninstall.sh*|*/settings.schema.json*) exit 71;; esac\nexec /bin/cp "$@"\n');
+  chmodSync(join(bin,'cp'),0o755);
+  const result=install(s,['--settings',profile(s)],{env:{...process.env,PATH:bin+':'+process.env.PATH}});ok(result);
+  assert.match(result.stderr,/WARNING: Could not copy optional/);
+  assert.equal((await installedAgents(s))['azpr-review-risk'].model,'team/risk');original(s);clean(s);
 });
 
 test('replacement migrates sibling layout with byte-identical current settings and no backup',()=>{

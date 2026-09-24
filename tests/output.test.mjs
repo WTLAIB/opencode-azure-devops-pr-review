@@ -1,10 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseJSONReport, stageFormat } from '../src/output.mjs';
+import { parseJSONReport, stageFormat, checkEnvelope, finalEnvelope } from '../src/output.mjs';
 import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
 const settings = { maxStageCharacters: 1000 };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
+const snapshot = { repository:'org/project/repo',prId:1,base:'a'.repeat(40),head:'b'.repeat(40),scope:'cumulative',files:['/main.js'] };
+const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.head,dispositions,report:'Evidence report'});
+
+test('source-check contracts reject malformed readiness before starting initial reviews',()=>{
+  assert.equal(checkEnvelope({status:'READY',snapshot,report:'Source available'}).snapshot.head,snapshot.head);
+  assert.equal(checkEnvelope({status:'NOT_READY',report:'No source access'}).status,'NOT_READY');
+  for(const value of [null,{}, {status:'READY',report:'No snapshot'}, {status:'READY',snapshot,report:''},
+    {status:'NOT_READY'}, {status:'READY',snapshot,report:'Source',sourceAccess:[]},
+    {status:'READY',snapshot,report:'Source',sourceAccess:{diff:[]}}, {status:'READY',snapshot,report:'Source',requirements:null}]) assert.throws(()=>checkEnvelope(value));
+});
+test('final merge graph rejects cycles instead of silently losing all findings',()=>{
+  const originals=['F-1','R-1','F-2'].map(id=>({id}));
+  for(const targets of [['R-1','F-1','F-1'],['R-1','F-2','F-1']]) {
+    const dispositions=originals.map((f,index)=>({...f,status:'MERGED',mergedInto:targets[index],reason:'Duplicate'}));
+    assert.throws(()=>finalEnvelope(final(dispositions),snapshot,originals),/cycle/);
+  }
+});
+test('merge chains must terminate at a real disposition and only merges may name a target',()=>{
+  const originals=['F-1','R-1','F-2'].map(id=>({id}));
+  for(const status of ['CONFIRMED','NEEDS_INFO','REJECTED']) {
+    const result=final([{id:'F-1',status,reason:'Evidence'}, {id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'Duplicate'}, {id:'F-2',status:'MERGED',mergedInto:'R-1',reason:'Duplicate'}]);
+    assert.equal(finalEnvelope(result,snapshot,originals).status,'COMPLETE');
+  }
+  assert.throws(()=>finalEnvelope(final([{id:'F-1',status:'CONFIRMED',mergedInto:'R-1',reason:'Evidence'}]),snapshot,[originals[0]]),/Only a MERGED/);
+  assert.throws(()=>finalEnvelope({...final([]),newFindings:null},snapshot,[]),/Invalid initial/);
+});
 
 test('structured results are read from info.structured without text and still reject errors', () => {
   assert.deepEqual(parseJSONReport({ info: { structured: { status: 'READY' } }, parts: [] }, settings), { status: 'READY' });

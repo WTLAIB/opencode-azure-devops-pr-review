@@ -21,7 +21,7 @@ Return:
 }
 ```
 
-Allowed dispositions are CONFIRMED, NEEDS_INFO, REJECTED, and MERGED. NEEDS_INFO names the missing information; REJECTED includes counterevidence; MERGED references another original ID. Copy the snapshot exactly.
+Allowed dispositions are CONFIRMED, NEEDS_INFO, REJECTED, and MERGED. NEEDS_INFO names the missing information; REJECTED includes counterevidence; MERGED references another original ID. A merge chain must end at a non-MERGED disposition; circular merges are invalid. Only MERGED entries may include mergedInto. Copy the snapshot exactly.
 
 The report field's headings, explanations, table descriptions, and recommendations must use the configured outputLanguage. The runtime supplies this language in your role instructions and input. Do not translate machine-readable fields, finding IDs, status values, code identifiers, paths, or quoted source. Structured dispositions and newFindings remain in English; localize their human-facing descriptions when including them in the report.
 

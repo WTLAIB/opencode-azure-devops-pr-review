@@ -4,7 +4,7 @@
 
 The local plugin controls a fixed workflow through the OpenCode-provided Session SDK. It does not use nested Task orchestration, a global review skill, an external model SDK, or a separate launcher.
 
-The source entry is `src/plugin.js`, which imports the runtime beside it. Installation creates a small `plugins/azpr.js` loader that re-exports `./azpr/plugin.js`. Runtime code, prompts, settings, and the uninstaller live under `plugins/azpr/`. The loader does not import through a parent directory. OpenCode 1.18.31 scans top-level plugin `.js`/`.ts` files; nested helpers are not separate entries.
+The source entry is `src/plugin.js`, which imports the runtime beside it. Installation creates a small `plugins/azpr.js` loader that re-exports `./azpr/plugin.js`. Runtime code, prompts, settings, generated module metadata, and any supplied optional uninstaller/docs/schema live under `plugins/azpr/`. The source `package.json` is not required; installation generates the minimal `type: module` declaration. The loader does not import through a parent directory. OpenCode 1.18.31 scans top-level plugin `.js`/`.ts` files; nested helpers are not separate entries.
 
 A source check runs first. Both normal and deep profiles then run two initial reviewers (functional and risk) concurrently in separate child sessions, each receiving the same request and snapshot but no other initial review. Their configured verifier starts only after both initial reviews complete successfully. Deep adds depth instructions and its own initial iteration budget, not a third initial reviewer or an automatic fallback.
 
@@ -27,11 +27,40 @@ Normal model, default agent, auxiliary model, permission, provider, MCP, and sub
 
 Configuration fingerprints prevent route changes during a run. Editing settings requires a restart. Grants are revoked after each stage and at completion or cancellation.
 
+## Run lifecycle
+
+Review and comment commands share one lifecycle owner inside the adapter. It
+checks SDK availability, acquires origin/PR locks, starts the deadline, initializes
+diagnostics, invokes the workflow, displays the result, revokes grants, and releases
+locks. Workflow callbacks own only review/comment decisions, not a second copy of
+timer and cleanup logic. Existing same-origin and comment-target serialization
+rules are unchanged; separate origins may run normal and deep reviews concurrently.
+
+UI toasts and setup logs are advisory, non-blocking requests with short deadlines.
+A missing UI response cannot strand an active run. Session-abort and last-message
+requests have five-second local deadlines even if an SDK ignores its signal.
+Concurrent cancellation and cleanup await the same abort operation. Unconfirmed
+aborts are disclosed; local grant revocation does not prove that remote work or
+billing stopped.
+
+Completed review records become available for comments only after the workflow
+finishes without cancellation. Cancelling during report display does not leave a
+publishable completed review. Cancelling or failing a refreshed comment preview
+invalidates both the previous and newly prepared plan. Publication attempts remain
+uncertain/reported records and are never automatically retried or rolled back.
+
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no failed stage is automatically rerun. Snapshot validation requires a repository, positive PR ID, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no failed stage is automatically rerun. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
 
-Initial finding IDs use `F-` and `R-` prefixes in both modes. Every original ID must have exactly one final disposition: `CONFIRMED`, `NEEDS_INFO`, `REJECTED`, or `MERGED`. Merged items reference another original ID. Confirmed final-verifier discoveries use `V-` IDs in both the report and the structured `newFindings` array. Without that structured entry they cannot be automatically published.
+Source checks, initial reviews, final verification, comment plans, and publication
+receipts all pass their local contract validator inside the stage boundary before
+the stage records a valid result. A malformed READY plan or DONE publication report
+therefore appears as a failed stage with its original response/session preserved,
+not a successful stage followed by an unexplained workflow failure. A valid but
+incomplete publication report remains incomplete and model-reported.
+
+Initial finding IDs use `F-` and `R-` prefixes in both modes. Every original ID must have exactly one final disposition: `CONFIRMED`, `NEEDS_INFO`, `REJECTED`, or `MERGED`. Only merged items may name a merge target, which must be another original ID. Chains must terminate at a non-merged disposition; cycles are rejected rather than hiding every finding as a duplicate. Confirmed final-verifier discoveries use `V-` IDs in both the report and the structured `newFindings` array. Without that structured entry they cannot be automatically published.
 
 The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
@@ -109,16 +138,25 @@ The runtime uses seven JavaScript files, including the tiny required entry point
 | Module | Ownership |
 | --- | --- |
 | `plugin.js` | OpenCode entry export. |
-| `runtime.mjs` | Session orchestration, grants, lifecycle hooks, and command dispatch. |
-| `config.mjs` | Settings validation, language instructions, and the single mode/role catalog for model slots, prompts, output kinds, budgets, and report order. |
+| `runtime.mjs` | Host I/O, grants/hooks, one shared run lifecycle, and the review/comment workflows. |
+| `config.mjs` | Settings validation, immutable mode/role/prompt catalogs, and pure compilation of private agent definitions. |
 | `output.mjs` | Literal request parsing, JSON output schemas/parsing, snapshots, and review evidence contracts. |
 | `comments.mjs` | Saved comment-plan contracts, markers, and publication-result bookkeeping. |
 | `diagnostics.mjs` | Opt-in private filesystem output; no workflow authority. |
 | `attribution.mjs` | Deterministic localized model/method disclosure from stage records. |
 
-The former tiny request-only module is folded into the contracts module. Pure contracts and formatting remain outside the stateful runtime; filesystem diagnostics and comment publication keep their own boundaries. Prompts remain editable Markdown because they are review policy, not JavaScript routing logic. A shared deep supplement is appended to both initial roles and the verifier only in deep mode.
+The former tiny request-only module is folded into the contracts module. Pure contracts and formatting remain outside the stateful runtime; filesystem diagnostics and comment publication keep their own boundaries. Prompts remain editable Markdown because they are review policy, not JavaScript routing logic. A shared deep supplement is appended to both initial roles and the verifier only in deep mode. Each required prompt is read once at startup, then the pure compiler constructs both profiles without mutating settings or the prompt inputs. Missing/empty policies fail before any agent is injected.
 
-The Python settings migrator is installer-only, not another runtime service. It converts the previous four slots to schema version 2 and recursively fills missing defaults. `models._help` is documentation and is excluded from normalized runtime settings and model instructions. Installation retains no persistent backup; temporary rollback files are removed on success. See [migration and update behavior](../README.md#update-disable-or-uninstall).
+The current size does not justify a separate framework, controller class per stage,
+or build pipeline. Keeping lifecycle/grants together makes revocation ordering
+auditable; keeping contracts and agent compilation pure makes them independently
+testable. This preserves seven JavaScript modules and the 24-file manual package.
+The shell installer deliberately keeps a plain file list so it needs no Node
+runtime. A contract test compares the operational catalogs, actual source files,
+and documented manual package, while installer tests check every required file;
+drift fails development tests instead of adding another required manifest file.
+
+The Python settings migrator is installer-only, not another runtime service. It converts the previous four slots to schema version 2 and recursively fills missing defaults. `models._help` is documentation and is excluded from normalized runtime settings and model instructions. Runtime defaults apply to omitted optional fields, not explicit invalid values such as null; the installer preserves such values for the user to correct. The optional JSON schema supplies editor hints; runtime validation does not depend on that file. Installation retains no persistent backup; temporary rollback files are removed on success. See [migration and update behavior](../README.md#update-disable-or-uninstall).
 
 ## Interface references
 

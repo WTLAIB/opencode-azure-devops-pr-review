@@ -11,11 +11,27 @@ npm run check
 
 Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, two independent initial sessions in both modes, incomplete-profile refusal, snapshot consistency, complete finding dispositions, stale heads, cancellation, and display-only reports. Concurrent normal/deep tests verify static model bindings; comment tests verify the cached originating profile survives later reviews in another mode. Guidance-only settings never reach model instructions.
 
+Lifecycle regressions cover unresponsive advisory UI/log requests, SDK abort calls
+that ignore cancellation signals, abort API errors, lock release, and cancellation
+during final-report or preview display. Cancelled reviews/previews cannot authorize
+publication. Contract tests reject wrong-PR readiness, merge cycles, inconsistent
+merge targets, explicit null settings, and empty prompts. Invalid source/planner/
+publisher envelopes must be marked FAILED in stage diagnostics, not just at the
+outer workflow. These are local orchestration checks, not remote cancellation or
+source-authenticity guarantees.
+
 Comment tests cover saved-plan validation, explicit publishing, arbitrary MCP tool names/arguments, host-denial simulations, confirmed-only eligibility, caps, whole-batch uncertainty bookkeeping, cancellation, and honest model-reported publication labels. They do not assert a programmatic read-only MCP boundary or parse provider-specific responses. No test posts to Azure.
 
 Language tests cover the default, language-tag validation/canonicalization, final-only localization in both review modes, propagation to comment preview/publishing, unchanged saved comment bodies, restart requirements, and settings preservation across installer replacement. They check routing and instructions with mocks, not real-model translation quality.
 
 Installer tests execute the real shell scripts in disposable directories. They cover fresh installs, the actual installed plugin import, no-backup replacement, settings preservation, rollback after an injected failure, emergency file retention if restoration also fails, conflicts, symlinks, locks, and archival uninstall. Existing historical backups remain untouched.
+
+Manual-package tests install and import the plugin using only the 24 required
+files, without docs, README, source package metadata, editor schema, or uninstaller.
+They also cover replacement/migration from a full install, generated module
+metadata, optional-copy failure warnings, and early rejection of every missing
+required runtime, prompt, command, or migration file without replacing old files.
+The manual list is also checked against the operational catalogs and source files.
 
 Settings migration tests cover all four old model slots mapped to two three-role profiles, installed agent loading after conversion, nested missing defaults, explicit partial profiles, legacy directory migration, preserved non-model false/empty/null/array/custom values, repeated-install idempotence, private file permissions, and rejection of malformed/duplicate-key/non-object JSON, unsupported versions, or ambiguous mixed layouts before replacement. Python 3 standard library is required for these installer tests and for installation, not for plugin execution.
 

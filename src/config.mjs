@@ -1,6 +1,7 @@
 // One catalog owns mode, role, model slot, prompt, output kind, and stage order.
-export const MODES = ['review', 'deep'];
-export const COMMANDS = { 'pr-check': 'check', 'pr-review': 'review', 'pr-deep': 'deep', 'pr-stop': 'stop', 'pr-comment': 'comment' };
+export const MODES = Object.freeze(['review', 'deep']);
+export const COMMANDS = Object.freeze({ 'pr-check': 'check', 'pr-review': 'review', 'pr-deep': 'deep', 'pr-stop': 'stop', 'pr-comment': 'comment' });
+const MODEL_SLOTS = ['functional', 'risk', 'verifier'];
 const stages = {
   check: { slot: 'risk', prompt: 'check', step: 'check', format: 'check', order: 0, label: 'Source check' },
   functional: { slot: 'functional', prompt: 'functional', step: 'initial', format: 'initial', prefix: 'F', order: 1, label: 'Initial F' },
@@ -10,9 +11,12 @@ const stages = {
   'comment-publish': { slot: 'risk', prompt: 'comment-publish', step: 'final', format: 'comment-publish', comment: true, label: 'Publish comments' },
 };
 export const roleFor = (mode, stage) => `azpr-${mode}-${stage}`;
-export const ROLES = Object.fromEntries(MODES.flatMap(mode => Object.entries(stages).map(([stage, spec]) =>
-  [roleFor(mode, stage), Object.freeze({ ...spec, mode, stage, step: mode === 'deep' && spec.step === 'initial' ? 'deep' : spec.step })])));
+export const ROLES = Object.freeze(Object.fromEntries(MODES.flatMap(mode => Object.entries(stages).map(([stage, spec]) =>
+  [roleFor(mode, stage), Object.freeze({ ...spec, mode, stage, step: mode === 'deep' && spec.step === 'initial' ? 'deep' : spec.step })]))));
+export const PROMPTS = Object.freeze([...new Set(['common', 'comment-policy', 'deep', ...Object.values(stages).map(spec => spec.prompt)])]);
+export const initialRoles = mode => Object.entries(ROLES).filter(([, spec]) => spec.mode === mode && spec.format === 'initial').map(([role]) => role);
 export const commentRole = role => ROLES[role]?.comment === true;
+const withDefault = (value, fallback) => value === undefined ? fallback : value;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 function keys(value, allowed, at) {
   if (!isObject(value)) throw new Error(`${at} must be a JSON object.`);
@@ -41,26 +45,27 @@ export function languagePrompt(role, language) {
 export function validateSettings(raw) {
   keys(raw, ['$schema', 'version', 'enabled', 'models', 'azure', 'steps', 'comments', 'debug', 'structuredOutput', 'outputLanguage', 'auxiliaryModels', 'returnReport', 'runTimeoutSeconds', 'maxStageCharacters'], 'settings');
   if (raw.version !== 2) throw new Error('settings.version must be 2. Run install.sh --replace to migrate the old model settings.');
-  if (raw.enabled != null && typeof raw.enabled !== 'boolean') throw new Error('enabled must be boolean.');
+  if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') throw new Error('enabled must be boolean.');
+  if (raw.$schema !== undefined && typeof raw.$schema !== 'string') throw new Error('$schema must be a string.');
   keys(raw.models, ['_help', 'review', 'deep'], 'models');
   if (raw.models._help !== undefined) {
-    keys(raw.models._help, ['functional', 'risk', 'verifier'], 'models._help');
+    keys(raw.models._help, MODEL_SLOTS, 'models._help');
     if (Object.values(raw.models._help).some(value => typeof value !== 'string')) throw new Error('models._help values must be documentation strings.');
   }
   const models = {};
   for (const mode of MODES) {
     const group = raw.models[mode] === undefined && mode === 'deep' ? {} : raw.models[mode];
-    keys(group, ['functional', 'risk', 'verifier'], `models.${mode}`);
-    models[mode] = Object.fromEntries(['functional', 'risk', 'verifier'].map(slot =>
+    keys(group, MODEL_SLOTS, `models.${mode}`);
+    models[mode] = Object.fromEntries(MODEL_SLOTS.map(slot =>
       [slot, model(group[slot] === undefined && mode === 'deep' ? '' : group[slot], `models.${mode}.${slot}`, mode === 'deep')]));
   }
   keys(raw.steps, ['check', 'initial', 'deep', 'final'], 'steps');
   for (const key of ['check', 'initial', 'deep', 'final']) {
     if (!Number.isInteger(raw.steps[key]) || raw.steps[key] < 1 || raw.steps[key] > 500) throw new Error(`steps.${key} must be an integer from 1 to 500 (iterations, not money).`);
   }
-  const auxiliaryModels = raw.auxiliaryModels ?? 'preserve';
+  const auxiliaryModels = withDefault(raw.auxiliaryModels, 'preserve');
   if (auxiliaryModels !== 'preserve') throw new Error('This plugin never changes auxiliary models. Set auxiliaryModels to preserve.');
-  const returnReport = raw.returnReport ?? 'receipt';
+  const returnReport = withDefault(raw.returnReport, 'receipt');
   if (!['receipt', 'full'].includes(returnReport)) throw new Error('returnReport must be receipt or full.');
   const outputLanguage = languageTag(raw.outputLanguage === undefined ? 'en' : raw.outputLanguage);
   const structuredOutput = raw.structuredOutput === undefined ? true : raw.structuredOutput;
@@ -69,14 +74,28 @@ export function validateSettings(raw) {
   keys(debug, ['enabled', 'directory'], 'debug');
   if (typeof debug.enabled !== 'boolean' || (debug.directory !== undefined &&
       (typeof debug.directory !== 'string' || /[\0\r\n]/.test(debug.directory) || debug.directory.startsWith('~')))) throw new Error('debug requires enabled (boolean) and an optional directory path; use an absolute path or a project-relative path, not ~.');
-  const runTimeoutSeconds = raw.runTimeoutSeconds ?? 1200;
+  const runTimeoutSeconds = withDefault(raw.runTimeoutSeconds, 1200);
   if (!Number.isInteger(runTimeoutSeconds) || runTimeoutSeconds < 10 || runTimeoutSeconds > 7200) throw new Error('runTimeoutSeconds must be 10..7200.');
-  const maxStageCharacters = raw.maxStageCharacters ?? 250000;
+  const maxStageCharacters = withDefault(raw.maxStageCharacters, 250000);
   if (!Number.isInteger(maxStageCharacters) || maxStageCharacters < 1000 || maxStageCharacters > 1000000) throw new Error('maxStageCharacters must be 1000..1000000.');
-  const comments = raw.comments ?? { enabled: false, maxComments: 5 };
+  const comments = withDefault(raw.comments, { enabled: false, maxComments: 5 });
   keys(comments, ['enabled', 'maxComments'], 'comments');
   if (typeof comments.enabled !== 'boolean' || !Number.isInteger(comments.maxComments) || comments.maxComments < 1 || comments.maxComments > 10) throw new Error('comments requires enabled (boolean) and maxComments (1..10).');
   return { models, steps: { ...raw.steps }, comments: { ...comments }, structuredOutput, debug: { enabled: debug.enabled, directory: debug.directory ?? '' },
     enabled: raw.enabled !== false, outputLanguage, returnReport, runTimeoutSeconds, maxStageCharacters, auxiliaryModels,
     deepReady: Object.values(models.deep).every(Boolean) };
+}
+
+/** Pure compilation: file I/O and OpenCode config mutation stay in the adapter. */
+export function buildAgents(settings, prompts) {
+  for (const name of PROMPTS) if (typeof prompts[name] !== 'string' || !prompts[name].trim()) throw new Error(`Missing or empty prompt: ${name}.md`);
+  return Object.fromEntries(Object.entries(ROLES).map(([role, spec]) => [role, {
+    description: 'Private command-scoped reviewer; not callable with Task or @mention.',
+    mode: 'primary', hidden: true, model: settings.models[spec.mode][spec.slot] || 'azpr-unconfigured/setup-required',
+    ...((spec.mode === 'deep' && !settings.deepReady) || (spec.stage === 'comment-publish' && !settings.comments.enabled) ? { disable: true } : {}),
+    prompt: (spec.comment ? prompts['comment-policy'] : prompts.common) + '\n\n' + prompts[spec.prompt] + languagePrompt(role, settings.outputLanguage) +
+      (spec.mode === 'deep' && ['initial', 'final'].includes(spec.format) ? '\n\n' + prompts.deep : '') +
+      (settings.structuredOutput ? '\n\n# Output transport\nAfter completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. This overrides instructions to print a JSON text/code block. The output schema describes the envelope, not an MCP tool restriction.' : ''),
+    steps: settings.steps[spec.step], permission: { task: 'deny' },
+  }]));
 }

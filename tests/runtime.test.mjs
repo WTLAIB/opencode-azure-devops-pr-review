@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAzurePrReviewPlugin } from '../src/runtime.mjs';
-import { ROLES, validateSettings, roleFor } from '../src/config.mjs';
+import { ROLES, PROMPTS, COMMANDS, MODES, buildAgents, validateSettings, roleFor } from '../src/config.mjs';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SNAP = { repository:'org/proj/repo',prId:123,base:'a'.repeat(40),head:'b'.repeat(40),scope:'cumulative',files:['/src/Main.java'] };
 const jclone = x => JSON.parse(JSON.stringify(x));
@@ -329,6 +329,26 @@ test('version two settings reject legacy, unknown, null, and malformed model gro
   settings.models.deep={functional:'fixture/a'};
   assert.equal(validateSettings(settings).deepReady,false);
 });
+test('only missing optional settings receive defaults; explicit nulls fail closed',async t=>{
+  const f=await fixture(t);
+  for(const key of ['enabled','$schema','auxiliaryModels','returnReport','runTimeoutSeconds','maxStageCharacters','comments','debug','structuredOutput','outputLanguage']) assert.throws(()=>validateSettings({...f.settings,[key]:null}),undefined,key);
+  const minimal=jclone(f.settings);
+  for(const key of ['enabled','auxiliaryModels','returnReport','runTimeoutSeconds','maxStageCharacters','comments','debug','structuredOutput','outputLanguage']) delete minimal[key];
+  const defaults=validateSettings(minimal);
+  assert.equal(defaults.enabled,true);assert.equal(defaults.runTimeoutSeconds,1200);assert.equal(defaults.returnReport,'receipt');
+  const invalid=await fixture(t,{settings:s=>s.enabled=null});
+  assert.deepEqual(invalid.cfg,invalid.baseline);await assert.rejects(invalid.command(),/enabled/);assert.equal(invalid.calls.length,0);
+});
+test('agent compilation is pure, catalogs are immutable, and empty policy files are rejected',async t=>{
+  const f=await fixture(t),settings=validateSettings(f.settings);
+  const prompts=Object.fromEntries(await Promise.all(PROMPTS.map(async name=>[name,await readFile(join(f.dir,'prompts',name+'.md'),'utf8')])));
+  const before=jclone({settings,prompts});
+  const first=buildAgents(settings,prompts),second=buildAgents(settings,prompts);
+  assert.deepEqual({settings,prompts},before);assert.deepEqual(first,second);
+  first['azpr-review-risk'].permission.task='allow';assert.equal(second['azpr-review-risk'].permission.task,'deny');
+  for(const catalog of [ROLES,PROMPTS,COMMANDS,MODES,...Object.values(ROLES)]) assert.ok(Object.isFrozen(catalog));
+  for(const name of PROMPTS) assert.throws(()=>buildAgents(settings,{...prompts,[name]:'\n '}),/Missing or empty prompt/);
+});
 
 for (const name of ['pr-check','pr-review','pr-deep']) test(`${name} carries literal supplementary requirements to every stage`,async t=>{
   const context='Repository requirement: preserve API compatibility.\nCheck "null" handling; literal @../docs !`not-a-command` $HOME.\n';
@@ -457,6 +477,11 @@ test('snapshot mismatch prevents final stage',async t=>{
 test('final missing original finding is not accepted as COMPLETE',async t=>{
   const f=await fixture(t,{result:({result,role})=>role.endsWith('-verifier')?{...result,dispositions:[]}:result});const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/omitted/);
 });
+test('cyclic merges cannot complete a review or authorize comments',async t=>{
+  const f=await fixture(t,{result:({role,result})=>ROLES[role].stage==='verifier'?{...result,dispositions:result.dispositions.map(d=>({...d,status:'MERGED',mergedInto:d.id==='F-1'?'R-1':'F-1'}))}:result});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/cycle/);assert.match(out,/azpr-review-verifier: FAILED/);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
 test('changed current PR head yields STALE and does not rerun',async t=>{
   const f=await fixture(t,{result:({result,role})=>role.endsWith('-verifier')?{...result,currentHead:'c'.repeat(40)}:result});assert.match(await f.command('pr-deep'),/] STALE/);assert.equal(f.prompts().length,4);
 });
@@ -480,6 +505,53 @@ test('global asks, denies and nested patterns are left intact for the host to en
 });
 test('SDK create failure cannot prompt a model or grant a reviewer',async t=>{
   const f=await fixture(t,{createError:true});assert.match(await f.command(),/INCOMPLETE/);assert.equal(f.prompts().length,0);
+});
+test('unresponsive advisory logging and toasts do not block workflows or retain locks',{timeout:2000},async t=>{
+  const never=()=>new Promise(()=>{});
+  const f=await fixture(t,{settings:s=>s.azure={},client:client=>{client.app.log=never;client.tui.showToast=never;}});
+  assert.match(await f.command(),/] COMPLETE/);
+  assert.match(await f.command('pr-check'),/] READY/);
+});
+test('invalid source readiness is a failed stage with usable session diagnostics',async t=>{
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},result:({role,result})=>ROLES[role].stage==='check'?{status:'READY',report:'Missing snapshot'}:result});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/azpr-review-check: FAILED/);assert.match(out,/opencode export/);
+  assert.equal(f.prompts().length,1);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  assert.equal(JSON.parse(await readFile(join(dir,'01-azpr-review-check.result.json'),'utf8')).status,'FAILED');
+});
+test('readiness for a different PR cannot start reviewers or be reported as READY',async t=>{
+  const f=await fixture(t,{result:({role,result})=>ROLES[role].stage==='check'?{...result,snapshot:{...result.snapshot,prId:456}}:result});
+  for(const command of ['pr-check','pr-review','pr-deep']) {
+    const before=f.prompts().length,out=await f.command(command);
+    assert.match(out,/] INCOMPLETE/);assert.match(out,/PR ID does not match/);assert.equal(f.prompts().length,before+1);
+  }
+});
+test('cancellation has a local deadline even if the SDK abort ignores its signal',{timeout:3000},async t=>{
+  let started,release,aborting;const ready=new Promise(r=>started=r),wait=new Promise(r=>release=r),abortReady=new Promise(r=>aborting=r);
+  const f=await fixture(t,{duringPrompt:async()=>{started();await wait;},client:(client,calls)=>{
+    client.session.abort=o=>{calls.push({kind:'abort',...o});aborting();return new Promise(()=>{});};
+  }});
+  t.mock.timers.enable({apis:['setTimeout']});
+  const running=f.command('pr-check');await ready;
+  const stopped=f.command('pr-stop','');await abortReady;
+  t.mock.timers.tick(5001);
+  assert.match(await stopped,/did not confirm session abort/);
+  const out=await running;assert.match(out,/] CANCELLED/);assert.match(out,/Cancellation warning/);
+  release();
+  assert.match(await f.command('pr-stop',''),/No active review/);
+});
+test('abort API errors are reported without hiding failure or retaining the run lock',async t=>{
+  const opts={invalidJSON:true,client:client=>{client.session.abort=async()=>({error:{message:'No abort acknowledgement'}});}},f=await fixture(t,opts);
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/did not confirm session abort/);
+  opts.invalidJSON=false;assert.match(await f.command('pr-check'),/] READY/);
+});
+test('cancellation during final display cannot cache a publishable completed review',async t=>{
+  let started,release;const ready=new Promise(r=>started=r),wait=new Promise(r=>release=r);
+  const opts={duringDisplay:async()=>{started();await wait;}},f=await fixture(t,opts);
+  const running=f.command();await ready;await f.command('pr-stop','');
+  const out=await running;release();assert.match(out,/] CANCELLED/);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+  opts.duringDisplay=undefined;assert.match(await f.command(),/] COMPLETE/);
 });
 test('model mappings can be replaced without prompt or workflow edits',async t=>{
   const f=await fixture(t,{settings:s=>s.models.review.functional='new-provider/new-model-v99'});assert.equal(f.cfg.agent['azpr-review-functional'].model,'new-provider/new-model-v99');
@@ -521,6 +593,35 @@ test('failed stage revokes its grant and requests abort without touching the dev
 const reviewId = receipt => /\[AZPR ([a-f0-9]{8})\]/.exec(receipt)[1];
 const enableComments = s => { s.comments.enabled = true; };
 const writes = f => f.calls.filter(c => c.kind === 'tool' && c.tool==='custom_mcp_annotate');
+
+test('invalid comment plans fail their stage, clear old previews, and release locks',async t=>{
+  const opts={settings:s=>{enableComments(s);s.debug={enabled:true,directory:'.azpr-debug'};}},f=await fixture(t,opts),id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  opts.result=({role,result})=>ROLES[role].stage==='comment-plan'?{...result,comments:result.comments.map(c=>({...c,severity:'low'}))}:result;
+  const out=await f.command('pr-comment',id);assert.match(out,/] INCOMPLETE/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  assert.equal(JSON.parse(await readFile(join(dir,'01-azpr-review-comment-plan.result.json'),'utf8')).status,'FAILED');
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/Preview first/);
+  opts.result=undefined;assert.match(await f.command('pr-comment',id),/] PREVIEW/);assert.equal(writes(f).length,0);
+});
+test('invalid publisher reports fail the stage and retain uncertain attempts without retry',async t=>{
+  const f=await fixture(t,{settings:s=>{enableComments(s);s.debug={enabled:true,directory:'.azpr-debug'};},result:({role,result})=>ROLES[role].stage==='comment-publish'?{status:'DONE',posted:[{findingId:'UNKNOWN-1',threadId:1}]}:result});
+  const id=reviewId(await f.command());await f.command('pr-comment',id);
+  const out=await f.command('pr-comment',id+' --publish'),dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/F-1: UNKNOWN/);
+  assert.equal(JSON.parse(await readFile(join(dir,'01-azpr-review-comment-publish.result.json'),'utf8')).status,'FAILED');
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/publication attempt/);
+});
+test('cancellation during preview display invalidates both the old and new publication plan',async t=>{
+  const opts={settings:enableComments},f=await fixture(t,opts),id=reviewId(await f.command());
+  await f.command('pr-comment',id);
+  let started,release;const ready=new Promise(r=>started=r),wait=new Promise(r=>release=r);
+  opts.duringDisplay=async()=>{started();await wait;};
+  const running=f.command('pr-comment',id);await ready;await f.command('pr-stop','');
+  assert.match(await running,/] CANCELLED/);release();
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/Preview first/);
+  opts.duringDisplay=undefined;assert.match(await f.command('pr-comment',id),/] PREVIEW/);assert.equal(writes(f).length,0);
+});
 
 test('comment preview is visible, read-only, and retains the originating deep risk model', async t => {
   const f=await fixture(t), id=reviewId(await f.command('pr-deep'));

@@ -89,8 +89,17 @@ export function validateSnapshot(s) {
   return { repository: s.repository, prId: s.prId, base: s.base.toLowerCase(), head: s.head.toLowerCase(), scope: s.scope, files: [...s.files] };
 }
 function snapshotKey(s) { return JSON.stringify(validateSnapshot(s)); }
+export function checkEnvelope(result, prUrl) {
+  if (!isObject(result) || !['READY', 'NOT_READY'].includes(result.status) || !text(result.report)) throw new Error('Invalid source-check envelope: a status and report are required.');
+  if (result.requirements !== undefined && typeof result.requirements !== 'string') throw new Error('Source-check requirements must be text.');
+  if (result.sourceAccess !== undefined && (!isObject(result.sourceAccess) || Object.values(result.sourceAccess).some(value => typeof value !== 'string'))) throw new Error('Source-check sourceAccess must describe capabilities as text fields.');
+  if (result.status !== 'READY') return result;
+  const snapshot = validateSnapshot(result.snapshot);
+  if (prUrl && String(snapshot.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Source-check snapshot PR ID does not match the requested URL.');
+  return { ...result, snapshot };
+}
 export function initialEnvelope(result, expected, prefix) {
-  if (!['COMPLETE', 'PARTIAL'].includes(result.status) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
+  if (!isObject(result) || !['COMPLETE', 'PARTIAL'].includes(result.status) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
   const ids = new Set();
   for (const finding of result.findings) {
@@ -101,7 +110,7 @@ export function initialEnvelope(result, expected, prefix) {
   return result;
 }
 export function finalEnvelope(result, expected, originals) {
-  if (!['COMPLETE', 'INCOMPLETE', 'STALE'].includes(result.status) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
+  if (!isObject(result) || !['COMPLETE', 'INCOMPLETE', 'STALE'].includes(result.status) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Final reviewer used a different snapshot.');
   const ids = new Set(originals.map(f => f.id));
   const accounted = new Set();
@@ -110,10 +119,21 @@ export function finalEnvelope(result, expected, originals) {
       throw new Error('Final review has an invalid/missing disposition or silently changed a finding ID.');
     }
     if (item.status === 'MERGED' && (!ids.has(item.mergedInto) || item.mergedInto === item.id)) throw new Error('Merged finding must reference another original finding.');
+    if (item.status !== 'MERGED' && item.mergedInto !== undefined) throw new Error('Only a MERGED finding may contain mergedInto.');
     accounted.add(item.id);
   }
   if (accounted.size !== ids.size) throw new Error('Final reviewer omitted one or more original findings.');
-  if (result.newFindings != null) initialEnvelope({ status: 'COMPLETE', snapshot: result.snapshot, findings: result.newFindings, report: result.report }, expected, 'V');
+  const dispositions = new Map(result.dispositions.map(item => [item.id, item]));
+  const resolved = new Set();
+  for (let item of result.dispositions) {
+    const path = new Set();
+    while (item.status === 'MERGED' && !resolved.has(item.id)) {
+      if (path.has(item.id)) throw new Error('Merged findings form a cycle with no final disposition.');
+      path.add(item.id); item = dispositions.get(item.mergedInto);
+    }
+    for (const id of path) resolved.add(id);
+  }
+  if (result.newFindings !== undefined) initialEnvelope({ status: 'COMPLETE', snapshot: result.snapshot, findings: result.newFindings, report: result.report }, expected, 'V');
   if (!sha(result.currentHead)) {
     if (result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
   } else if (result.currentHead.toLowerCase() !== expected.head) {

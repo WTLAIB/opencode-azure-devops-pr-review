@@ -93,6 +93,19 @@ initial review, risk initial review, and final verification. `MODE` is `review`
 or `deep`; the two initial file numbers may vary because the sessions start
 concurrently. A comment command uses the originating review's profile.
 
+Stage results are written after local contract validation. A model can claim
+READY/DONE in its visible response while the stage result is FAILED because the
+snapshot, plan, or publication report is invalid. Inspect both files. No retry is
+started to repair the envelope.
+
+`abortUnconfirmed: true` in `result.json` (also shown as a receipt warning) means
+the host did not acknowledge a session-abort request within the local deadline,
+or returned an error/unsuccessful result. Grants are revoked locally, but remote
+work may still be running or billed. Inspect OpenCode rather than blindly retrying.
+Cancelled report displays are not cached as completed reviews; cancelled preview
+displays invalidate the saved plan. Advisory notification failures do not stop a
+review and do not establish whether a model request succeeded.
+
 Response text and structured-output previews are limited to
 `maxStageCharacters`; truncation is explicitly flagged and the full host session
 remains the source for inspection. A process crash can leave an unfinished run
