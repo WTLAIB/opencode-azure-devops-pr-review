@@ -5,7 +5,13 @@ const array = items => ({ type: 'array', items });
 const object = (properties, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });
 const status = (...values) => ({ type: 'string', enum: values });
 const snapshot = object({ repository: string, prId: { type: 'integer' }, base: string, head: string, scope: { const: 'cumulative', type: 'string' }, files: array(string) });
-const finding = object({ id: string, summary: string, evidence: string, location: string, severity: status('high', 'medium', 'low'), suggestion: string }, ['id', 'summary', 'evidence', 'location']);
+const finding = object({ id: string, summary: string, evidence: string,
+  counterevidence: { ...string, description: 'Source-based safeguards or alternative explanations checked, their effect on the claim, and any unavailable evidence; not private reasoning.' },
+  location: string, severity: status('high', 'medium', 'low'), suggestion: string });
+const coverage = object({
+  files: { ...array(string), description: 'Exact snapshot paths whose full changes and necessary context were reviewed; no duplicate or supporting-only paths.' },
+  gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
+});
 
 export function stageFormat(role) {
   const kind = ROLES[role]?.format;
@@ -18,7 +24,9 @@ export function stageFormat(role) {
   else if (kind === 'final') schema = object({
     status: status('COMPLETE', 'INCOMPLETE', 'STALE'), snapshot,
     currentHead: { type: ['string', 'null'] },
-    dispositions: array(object({ id: string, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string }, ['id', 'status', 'reason'])),
+    dispositions: array(object({ id: string, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
+      verifiedFinding: { ...finding, description: 'Required for CONFIRMED: the complete corrected finding under this same ID. Omit for every other disposition.' },
+    }, ['id', 'status', 'reason'])),
     newFindings: array(finding), report: string,
   }, ['status', 'snapshot', 'currentHead', 'dispositions', 'report']);
   else if (kind === 'comment-plan') schema = object({
@@ -29,7 +37,7 @@ export function stageFormat(role) {
   else if (kind === 'comment-publish') schema = object({
     status: status('DONE', 'INCOMPLETE'), posted: array(object({ findingId: string, threadId: { type: ['string', 'integer'] } })),
   });
-  else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, findings: array(finding), report: string });
+  else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(finding), report: string });
   return { type: 'json_schema', schema, retryCount: 0 };
 }
 
@@ -98,15 +106,26 @@ export function checkEnvelope(result, prUrl) {
   if (prUrl && String(snapshot.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Source-check snapshot PR ID does not match the requested URL.');
   return { ...result, snapshot };
 }
+function validateFindings(findings, prefix) {
+  if (!Array.isArray(findings)) throw new Error('Invalid findings array.');
+  const ids = new Set();
+  for (const finding of findings) {
+    if (!isObject(finding) || typeof finding.id !== 'string' || !new RegExp(`^${prefix}-[1-9][0-9]*$`).test(finding.id) ||
+        ids.has(finding.id) || !text(finding.summary) || !text(finding.evidence) || !text(finding.location)) throw new Error('Invalid/duplicate finding ID or missing evidence/location.');
+    if (!text(finding.counterevidence) || !text(finding.suggestion) || !['high', 'medium', 'low'].includes(finding.severity)) throw new Error('Every finding requires counterevidence checks, severity, and a correction/verification suggestion.');
+    ids.add(finding.id);
+  }
+}
 export function initialEnvelope(result, expected, prefix) {
   if (!isObject(result) || !['COMPLETE', 'PARTIAL'].includes(result.status) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
-  const ids = new Set();
-  for (const finding of result.findings) {
-    if (!isObject(finding) || typeof finding.id !== 'string' || !new RegExp(`^${prefix}-[1-9][0-9]*$`).test(finding.id) ||
-        ids.has(finding.id) || !text(finding.summary) || !text(finding.evidence) || !text(finding.location)) throw new Error('Invalid/duplicate finding ID or missing evidence/location.');
-    ids.add(finding.id);
-  }
+  const coverage = result.coverage;
+  if (!isObject(coverage) || !Array.isArray(coverage.files) || !Array.isArray(coverage.gaps) ||
+      !coverage.files.every(file => text(file) && expected.files.includes(file)) ||
+      new Set(coverage.files).size !== coverage.files.length || !coverage.gaps.every(text)) throw new Error('Invalid coverage ledger: list unique reviewed snapshot files and concrete gaps.');
+  if (result.status === 'COMPLETE' && (coverage.files.length !== expected.files.length || coverage.gaps.length)) throw new Error('COMPLETE requires coverage of every snapshot file with no review gaps.');
+  if (result.status === 'PARTIAL' && !coverage.gaps.length) throw new Error('PARTIAL requires an explanation of the review gaps.');
+  validateFindings(result.findings, prefix);
   return result;
 }
 export function finalEnvelope(result, expected, originals) {
@@ -120,6 +139,10 @@ export function finalEnvelope(result, expected, originals) {
     }
     if (item.status === 'MERGED' && (!ids.has(item.mergedInto) || item.mergedInto === item.id)) throw new Error('Merged finding must reference another original finding.');
     if (item.status !== 'MERGED' && item.mergedInto !== undefined) throw new Error('Only a MERGED finding may contain mergedInto.');
+    if (item.status === 'CONFIRMED') {
+      if (!isObject(item.verifiedFinding) || item.verifiedFinding.id !== item.id) throw new Error('CONFIRMED requires the verifier\'s corrected finding with the same original ID.');
+      validateFindings([item.verifiedFinding], '[FR]');
+    } else if (item.verifiedFinding !== undefined) throw new Error('Only a CONFIRMED disposition may contain verifiedFinding.');
     accounted.add(item.id);
   }
   if (accounted.size !== ids.size) throw new Error('Final reviewer omitted one or more original findings.');
@@ -133,7 +156,7 @@ export function finalEnvelope(result, expected, originals) {
     }
     for (const id of path) resolved.add(id);
   }
-  if (result.newFindings !== undefined) initialEnvelope({ status: 'COMPLETE', snapshot: result.snapshot, findings: result.newFindings, report: result.report }, expected, 'V');
+  if (result.newFindings !== undefined) validateFindings(result.newFindings, 'V');
   if (!sha(result.currentHead)) {
     if (result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
   } else if (result.currentHead.toLowerCase() !== expected.head) {

@@ -149,6 +149,21 @@ Every role needs reliable tool use and structured output. Use services approved 
 
 Both modes run a source check, **two independent initial reviews**, and one final verification stage. Initial reviewers run concurrently on the full cumulative PR without seeing each other's results. They use `F-` and `R-` finding IDs. The final verifier receives both reports and must check the source again, accounting for every original finding as confirmed, requiring information, rejected, or merged. It does not decide by majority vote.
 
+Quality takes priority over speed: no file sampling, confidence-score cutoff,
+automatic skip for small/draft/already-commented PRs, or removal of final
+verification when the initial reviewers find nothing. Each initial review must
+return a coverage ledger for all snapshot files and explicitly disclose gaps.
+Each finding includes source evidence, checks for counterevidence/safeguards,
+impact severity, and a correction/verification suggestion. Relevant repository
+rules must be scoped and cited; they cannot override the review's instructions.
+
+The verifier returns a corrected `verifiedFinding` for every confirmed original
+ID. Comment planning uses that version, not the initial claim, and cannot change
+its severity or promote low-severity findings. The runtime validates the ledger
+and evidence fields in both output transports; it cannot prove that a model
+actually read the files or that its conclusions are true. See the
+[evidence contract](docs/ARCHITECTURE.md#evidence-contract).
+
 Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.check` (24), `steps.final` (100), and the run timeout. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
 
 A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. It uses that mode's `risk` model; standalone `/pr-check` uses `models.review.risk`. A snapshot whose PR ID differs from the URL is rejected. Incomplete initial reviews prevent final verification, and circular finding merges cannot produce a complete report. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns the review.
@@ -243,6 +258,11 @@ sh ~/.config/opencode/plugins/azpr/uninstall.sh --apply
 ```
 
 The installer does not edit your main OpenCode configuration, providers, MCP connections, or credentials. Uninstall remains an explicit archival operation under `azpr-backups/`; the no-backup behavior applies to installation/replacement. Restart OpenCode after updates or removal.
+
+Install runtime files and prompts from the same revision. Review envelopes now
+require coverage, counterevidence, and corrected confirmed findings; older custom
+prompts that omit them will fail validation. No new setting, model slot, or
+mandatory installation file is needed. Existing private settings are preserved.
 
 ## Repository layout
 

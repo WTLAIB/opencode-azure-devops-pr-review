@@ -98,6 +98,23 @@ READY/DONE in its visible response while the stage result is FAILED because the
 snapshot, plan, or publication report is invalid. Inspect both files. No retry is
 started to repair the envelope.
 
+For quality-contract failures, compare the saved response to its request schema:
+
+- Each initial review needs `coverage.files` and `coverage.gaps`. COMPLETE cannot
+  omit a snapshot file or carry review gaps; PARTIAL must explain its gaps.
+- Every finding needs `counterevidence`, severity and a correction/verification
+  suggestion as well as its ID, summary, location and source evidence.
+- Each CONFIRMED disposition needs the verifier's complete `verifiedFinding`
+  under the same original ID; other dispositions must not carry one.
+- Comment severity must equal the supplied verified high/medium severity. A
+  low-severity finding must be explicitly skipped, not promoted.
+
+Both native and text output use these checks. Install matching runtime/prompts
+and restart after an update; old custom prompts must satisfy the new contract.
+No output repair or fallback to the original candidate is performed. Debug data
+lets you inspect coverage claims, counterevidence and corrected findings, not
+independently prove that source reads or reasoning were correct.
+
 `abortUnconfirmed: true` in `result.json` (also shown as a receipt warning) means
 the host did not acknowledge a session-abort request within the local deadline,
 or returned an error/unsuccessful result. Grants are revoked locally, but remote

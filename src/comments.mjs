@@ -37,8 +37,13 @@ export function targetKey(target) {
 }
 
 export function confirmedFindings(review) {
-  const confirmed = new Set(review.final.dispositions.filter(d => d.status === 'CONFIRMED').map(d => d.id));
-  return [...review.findings.filter(f => confirmed.has(f.id)), ...(review.final.newFindings ?? [])];
+  // Initial candidates remain audit data. Never resurrect claims or severity
+  // that the verifier corrected, even when an original ID was confirmed.
+  const confirmed = review.final.dispositions.filter(d => d.status === 'CONFIRMED').map(d => {
+    if (!object(d.verifiedFinding) || d.verifiedFinding.id !== d.id) fail('Confirmed disposition is missing its verified finding.');
+    return d.verifiedFinding;
+  });
+  return [...confirmed, ...(review.final.newFindings ?? [])];
 }
 
 function marker(review, finding, comment) {
@@ -60,6 +65,7 @@ export function validateCommentPlan(result, review, maxComments) {
     exactKeys(c, ['findingId', 'severity', 'path', 'startLine', 'endLine', 'anchor', 'body']);
     const finding = eligible.get(c.findingId);
     if (!finding || accounted.has(c.findingId)) fail('Only unique confirmed findings may be posted.');
+    if (!['high', 'medium'].includes(finding.severity) || c.severity !== finding.severity) fail('Comment severity must match the verified high/medium finding; skip low-severity findings.');
     if ([...review.attempts.values()].some(a => a.findingId === c.findingId)) fail('This finding was already attempted; skip it instead of changing its wording or anchor.');
     accounted.add(c.findingId);
     if (!['high', 'medium'].includes(c.severity) || !nonempty(c.body) || c.body.length > 1200 ||

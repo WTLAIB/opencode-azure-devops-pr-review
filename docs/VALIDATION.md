@@ -20,6 +20,16 @@ publisher envelopes must be marked FAILED in stage diagnostics, not just at the
 outer workflow. These are local orchestration checks, not remote cancellation or
 source-authenticity guarantees.
 
+Quality-contract tests require complete per-reviewer coverage ledgers, concrete
+gap explanations for PARTIAL, counterevidence/severity/suggestion fields, and a
+complete corrected finding for each CONFIRMED disposition. Native/text transports
+both reject coverage omissions. Prompt JSON examples are checked against the
+same validators and native schema fields. A two-session barrier test verifies
+that both initial sessions start before either returns; zero findings still
+invoke the final verifier. Comment tests verify corrected-claim handoff and reject
+severity changes, low-severity promotion, or fallback to stale initial wording.
+These are contract and routing checks, not empirical review-quality results.
+
 Comment tests cover saved-plan validation, explicit publishing, arbitrary MCP tool names/arguments, host-denial simulations, confirmed-only eligibility, caps, whole-batch uncertainty bookkeeping, cancellation, and honest model-reported publication labels. They do not assert a programmatic read-only MCP boundary or parse provider-specific responses. No test posts to Azure.
 
 Language tests cover the default, language-tag validation/canonicalization, final-only localization in both review modes, propagation to comment preview/publishing, unchanged saved comment bodies, restart requirements, and settings preservation across installer replacement. They check routing and instructions with mocks, not real-model translation quality.
@@ -80,6 +90,14 @@ plugin does not copy agent-only restrictions from the originating Plan/Build
 agent. Do not mistake mock hook tests for a live permission or security audit.
 
 Before wider adoption, evaluate known historical PRs for missed issues, false positives, coverage, time, and cost. This integration is not a merge gate.
+
+For the quality-first policy, inspect at least a real conditional failure, a
+plausible but guarded non-bug, a file-scoped repository rule, and a review with no
+initial findings. Verify the coverage ledgers against source, check the claimed
+counterevidence, and inspect the verifier's corrected findings and reasons for
+NEEDS_INFO/REJECTED/MERGED. A zero-finding review should still describe independent
+checks and limitations. Do not use the verifier itself as the ground-truth judge
+of whether the new policy improved recall or precision.
 
 Also run `/pr-check <URL> <context>` and `/pr-review <URL> <same context>` against
 a test PR with a concrete acceptance requirement. Inspect the private-stage

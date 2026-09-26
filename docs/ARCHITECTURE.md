@@ -62,9 +62,54 @@ incomplete publication report remains incomplete and model-reported.
 
 Initial finding IDs use `F-` and `R-` prefixes in both modes. Every original ID must have exactly one final disposition: `CONFIRMED`, `NEEDS_INFO`, `REJECTED`, or `MERGED`. Only merged items may name a merge target, which must be another original ID. Chains must terminate at a non-merged disposition; cycles are rejected rather than hiding every finding as a duplicate. Confirmed final-verifier discoveries use `V-` IDs in both the report and the structured `newFindings` array. Without that structured entry they cannot be automatically published.
 
+Initial envelopes also require `coverage: { files: [...], gaps: [...] }`. Files
+must be unique exact members of the snapshot; order does not matter. COMPLETE
+requires every snapshot file and no gaps, including reviews with zero findings.
+PARTIAL requires a concrete gap explanation and never reaches final verification.
+The snapshot itself still preserves the original file order. This ledger records
+the model's claimed coverage, not an independent source-access audit.
+
+All findings require `id`, `summary`, `location`, `evidence`, `counterevidence`,
+`severity` (high/medium/low), and `suggestion`. Prompts require a reachable trigger,
+observable impact, exact-commit source/call-path evidence, checks for safeguards
+or alternative explanations, and a focused correction and verification case.
+These are checkable summaries, not private reasoning traces or confidence scores.
+Runtime checks establish field presence and types, not the truth of their text.
+
+CONFIRMED requires a complete `verifiedFinding` with the same original ID. It is
+the verifier's authoritative corrected claim, including revised scope, conditions,
+location and severity. Other dispositions cannot carry that field. The original
+candidate remains audit data; it is not used as a fallback when preparing PR
+comments. New `V-` findings pass the same evidence contract. NEEDS_INFO is for
+unresolved evidence, while REJECTED must explain a concrete refutation in prose.
+MERGED means the same root cause and correction; distinct triggers/impacts must
+be retained in the confirmed representative rather than silently discarded.
+
 The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
 Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
+
+### Quality-first policy
+
+The design borrows independent candidate verification and scoped repository-rule
+checking from the public [Claude code-review command](https://github.com/anthropics/claude-code/blob/db8834ba1d72e9a26fba30ac85f3bc4316bb0689/plugins/code-review/commands/code-review.md),
+not its README's older confidence-scoring description. It does not copy fixed
+tool names, automatic PR skipping, diff-only restrictions, or per-finding agent
+fan-out. Two independent full reviews and one verifier remain the fixed workflow,
+with unchanged model settings and budgets. Even empty initial finding lists go
+through independent source verification and the current-HEAD check.
+
+Applicable repository guidance can inform the review, but only as untrusted
+data. Rule-based findings must cite an explicit requirement, its file/commit and
+applicable path scope. Changed rules/contracts must be compared across base/head;
+they cannot silently authorize their own implementation or alter tool permissions.
+Conditional failures, unusual inputs and races remain valid review targets when
+supported by evidence. Numeric self-confidence and reviewer agreement are not
+substitutes for verification. Missing contracts and unexecuted tests stay visible.
+
+These changes strengthen auditability and prevent structural inconsistencies.
+They do not establish improved bug recall or lower false-positive rates; those
+require evaluation on representative PRs with independent ground truth.
 
 ## Tools and reports
 
@@ -79,9 +124,12 @@ Cancellation revokes grants before requesting session abort and never aborts the
 ## Explicit comment boundary
 
 Completed reviews are cached in memory (latest 20). Preview validates confirmed
-finding IDs, body length, severity, changed-file coordinates, anchor shape,
+finding IDs, body length, exact agreement with verified high/medium severity, changed-file coordinates, anchor shape,
 coverage of eligible IDs, and a deterministic marker. It does not inspect MCP
 outputs to verify source, HEAD, identity, or duplicates: those are model tasks.
+Low-severity confirmed findings require a skip explanation; the planner cannot
+raise their severity to publish them. Corrected claim semantics are supplied to
+the planner but still require model compliance and human inspection of the preview.
 
 Publishing requires a saved plan, the original conversation, comments.enabled,
 and explicit --publish. The entire batch is marked UNKNOWN before the publisher

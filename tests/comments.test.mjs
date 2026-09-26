@@ -5,7 +5,8 @@ import { commentTarget, confirmedFindings, recordPublishResult, validateCommentP
 const snapshot={head:'a'.repeat(40),prId:123,files:['/src/example.ts']};
 const target=commentTarget('https://dev.azure.com/org/project/_git/repo/pullrequest/123',snapshot);
 const draft=()=>({status:'READY',comments:[{findingId:'F-1',severity:'high',path:snapshot.files[0],startLine:2,endLine:2,anchor:'return value.name;',body:'issue (high): Missing null handling\n\nNull input throws. Add a guard and a regression test.'}],skipped:[]});
-const review=()=>({target,snapshot,findings:[{id:'F-1',summary:'Missing guard',evidence:'Null input throws'}],final:{dispositions:[{id:'F-1',status:'CONFIRMED'}]},attempts:new Map()});
+const verifiedFinding=()=>({id:'F-1',summary:'Missing guard',evidence:'Null input throws',counterevidence:'The caller allows null on the failing path.',severity:'high',location:'head:/src/example.ts:2',suggestion:'Add a guard and a regression test.'});
+const review=()=>({target,snapshot,findings:[verifiedFinding()],final:{dispositions:[{id:'F-1',status:'CONFIRMED',verifiedFinding:verifiedFinding()}]},attempts:new Map()});
 function planned(){
   const r=review();r.plan=validateCommentPlan(draft(),r,5);
   for(const c of r.plan.comments) r.attempts.set(c.marker,{findingId:c.findingId,state:'UNKNOWN'});
@@ -41,8 +42,31 @@ for(const [name,change] of [
   const d=draft();change(d);assert.throws(()=>validateCommentPlan(d,review(),5));
 });
 test('confirmed findings and verifier additions are eligible, not rejected concerns',()=>{
-  const r=review();r.final.dispositions[0].status='REJECTED';r.final.newFindings=[{id:'V-1'}];
-  assert.deepEqual(confirmedFindings(r),[{id:'V-1'}]);
+  const r=review();r.final.dispositions=[{id:'F-1',status:'REJECTED',reason:'The caller prevents the failing input.'}];r.final.newFindings=[{...verifiedFinding(),id:'V-1'}];
+  assert.deepEqual(confirmedFindings(r),r.final.newFindings);
+});
+test('comments use corrected verifier claims rather than the original candidates',()=>{
+  const r=review();
+  r.final.dispositions[0].verifiedFinding={...verifiedFinding(),summary:'Narrowed trigger',evidence:'Only the optional integration supplies null.',severity:'medium'};
+  assert.deepEqual(confirmedFindings(r),[r.final.dispositions[0].verifiedFinding]);
+  assert.notEqual(confirmedFindings(r)[0].summary,r.findings[0].summary);
+  const d=draft();d.comments[0].severity='medium';d.comments[0].body=d.comments[0].body.replace('(high)','(medium)');
+  assert.equal(validateCommentPlan(d,r,5).comments[0].severity,'medium');
+  assert.throws(()=>validateCommentPlan(draft(),r,5),/severity must match/);
+  delete r.final.dispositions[0].verifiedFinding;
+  assert.throws(()=>confirmedFindings(r),/missing its verified finding/);
+});
+test('a planner cannot change verified severity or promote low findings into comments',()=>{
+  for(const source of ['original','new']) for(const severity of ['low','medium']) {
+    const r=review(),f={...verifiedFinding(),severity};
+    if(source==='new') {r.final.dispositions=[];r.final.newFindings=[{...f,id:'V-1'}];}
+    else r.final.dispositions[0].verifiedFinding=f;
+    const id=source==='new'?'V-1':'F-1', d=draft();d.comments[0].findingId=id;
+    assert.throws(()=>validateCommentPlan(d,r,5),/severity must match/);
+    assert.equal(validateCommentPlan({status:'READY',comments:[],skipped:[{findingId:id,reason:'Not selected for publication.'}]},r,5).comments.length,0);
+  }
+  const r=review(), d=draft();d.comments[0].severity='medium';d.comments[0].body=d.comments[0].body.replace('(high)','(medium)');
+  assert.throws(()=>validateCommentPlan(d,r,5),/severity must match/);
 });
 test('caps and attempted findings still constrain saved plans',()=>{
   assert.throws(()=>validateCommentPlan(draft(),review(),0),/limit/);

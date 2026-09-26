@@ -34,7 +34,20 @@ When the lookup returns no record, this property access throws before the fallba
 Check for a missing record before dereferencing it, and add a regression test for an empty lookup result.
 ```
 
-The final verifier's `CONFIRMED` original findings and structured `newFindings` (`V-*`) are eligible. `NEEDS_INFO`, `REJECTED`, and `MERGED` originals are not published. A new concern mentioned only in free-form report text is not automatically converted into a publishable finding. Every eligible finding is either in the preview or explicitly skipped with a reason. The model assesses severity, relevance, and semantic duplicates; the runtime cannot prove those judgments correct. Inspect the preview.
+The final verifier's `verifiedFinding` for each `CONFIRMED` original and its
+structured `newFindings` (`V-*`) are passed to the planner. These are the corrected,
+verified claims, not the original candidates. `NEEDS_INFO`, `REJECTED`, and
+`MERGED` originals are not published. A new concern mentioned only in free-form
+report text is not automatically converted into a publishable finding. Every
+supplied finding is either in the preview or explicitly skipped with a reason,
+including low-severity findings that cannot be posted. The planner must preserve
+the verified severity; the runtime rejects both promotion and demotion instead
+of silently revising the verifier's conclusion. Preserve the trigger and all
+qualifications when translating a finding into a short comment. The model still
+assesses relevance and semantic duplicates; the runtime cannot prove those
+judgments or the comment's meaning correct. Inspect the preview.
+If the verified claim cannot fit faithfully within the comment limit, the planner
+must explain the skip locally rather than omit essential conditions to fit.
 
 ## Enable and use
 
@@ -90,7 +103,7 @@ On-premises Azure URLs are not currently supported for the comment workflow.
 ## What is enforced and what is instructed
 
 The runtime checks plan structure: known confirmed finding IDs, maximum plan
-size, high/medium labels, body length, changed-file paths, 1-5 line ranges, anchor
+size, high/medium labels matching the verified finding, body length, changed-file paths, 1-5 line ranges, anchor
 line count, and an explanation for every skipped eligible finding. It adds stable
 markers. These checks are not proof that source lines or findings are correct.
 
@@ -139,6 +152,10 @@ before updating. Never commit private settings, model IDs, or PR data.
    marker, and thread ID; do not rely solely on MODEL_REPORTED_POSTED.
 5. Test unavailable tools, stale HEAD, existing discussions, cancellation, and
    denied writes. The model should stop; the workflow must not retry a batch.
+6. Use a review where the verifier narrows an initial claim or lowers its severity.
+   Check that the preview uses the corrected conditions and impact; a low-severity
+   finding must be skipped, not promoted. The runtime validates severity equality,
+   but faithful comment wording still needs human inspection.
 
 Offline tests exercise orchestration and report/plan validation with mocks, not
 real-model policy compliance, Azure rendering, or live server compatibility.

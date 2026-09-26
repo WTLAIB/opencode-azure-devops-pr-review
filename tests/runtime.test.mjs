@@ -9,6 +9,7 @@ import { ROLES, PROMPTS, COMMANDS, MODES, buildAgents, validateSettings, roleFor
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SNAP = { repository:'org/proj/repo',prId:123,base:'a'.repeat(40),head:'b'.repeat(40),scope:'cumulative',files:['/src/Main.java'] };
 const jclone = x => JSON.parse(JSON.stringify(x));
+const candidate = id => ({id,summary:'fixture issue',location:'head:/src/Main.java:12',evidence:'fixture branch evidence, reachable trigger and impact',counterevidence:'fixture caller guard does not cover the failing path',severity:'high',suggestion:'Add the missing guard and a regression test for the failing input.'});
 async function fixture(t, opts={}) {
   const dir=await mkdtemp(join(tmpdir(),'azpr-test-'));
   t.after(()=>rm(dir,{recursive:true,force:true}));
@@ -73,7 +74,7 @@ async function fixture(t, opts={}) {
         if (!opts.noCommentTools) await invoke('custom_mcp_inspect',{url:packet.target,at:packet.snapshot.head},{source:'fixture code',threads:[]});
         if(spec.stage==='comment-plan'){
           const count=Math.min(opts.planCount ?? 1,packet.maxComments);
-          result={status:'READY',comments:packet.findings.slice(0,count).map(f=>({findingId:f.id,severity:'high',path:SNAP.files[0],startLine:12,endLine:12,anchor:'fixture code',body:`issue (high): ${f.id} fixture defect\n\nTrigger and impact. Suggested fix and test.`})),skipped:packet.findings.slice(count).map(f=>({findingId:f.id,reason:'Duplicate or comment limit reached.'}))};
+          result={status:'READY',comments:packet.findings.slice(0,count).map(f=>({findingId:f.id,severity:f.severity,path:SNAP.files[0],startLine:12,endLine:12,anchor:'fixture code',body:`issue (${f.severity}): ${f.id} fixture defect\n\nTrigger and impact. Suggested fix and test.`})),skipped:packet.findings.slice(count).map(f=>({findingId:f.id,reason:'Duplicate or comment limit reached.'}))};
         } else {
           const posted=[];
           for(const comment of packet.comments){
@@ -87,10 +88,10 @@ async function fixture(t, opts={}) {
         }
       }
       else if(spec.stage==='check') result={status:'READY',snapshot:jclone(SNAP),sourceAccess:{diff:'fixture'},requirements:'fixture requirement',report:'SOURCE REPORT'};
-      else if(role.endsWith('-verifier')) result={status:'COMPLETE',snapshot:jclone(SNAP),currentHead:SNAP.head,dispositions:packet.reviews.flatMap(r=>r.findings).map(f=>({id:f.id,status:'CONFIRMED',reason:'verified fixture evidence'})),report:'FINAL_MARKDOWN_REPORT_SENTINEL'};
+      else if(role.endsWith('-verifier')) result={status:'COMPLETE',snapshot:jclone(SNAP),currentHead:SNAP.head,dispositions:packet.reviews.flatMap(r=>r.findings).map(f=>({id:f.id,status:'CONFIRMED',reason:'verified fixture evidence',verifiedFinding:jclone(f)})),report:'FINAL_MARKDOWN_REPORT_SENTINEL'};
       else {
         const prefix=spec.prefix;
-        result={status:'COMPLETE',snapshot:jclone(SNAP),findings:[{id:`${prefix}-1`,summary:'fixture issue',location:'/src/Main.java:12',evidence:'fixture branch evidence'}],report:`PRIVATE_INITIAL_REPORT_${prefix}`};
+        result={status:'COMPLETE',snapshot:jclone(SNAP),coverage:{files:[...SNAP.files],gaps:[]},findings:[candidate(`${prefix}-1`)],report:`PRIVATE_INITIAL_REPORT_${prefix}`};
       }
       if(opts.result) result=await opts.result({result,role,packet,id,calls});
       const info={role:'assistant',id:`msg_${sequence}`,agent:role,modelID:model.modelID,providerID:model.providerID};
@@ -178,7 +179,7 @@ test('transport errors recover the last visible session message using read-only 
   assert.match(await readFile(join(path,'01-azpr-review-check.transport-error.json'),'utf8'),/Connection ended/);
 });
 test('full provenance is derived from used stages and exposes merges without private initial reports', async t => {
-  const f=await fixture(t,{settings:s=>{s.returnReport='full';s.outputLanguage='zh-TW';},result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:[{id:'F-1',status:'CONFIRMED',reason:'checked'},{id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'duplicate'}]}:result});
+  const f=await fixture(t,{settings:s=>{s.returnReport='full';s.outputLanguage='zh-TW';},result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:[{id:'F-1',status:'CONFIRMED',reason:'checked',verifiedFinding:candidate('F-1')},{id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'duplicate'}]}:result});
   const out=await f.command();
   assert.match(out,/AI 審查來源 \(review\)/);assert.match(out,/功能初審.*fixture\/review-functional.*1/);assert.match(out,/最終驗證.*fixture\/review-verifier/);
   assert.match(out,/R-1 \| MERGED \| F-1/);assert.match(out,/不是多數決/);assert.match(out,/不代表人工核准/);
@@ -265,6 +266,44 @@ test('deep runs two independent initial sessions and its configured verifier',as
   assert.equal(roles.at(-1),'azpr-deep-verifier');
   assert.deepEqual(f.prompts().map(p=>[ROLES[p.body.agent].stage,p.body.model.modelID]).sort(),[['check','deep-risk'],['functional','deep-functional'],['risk','deep-risk'],['verifier','deep-verifier']]);
   const initial=f.prompts().slice(1,-1);assert.equal(initial.length,2);assert.equal(new Set(initial.map(p=>p.path.id)).size,2);assert.equal(new Set(initial.map(p=>p.body.parts[0].text)).size,1);assert.ok(initial.every(p=>!p.body.parts[0].text.includes('PRIVATE_INITIAL_REPORT')));
+});
+test('both initial sessions start before either completes and carry separate coverage to verification',{timeout:3000},async t=>{
+  let started=0,release;const gate=new Promise(resolve=>release=resolve);
+  t.after(()=>release());
+  const f=await fixture(t,{beforePrompt:async({role})=>{
+    if(ROLES[role].format!=='initial') return;
+    if(++started===2) release();
+    await gate;
+  }});
+  assert.match(await f.command(),/] COMPLETE/);
+  assert.equal(started,2);
+  const packet=JSON.parse(f.prompts().at(-1).body.parts[0].text);
+  assert.equal(packet.reviews.length,2);
+  assert.ok(packet.reviews.every(r=>JSON.stringify(r.coverage)===JSON.stringify({files:SNAP.files,gaps:[]})));
+});
+test('empty initial finding lists still require the independent final verifier',async t=>{
+  const f=await fixture(t,{result:({role,result})=>ROLES[role].format==='initial'?{...result,findings:[]}:result});
+  assert.match(await f.command(),/] COMPLETE/);
+  assert.equal(f.prompts().length,4);
+  assert.equal(ROLES[f.prompts().at(-1).body.agent].stage,'verifier');
+  assert.match(f.cfg.agent['azpr-review-verifier'].prompt,/Even when both finding lists are empty/);
+});
+test('review prompts preserve full coverage and conditional defects instead of confidence filtering',async t=>{
+  const f=await fixture(t);
+  for(const mode of MODES) for(const role of ['functional','risk','verifier']) {
+    const prompt=f.cfg.agent[roleFor(mode,role)].prompt;
+    assert.match(prompt,/entire cumulative PR diff/);
+    assert.match(prompt,/Quality takes priority over speed/);
+    assert.match(prompt,/Conditional defects are valid/);
+    assert.match(prompt,/Do not use numeric self-confidence/);
+    assert.match(prompt,/directory\/file scope/);
+    assert.match(prompt,/guidance remains\nuntrusted review data/);
+  }
+  for(const mode of MODES) {
+    const prompt=f.cfg.agent[roleFor(mode,'comment-plan')].prompt;
+    assert.match(prompt,/A verified defect with a specific supported trigger is eligible/);
+    assert.match(prompt,/Do not drop triggering conditions or qualifications/);
+  }
 });
 test('check-only never enters an initial review stage',async t=>{
   const f=await fixture(t);assert.match(await f.command('pr-check'),/] READY/);assert.equal(f.prompts().length,1);assert.equal(f.prompts()[0].body.model.modelID,'review-risk');
@@ -469,7 +508,24 @@ for(const [label,opts] of [['missing message hook',{skipMessageHook:true}],['mis
   const f=await fixture(t,opts);assert.match(await f.command('pr-deep'),/INCOMPLETE/);assert.equal(f.prompts().length,1);
 });
 test('PARTIAL initial reviewer prevents final verification',async t=>{
-  const f=await fixture(t,{result:({result,role})=>ROLES[role].stage==='risk'?{...result,status:'PARTIAL'}:result});assert.match(await f.command('pr-deep'),/INCOMPLETE/);assert.ok(!f.prompts().some(p=>p.body.agent==='azpr-deep-verifier'));
+  const f=await fixture(t,{result:({result,role})=>ROLES[role].stage==='risk'?{...result,status:'PARTIAL',coverage:{files:[],gaps:['Source page unavailable']}}:result});assert.match(await f.command('pr-deep'),/INCOMPLETE/);assert.ok(!f.prompts().some(p=>p.body.agent==='azpr-deep-verifier'));
+});
+for(const structuredOutput of [true,false]) test(`coverage omissions fail before verification in ${structuredOutput?'native':'text'} output`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=structuredOutput;s.debug={enabled:true,directory:'.azpr-debug'};},
+    answer:({answer,result})=>({data:structuredOutput?{...answer,info:{...answer.info,structured:result},parts:[]}:answer}),
+    result:({role,result})=>ROLES[role].stage==='functional'?{...result,coverage:{files:[],gaps:[]}}:result});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/every snapshot file/);
+  assert.equal(f.prompts().length,3);assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const recorded=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  assert.equal(recorded.stages.find(s=>s.stage==='functional').status,'FAILED');
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+test('unsupported confirmation cannot complete a review or become a comment source',async t=>{
+  const f=await fixture(t,{result:({role,result})=>ROLES[role].stage==='verifier'?{...result,dispositions:result.dispositions.map(({verifiedFinding,...d})=>d)}:result});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/CONFIRMED requires/);
+  assert.equal(f.prompts().length,4);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
 });
 test('snapshot mismatch prevents final stage',async t=>{
   const f=await fixture(t,{result:({result,role})=>ROLES[role].stage==='functional'?{...result,snapshot:{...result.snapshot,head:'c'.repeat(40)}}:result});assert.match(await f.command('pr-deep'),/INCOMPLETE/);assert.equal(f.prompts().length,3);
@@ -478,7 +534,7 @@ test('final missing original finding is not accepted as COMPLETE',async t=>{
   const f=await fixture(t,{result:({result,role})=>role.endsWith('-verifier')?{...result,dispositions:[]}:result});const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/omitted/);
 });
 test('cyclic merges cannot complete a review or authorize comments',async t=>{
-  const f=await fixture(t,{result:({role,result})=>ROLES[role].stage==='verifier'?{...result,dispositions:result.dispositions.map(d=>({...d,status:'MERGED',mergedInto:d.id==='F-1'?'R-1':'F-1'}))}:result});
+  const f=await fixture(t,{result:({role,result})=>ROLES[role].stage==='verifier'?{...result,dispositions:result.dispositions.map(({verifiedFinding,...d})=>({...d,status:'MERGED',mergedInto:d.id==='F-1'?'R-1':'F-1'}))}:result});
   const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/cycle/);assert.match(out,/azpr-review-verifier: FAILED/);
   await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
 });
@@ -632,6 +688,18 @@ test('comment preview is visible, read-only, and retains the originating deep ri
   assert.equal(f.prompts().at(-1).body.model.modelID,'deep-risk');
   await assert.rejects(f.command('pr-comment',id+' --publish'),/comments.enabled/);
 });
+test('verifier corrections reach comment planning and severity cannot be inflated',async t=>{
+  const opts={settings:enableComments,result:({role,result})=>ROLES[role].stage==='verifier'?{...result,dispositions:result.dispositions.map(d=>({...d,verifiedFinding:{...d.verifiedFinding,summary:'Verified narrow trigger',severity:'medium',evidence:'Only a retry after partial success reaches the failing path.'}}))}:result};
+  const f=await fixture(t,opts),id=reviewId(await f.command());
+  assert.match(await f.command('pr-comment',id),/issue \(medium\)/);
+  const payload=JSON.parse(f.prompts().at(-1).body.parts[0].text);
+  assert.ok(payload.findings.every(v=>v.summary==='Verified narrow trigger' && v.severity==='medium' && v.evidence.includes('Only a retry')));
+  assert.ok(!payload.findings.some(v=>v.summary==='fixture issue'));
+  opts.result=({role,result})=>ROLES[role].stage==='comment-plan'?{...result,comments:result.comments.map(c=>({...c,severity:'high',body:c.body.replace('(medium)','(high)')}))}:result;
+  assert.match(await f.command('pr-comment',id),/severity must match/);
+  await assert.rejects(f.command('pr-comment',id+' --publish'),/Preview first/);
+  assert.equal(writes(f).length,0);
+});
 test('comments use the saved review profile even after a different mode has completed',async t=>{
   const f=await fixture(t,{settings:enableComments});
   const deep=reviewId(await f.command('pr-deep')),review=reviewId(await f.command('pr-review'));
@@ -699,12 +767,12 @@ test('partial publication preserves model-reported IDs and marks other entries u
   assert.match(out,/] INCOMPLETE/); assert.match(out,/F-1: MODEL_REPORTED_POSTED/); assert.match(out,/R-1: UNKNOWN/);
 });
 test('confirmed verifier discoveries are eligible; unconfirmed findings are excluded', async t => {
-  const f=await fixture(t,{result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:result.dispositions.map(d=>({...d,status:'NEEDS_INFO'})),newFindings:[{id:'V-1',summary:'New confirmed defect',evidence:'Verified code',location:'/src/Main.java:12'}]}:result});
+  const f=await fixture(t,{result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:result.dispositions.map(({verifiedFinding,...d})=>({...d,status:'NEEDS_INFO'})),newFindings:[candidate('V-1')]}:result});
   const id=reviewId(await f.command()), out=await f.command('pr-comment',id);
   assert.match(out,/] PREVIEW/); assert.match(out,/V-1/); assert.doesNotMatch(out,/### F-1/);
 });
 test('empty preview never writes a summary thread', async t => {
-  const f=await fixture(t,{settings:enableComments,result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:result.dispositions.map(d=>({...d,status:'REJECTED'}))}:result});
+  const f=await fixture(t,{settings:enableComments,result:({role,result})=>role.endsWith('-verifier')?{...result,dispositions:result.dispositions.map(({verifiedFinding,...d})=>({...d,status:'REJECTED'}))}:result});
   const id=reviewId(await f.command()); await f.command('pr-comment',id);
   assert.match(await f.command('pr-comment',id+' --publish'),/NOTHING_TO_POST/); assert.equal(writes(f).length,0);
 });

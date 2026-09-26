@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseJSONReport, stageFormat, checkEnvelope, finalEnvelope } from '../src/output.mjs';
+import { parseJSONReport, stageFormat, checkEnvelope, initialEnvelope, finalEnvelope } from '../src/output.mjs';
+import { readFile } from 'node:fs/promises';
 import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
 const settings = { maxStageCharacters: 1000 };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
 const snapshot = { repository:'org/project/repo',prId:1,base:'a'.repeat(40),head:'b'.repeat(40),scope:'cumulative',files:['/main.js'] };
 const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.head,dispositions,report:'Evidence report'});
+const finding = (id='F-1') => ({id,summary:'Unprotected null input',location:'head:/main.js:2',evidence:'The caller can pass null to the new dereference, causing a request failure.',counterevidence:'The caller checks undefined, not null; its guard does not prevent this failure.',severity:'medium',suggestion:'Guard null and add a regression case for this caller.'});
+const initial = () => ({status:'COMPLETE',snapshot,coverage:{files:[...snapshot.files],gaps:[]},findings:[finding()],report:'Reviewed full changes and the relevant caller; no tests executed.'});
 
 test('source-check contracts reject malformed readiness before starting initial reviews',()=>{
   assert.equal(checkEnvelope({status:'READY',snapshot,report:'Source available'}).snapshot.head,snapshot.head);
@@ -25,11 +28,86 @@ test('final merge graph rejects cycles instead of silently losing all findings',
 test('merge chains must terminate at a real disposition and only merges may name a target',()=>{
   const originals=['F-1','R-1','F-2'].map(id=>({id}));
   for(const status of ['CONFIRMED','NEEDS_INFO','REJECTED']) {
-    const result=final([{id:'F-1',status,reason:'Evidence'}, {id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'Duplicate'}, {id:'F-2',status:'MERGED',mergedInto:'R-1',reason:'Duplicate'}]);
+    const result=final([{id:'F-1',status,reason:'Evidence',...(status==='CONFIRMED'?{verifiedFinding:finding()}: {})}, {id:'R-1',status:'MERGED',mergedInto:'F-1',reason:'Duplicate'}, {id:'F-2',status:'MERGED',mergedInto:'R-1',reason:'Duplicate'}]);
     assert.equal(finalEnvelope(result,snapshot,originals).status,'COMPLETE');
   }
   assert.throws(()=>finalEnvelope(final([{id:'F-1',status:'CONFIRMED',mergedInto:'R-1',reason:'Evidence'}]),snapshot,[originals[0]]),/Only a MERGED/);
-  assert.throws(()=>finalEnvelope({...final([]),newFindings:null},snapshot,[]),/Invalid initial/);
+  assert.throws(()=>finalEnvelope({...final([]),newFindings:null},snapshot,[]),/Invalid findings/);
+});
+
+test('complete initial reviews require an explicit full coverage ledger even with zero findings',()=>{
+  const result={...initial(),findings:[]};
+  assert.equal(initialEnvelope(result,snapshot,'F').status,'COMPLETE');
+  for(const coverage of [undefined,null,[],{}, {files:[],gaps:[]},
+    {files:snapshot.files,gaps:['Unreviewed caller']}, {files:['/other.js'],gaps:[]},
+    {files:['/main.js','/main.js'],gaps:[]}, {files:snapshot.files,gaps:['']},
+    {files:snapshot.files,gaps:null}, {files:[null],gaps:[]}]) {
+    assert.throws(()=>initialEnvelope({...result,coverage},snapshot,'F'),/coverage|COMPLETE/);
+  }
+});
+test('coverage order is immaterial but missing work must be explicitly PARTIAL',()=>{
+  const expanded={...snapshot,files:['/main.js','/deleted.js']};
+  const result={...initial(),snapshot:expanded,coverage:{files:[...expanded.files].reverse(),gaps:[]}};
+  assert.equal(initialEnvelope(result,expanded,'F').status,'COMPLETE');
+  assert.throws(()=>initialEnvelope({...result,coverage:{files:['/main.js'],gaps:[]}},expanded,'F'),/every snapshot/);
+  assert.equal(initialEnvelope({...result,status:'PARTIAL',coverage:{files:['/main.js'],gaps:['Deleted file base source unavailable.']}},expanded,'F').status,'PARTIAL');
+  assert.throws(()=>initialEnvelope({...result,status:'PARTIAL'},expanded,'F'),/PARTIAL requires/);
+});
+test('initial findings require counterevidence, impact severity and a verification suggestion',()=>{
+  for(const key of ['summary','location','evidence','counterevidence','severity','suggestion']) {
+    for(const value of [undefined,null,'',42]) {
+      const result=initial();result.findings[0][key]=value;
+      assert.throws(()=>initialEnvelope(result,snapshot,'F'),/finding|evidence/);
+    }
+  }
+  const result=initial();result.findings[0].severity='certain';
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),/severity/);
+  result.findings[0].severity='low';assert.equal(initialEnvelope(result,snapshot,'F').findings.length,1);
+});
+test('confirmed dispositions require a complete corrected finding under the original ID',()=>{
+  const corrected={...finding(),summary:'Narrowed claim',severity:'low'};
+  const disposition={id:'F-1',status:'CONFIRMED',reason:'Caller and safeguard checked',verifiedFinding:corrected};
+  const result=finalEnvelope(final([disposition]),snapshot,[finding()]);
+  assert.deepEqual(result.dispositions[0].verifiedFinding,corrected);
+  for(const verifiedFinding of [undefined,null,{},finding('R-1'),{...finding(),counterevidence:''},{...finding(),suggestion:''},{...finding(),severity:'certain'}]) {
+    assert.throws(()=>finalEnvelope(final([{...disposition,verifiedFinding}]),snapshot,[finding()]));
+  }
+  for(const status of ['REJECTED','NEEDS_INFO','MERGED']) {
+    assert.throws(()=>finalEnvelope(final([{...disposition,status,...(status==='MERGED'?{mergedInto:'R-1'}:{})}]),snapshot,[finding(),finding('R-1')]),/Only a CONFIRMED/);
+  }
+});
+test('new verifier findings must pass the same evidence and severity checks',()=>{
+  const good={...final([]),newFindings:[finding('V-1')]};
+  assert.equal(finalEnvelope(good,snapshot,[]).newFindings.length,1);
+  for(const entry of [finding('F-1'),{...finding('V-1'),counterevidence:undefined},{...finding('V-1'),severity:null}]) {
+    assert.throws(()=>finalEnvelope({...good,newFindings:[entry]},snapshot,[]));
+  }
+});
+test('native schemas and role prompt examples describe the same quality contracts',async()=>{
+  const required=['id','summary','evidence','counterevidence','location','severity','suggestion'];
+  for(const mode of ['review','deep']) {
+    const finalSchema=stageFormat(`azpr-${mode}-verifier`).schema;
+    assert.deepEqual(finalSchema.properties.dispositions.items.properties.verifiedFinding.required,required);
+    assert.deepEqual(finalSchema.properties.newFindings.items.required,required);
+    for(const role of ['functional','risk']) {
+      const schema=stageFormat(`azpr-${mode}-${role}`).schema;
+      assert.ok(schema.required.includes('coverage'));
+      assert.deepEqual(schema.properties.coverage.required,['files','gaps']);
+      assert.deepEqual(schema.properties.findings.items.required,required);
+    }
+  }
+  for(const [name,prefix] of [['functional','F'],['risk','R'],['final','V']]) {
+    const prompt=await readFile(new URL(`../src/prompts/${name}.md`,import.meta.url),'utf8');
+    const result=JSON.parse(/```json\n([\s\S]*?)\n```/.exec(prompt)[1]);
+    result.snapshot=snapshot;
+    if(name==='final') {
+      result.currentHead=snapshot.head;
+      assert.equal(finalEnvelope(result,snapshot,[finding(),finding('R-1')]).status,'COMPLETE');
+    } else {
+      result.coverage.files=[...snapshot.files];
+      assert.equal(initialEnvelope(result,snapshot,prefix).status,'COMPLETE');
+    }
+  }
 });
 
 test('structured results are read from info.structured without text and still reject errors', () => {
