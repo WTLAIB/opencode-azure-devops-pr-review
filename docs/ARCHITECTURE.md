@@ -118,7 +118,7 @@ uncertain/reported records and are never automatically retried or rolled back.
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The opt-in status-only exception below does not weaken evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in status-only resubmission below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
@@ -175,6 +175,38 @@ as a substitute for an accepted envelope. This is a schema compatibility measure
 not proof of any hosted provider's parser implementation or live reliability.
 
 Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
+
+### Audited finding-format normalization
+
+A native StructuredOutput capture does not certify the plugin's evidence contract.
+Both transports therefore use local finding validation: exactly the seven schema
+keys, nonempty values, role-prefixed unique IDs and the allowed severity values.
+Errors identify array indices and field paths, including verifiedFinding and
+newFindings; they never echo source values, arbitrary IDs or unknown key names.
+
+After parsing, before validation, an initial/verifier envelope with a valid
+top-level status may undergo two deterministic changes to finding objects:
+
+- Trim only ASCII JSON whitespace (space, tab, CR, LF) around an otherwise exact
+  known key. Any collision, even between equal values, fails.
+- Remove an unknown field only when its value is exactly the empty string.
+  Whitespace strings, nulls, arrays, objects, numbers and booleans are not empty
+  for this rule and remain invalid extras. No content-bearing field is dropped.
+
+No spelling/case correction, evidence synthesis, value trimming, JSON repair,
+status inference or snapshot/coverage/report/head change occurs. The original
+response is never mutated. Only a candidate that passes the entire existing
+stage validator is accepted; corrections alone cannot make a stage complete.
+The stage records each accepted correction's path/action and, for unknown keys,
+its zero-based property index in the original finding. Receipts always disclose
+the count and meaning, including when debug logging is off. Saved response files
+retain the raw output and result files contain the validated candidate.
+
+This path adds no model/session/tool request and is independent of outputRetries.
+It excludes source checks, comments, invalid statuses and status-repair grants.
+A submission needing both a status amendment and finding-format corrections
+cannot qualify for the status-only retry. Normal prompts still request exact
+keys; normalization is not an alternative output format for reviewers.
 
 ### Bounded status resubmission
 

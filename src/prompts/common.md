@@ -140,4 +140,12 @@ If execution is needed, propose a minimal verification case instead of running i
 
 Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reports and structured finding explanations in English. For the final verifier only, human-facing Markdown in the report field uses the configured outputLanguage instead. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
 
+Before submitting, check every finding object (including verifiedFinding and
+newFindings) uses exactly these seven keys: id, summary, evidence, counterevidence,
+location, severity, suggestion. Copy keys literally, without leading/trailing
+spaces or extra fields. Put source notes inside evidence and limitations inside
+the appropriate existing field; do not add evidence_note or placeholder fields.
+Check unique role-prefixed IDs and nonempty required values. This formatting
+check cannot supply missing evidence or make an incomplete review COMPLETE.
+
 If you cannot meet the required output contract, do not rerun, switch models, or repair the workflow yourself. The plugin will retain the session and mark the run incomplete.

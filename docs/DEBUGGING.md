@@ -88,6 +88,32 @@ must still be tested with the actual provider. See the pinned
 [prompt implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts)
 and [SDK implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/sdk/js/src/gen/sdk.gen.ts).
 
+## Finding-field format notices
+
+`output-format-corrections=N` records local corrections accepted only after full
+stage validation. For example, `" evidence"` can become `"evidence"` without
+changing its text, and `"evidence_note": ""` can be removed without discarding
+content. This does not add a session, call a model, repeat source reads or consume
+the status-retry allowance. It applies only to initial/verifier finding objects.
+
+Stage `outputFormatCorrections` lists the trusted field path and action; removed
+empty unknown fields use their original zero-based property index rather than
+echoing potentially private names. Compare the raw `.response.json` with the
+validated `.result.json`. The receipt includes a notice even with debug disabled;
+the original native/text response also remains in its OpenCode session.
+
+Conflicting keys, misspellings/case differences, missing/empty evidence and
+nonempty or nonstring extra fields still fail. Diagnostics distinguish, for
+example, `findings[0].evidence is missing` from `findings[1].id duplicates an
+earlier finding`, without printing source values. The same rules apply to
+`dispositions[i].verifiedFinding` and `newFindings[i]`. Other envelope fields are
+not normalized, and a failed candidate does not record accepted corrections.
+Count format notices separately from native rejections and model status retries.
+
+A host tool marked completed, or zero invalidStructuredOutputs, does not prove
+schema conformance. Inspect the saved arguments and the plugin's validator
+result; native capture success must not bypass local evidence checks.
+
 ## Bounded status retries
 
 Set `"outputRetries": 1` and restart to enable one status-only resubmission per
@@ -209,7 +235,8 @@ For quality-contract failures, compare the saved response to its request schema:
 - Each initial review needs `coverage.files` and `coverage.gaps`. COMPLETE cannot
   omit a snapshot file or carry review gaps; PARTIAL must explain its gaps.
 - Every finding needs `counterevidence`, severity and a correction/verification
-  suggestion as well as its ID, summary, location and source evidence.
+  suggestion as well as its ID, summary, location and source evidence. No extra
+  fields are accepted after the disclosed formatting step above.
 - Each CONFIRMED disposition needs the verifier's complete `verifiedFinding`
   under the same original ID; other dispositions must not carry one.
 - Comment severity must equal the supplied verified high/medium severity. A

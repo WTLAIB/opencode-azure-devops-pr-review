@@ -9,6 +9,7 @@ const finding = object({ id: string, summary: string, evidence: string,
   counterevidence: { ...string, description: 'Source-based safeguards or alternative explanations checked, their effect on the claim, and any unavailable evidence; not private reasoning.' },
   location: { ...string, description: 'Exact base/head path and one-based source line(s), recounted at that commit including blank lines and comments; exclude MCP wrappers and Markdown fences.' },
   severity: status('high', 'medium', 'low'), suggestion: string });
+finding.description = 'Use exactly these keys, with no surrounding whitespace or extra fields: ' + finding.required.join(', ') + '. Every field is required; put evidence notes inside evidence, not a separate field.';
 const coverage = object({
   files: { ...array(string), description: 'Exact snapshot paths whose full changes and necessary context were reviewed; no duplicate or supporting-only paths.' },
   gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
@@ -48,6 +49,45 @@ export function visibleText(response) {
   return (response?.parts ?? []).filter(p => p.type === 'text' && !p.ignored).map(p => p.text ?? '').join('\n');
 }
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const findingKey = key => key.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+
+/** Narrow, auditable formatting only. The caller must validate the entire result
+ * before accepting these changes. Never mutate the raw response or add evidence. */
+export function normalizeFindingFormat(result, role) {
+  const corrections = [];
+  const kind = ROLES[role]?.format;
+  if (!['initial', 'final'].includes(kind) || !isObject(result) ||
+      !stageFormat(role).schema.properties.status.enum.includes(result.status)) return { envelope: result, corrections };
+  function normalize(value, path) {
+    if (!isObject(value)) return value;
+    const entries = [], seen = new Set();
+    for (const [propertyIndex, [key, content]] of Object.entries(value).entries()) {
+      const canonical = findingKey(key);
+      if (Object.hasOwn(finding.properties, canonical)) {
+        // Reject even equal values: choosing between competing keys hides an
+        // ambiguous submission. Values (including whitespace) stay untouched.
+        if (seen.has(canonical)) throw new Error(`Invalid finding: ${path}.${canonical} has conflicting keys after whitespace normalization.`);
+        seen.add(canonical);
+        entries.push([canonical, content]);
+        if (canonical !== key) corrections.push({ path: `${path}.${canonical}`, action: 'trim-key-whitespace' });
+      } else if (content === '') {
+        // No names/values from unknown fields enter public receipts or notices.
+        corrections.push({ path, action: 'remove-empty-unknown-field', propertyIndex });
+      } else entries.push([key, content]);
+    }
+    return Object.fromEntries(entries);
+  }
+  const envelope = { ...result };
+  if (kind === 'initial' && Array.isArray(result.findings)) envelope.findings = result.findings.map((value, i) => normalize(value, `findings[${i}]`));
+  if (kind === 'final') {
+    if (Array.isArray(result.dispositions)) envelope.dispositions = result.dispositions.map((value, i) =>
+      isObject(value) && value.status === 'CONFIRMED'
+        ? { ...value, verifiedFinding: normalize(value.verifiedFinding, `dispositions[${i}].verifiedFinding`) } : value);
+    if (Array.isArray(result.newFindings)) envelope.newFindings = result.newFindings.map((value, i) => normalize(value, `newFindings[${i}]`));
+  }
+  return { envelope: corrections.length ? envelope : result, corrections };
+}
+
 export class OutputStatusError extends Error {
   constructor(label, value, allowed) {
     // Receipts must not echo arbitrary model text, source, or credentials.
@@ -140,15 +180,29 @@ export function checkEnvelope(result, prUrl) {
   if (prUrl && String(snapshot.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Source-check snapshot PR ID does not match the requested URL.');
   return { ...result, snapshot };
 }
-function validateFindings(findings, prefix) {
+function validateFinding(value, prefix, ids, path) {
+  if (!isObject(value)) throw new Error(`Invalid finding: ${path} must be an object.`);
+  const issues = [];
+  for (const key of finding.required) {
+    if (!Object.hasOwn(value, key)) {
+      const whitespace = Object.keys(value).some(raw => raw !== key && findingKey(raw) === key);
+      issues.push(`${path}.${key} is missing${whitespace ? ' (a matching key has surrounding ASCII whitespace)' : ''}`);
+    } else if (!text(value[key])) issues.push(`${path}.${key} must be nonempty text`);
+  }
+  if (text(value.id)) {
+    if (!new RegExp(`^${prefix}-[1-9][0-9]*$`).test(value.id)) issues.push(`${path}.id has an invalid prefix or number`);
+    else if (ids.has(value.id)) issues.push(`${path}.id duplicates an earlier finding`);
+  }
+  if (text(value.severity) && !finding.properties.severity.enum.includes(value.severity)) issues.push(`${path}.severity must be high, medium, or low`);
+  const extra = Object.keys(value).filter(key => !Object.hasOwn(finding.properties, key)).length;
+  if (extra) issues.push(`${path} contains ${extra} unexpected field(s); names and values omitted`);
+  if (issues.length) throw new Error(`Invalid finding: ${issues.join('; ')}.`);
+  ids.add(value.id);
+}
+function validateFindings(findings, prefix, path = 'findings') {
   if (!Array.isArray(findings)) throw new Error('Invalid findings array.');
   const ids = new Set();
-  for (const finding of findings) {
-    if (!isObject(finding) || typeof finding.id !== 'string' || !new RegExp(`^${prefix}-[1-9][0-9]*$`).test(finding.id) ||
-        ids.has(finding.id) || !text(finding.summary) || !text(finding.evidence) || !text(finding.location)) throw new Error('Invalid/duplicate finding ID or missing evidence/location.');
-    if (!text(finding.counterevidence) || !text(finding.suggestion) || !['high', 'medium', 'low'].includes(finding.severity)) throw new Error('Every finding requires counterevidence checks, severity, and a correction/verification suggestion.');
-    ids.add(finding.id);
-  }
+  findings.forEach((value, i) => validateFinding(value, prefix, ids, `${path}[${i}]`));
 }
 export function initialEnvelope(result, expected, prefix) {
   if (!isObject(result)) throw new Error('Invalid initial-review envelope: expected an object.');
@@ -176,7 +230,7 @@ export function finalEnvelope(result, expected, originals) {
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Final reviewer used a different snapshot.');
   const ids = new Set(originals.map(f => f.id));
   const accounted = new Set();
-  for (const item of result.dispositions) {
+  for (const [i, item] of result.dispositions.entries()) {
     if (!isObject(item) || !ids.has(item.id) || accounted.has(item.id) || !['CONFIRMED','NEEDS_INFO','REJECTED','MERGED'].includes(item.status) || !text(item.reason)) {
       throw new Error('Final review has an invalid/missing disposition or silently changed a finding ID.');
     }
@@ -184,7 +238,7 @@ export function finalEnvelope(result, expected, originals) {
     if (item.status !== 'MERGED' && item.mergedInto !== undefined) throw new Error('Only a MERGED finding may contain mergedInto.');
     if (item.status === 'CONFIRMED') {
       if (!isObject(item.verifiedFinding) || item.verifiedFinding.id !== item.id) throw new Error('CONFIRMED requires the verifier\'s corrected finding with the same original ID.');
-      validateFindings([item.verifiedFinding], '[FR]');
+      validateFinding(item.verifiedFinding, '[FR]', new Set(), `dispositions[${i}].verifiedFinding`);
     } else if (item.verifiedFinding !== undefined) throw new Error('Only a CONFIRMED disposition may contain verifiedFinding.');
     accounted.add(item.id);
   }
@@ -199,7 +253,7 @@ export function finalEnvelope(result, expected, originals) {
     }
     for (const id of path) resolved.add(id);
   }
-  if (result.newFindings !== undefined) validateFindings(result.newFindings, 'V');
+  if (result.newFindings !== undefined) validateFindings(result.newFindings, 'V', 'newFindings');
   if (!sha(result.currentHead)) {
     if (result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
   } else if (result.currentHead.toLowerCase() !== expected.head) {

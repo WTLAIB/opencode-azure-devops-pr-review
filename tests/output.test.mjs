@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseJSONReport, stageFormat, checkEnvelope, initialEnvelope, finalEnvelope } from '../src/output.mjs';
+import { parseJSONReport, normalizeFindingFormat, stageFormat, checkEnvelope, initialEnvelope, finalEnvelope } from '../src/output.mjs';
 import { readFile } from 'node:fs/promises';
 import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
@@ -105,6 +105,106 @@ test('initial findings require counterevidence, impact severity and a verificati
   const result=initial();result.findings[0].severity='certain';
   assert.throws(()=>initialEnvelope(result,snapshot,'F'),/severity/);
   result.findings[0].severity='low';assert.equal(initialEnvelope(result,snapshot,'F').findings.length,1);
+});
+test('finding diagnostics identify exact fields, duplicate IDs and schema extras without private data',()=>{
+  const result=initial(), first=result.findings[0];
+  first[' evidence']=first.evidence;delete first.evidence;
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),error=>{
+    assert.match(error.message,/findings\[0\]\.evidence is missing.*surrounding ASCII whitespace/);
+    assert.doesNotMatch(error.message,/caller can pass/);return true;
+  });
+  result.findings=[finding(),finding()];
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),/findings\[1\]\.id duplicates/);
+  result.findings=[{...finding(),PRIVATE_KEY_SENTINEL:'PRIVATE_VALUE_SENTINEL'}];
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),error=>{
+    assert.match(error.message,/findings\[0\].*unexpected field/);
+    assert.doesNotMatch(error.message,/PRIVATE_/);return true;
+  });
+  result.findings=[{...finding(),evidence_note:''}];
+  // The validator stays strict; only the separately audited preparation step
+  // may produce a canonical candidate for full validation.
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),/unexpected field/);
+  const bad={...finding(),evidence:null};
+  assert.throws(()=>finalEnvelope(final([{id:'F-1',status:'CONFIRMED',reason:'Checked',verifiedFinding:bad}]),snapshot,[finding()]),/dispositions\[0\]\.verifiedFinding\.evidence/);
+  assert.throws(()=>finalEnvelope({...final([]),newFindings:[{...bad,id:'V-1'}]},snapshot,[]),/newFindings\[0\]\.evidence/);
+});
+test('format normalization changes only unambiguous known keys and exactly empty unknown fields',()=>{
+  const expected=initial();expected.findings[0].evidence='  Preserve evidence whitespace.\n';
+  const raw={...expected,findings:[Object.fromEntries(Object.entries(expected.findings[0]).map(([k,v])=>[` \t${k}\r\n`,v]))]};
+  raw.findings[0].PRIVATE_UNKNOWN_NAME='';
+  const before=JSON.stringify(raw), prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+  assert.deepEqual(prepared.envelope,expected);
+  assert.equal(prepared.corrections.length,8);
+  assert.doesNotMatch(JSON.stringify(prepared.corrections),/PRIVATE_|Preserve evidence/);
+  assert.equal(JSON.stringify(raw),before);
+  assert.equal(initialEnvelope(prepared.envelope,snapshot,'F').status,'COMPLETE');
+  const again=normalizeFindingFormat(prepared.envelope,'azpr-review-functional');
+  assert.strictEqual(again.envelope,prepared.envelope);assert.deepEqual(again.corrections,[]);
+});
+test('format normalization never chooses between conflicting field names, even identical values',()=>{
+  for(const fields of [
+    {evidence:'Same value',' evidence':'Same value'},
+    {' evidence':'Same value','evidence ':'Same value'},
+    {evidence:'Actual evidence',' evidence':''},
+    {' evidence':'PRIVATE_VALUE_SENTINEL',evidence:'Other value'},
+  ]) {
+    const raw=initial();delete raw.findings[0].evidence;Object.assign(raw.findings[0],fields);
+    const before=JSON.stringify(raw);
+    assert.throws(()=>normalizeFindingFormat(raw,'azpr-review-functional'),error=>{
+      assert.match(error.message,/findings\[0\]\.evidence has conflicting keys/);
+      assert.doesNotMatch(error.message,/PRIVATE_|Same value|Actual evidence/);return true;
+    });
+    assert.equal(JSON.stringify(raw),before);
+  }
+});
+test('nonempty or nonstring extras, misspellings and absent evidence still fail full validation',()=>{
+  for(const extra of ['source note',' ',null,false,0,[],{}]) {
+    const raw=initial();raw.findings[0].evidence_note=extra;
+    const prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+    assert.deepEqual(prepared.corrections,[]);
+    assert.throws(()=>initialEnvelope(prepared.envelope,snapshot,'F'),/unexpected field/);
+  }
+  for(const key of ['Evidence','evdience','\u00a0evidence','\u200bevidence']) {
+    const raw=initial();raw.findings[0][key]=raw.findings[0].evidence;delete raw.findings[0].evidence;
+    const prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+    assert.deepEqual(prepared.corrections,[]);
+    assert.throws(()=>initialEnvelope(prepared.envelope,snapshot,'F'),/\.evidence is missing/);
+  }
+  for(const value of [undefined,null,'',' ',42]) {
+    const raw=initial();delete raw.findings[0].evidence;
+    if(value!==undefined)raw.findings[0][' evidence']=value;
+    raw.findings[0].unused='';
+    const prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+    assert.throws(()=>initialEnvelope(prepared.envelope,snapshot,'F'),/\.evidence (?:is missing|must be nonempty text)/);
+  }
+});
+test('finding formatting excludes statuses, snapshots, reports, coverage, comments and source checks',()=>{
+  const raw=initial();raw.findings[0][' evidence']=raw.findings[0].evidence;delete raw.findings[0].evidence;
+  for(const role of ['azpr-review-check','azpr-review-comment-plan','azpr-review-comment-publish','unknown']) {
+    const prepared=normalizeFindingFormat(raw,role);
+    assert.strictEqual(prepared.envelope,raw);assert.deepEqual(prepared.corrections,[]);
+  }
+  const badStatus={...raw,status:'CCOMPLETE'};
+  assert.strictEqual(normalizeFindingFormat(badStatus,'azpr-review-functional').envelope,badStatus);
+  const prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+  for(const key of ['status','snapshot','coverage','report']) assert.strictEqual(prepared.envelope[key],raw[key]);
+  assert.throws(()=>initialEnvelope({...prepared.envelope,coverage:{files:[],gaps:[]}},snapshot,'F'),/COMPLETE requires/);
+  assert.throws(()=>initialEnvelope({...prepared.envelope,snapshot:{...snapshot,head:'c'.repeat(40)}},snapshot,'F'),/different snapshot/);
+});
+test('verifier finding formatting preserves verdicts and head checks in both modes',()=>{
+  for(const mode of ['review','deep']) {
+    const corrected=finding();corrected[' suggestion']=corrected.suggestion;delete corrected.suggestion;
+    const raw={...final([{id:'F-1',status:'CONFIRMED',reason:'Checked',verifiedFinding:corrected}]),newFindings:[{...finding('V-1'),empty_note:''}]};
+    const before=JSON.stringify(raw), prepared=normalizeFindingFormat(raw,`azpr-${mode}-verifier`);
+    assert.deepEqual(prepared.corrections,[
+      {path:'dispositions[0].verifiedFinding.suggestion',action:'trim-key-whitespace'},
+      {path:'newFindings[0]',action:'remove-empty-unknown-field',propertyIndex:7},
+    ]);
+    assert.equal(finalEnvelope(prepared.envelope,snapshot,[finding()]).status,'COMPLETE');
+    assert.equal(finalEnvelope({...prepared.envelope,currentHead:'c'.repeat(40)},snapshot,[finding()]).status,'STALE');
+    assert.throws(()=>finalEnvelope({...prepared.envelope,currentHead:''},snapshot,[finding()]),/did not verify/);
+    assert.equal(JSON.stringify(raw),before);
+  }
 });
 test('confirmed dispositions require a complete corrected finding under the original ID',()=>{
   const corrected={...finding(),summary:'Narrowed claim',severity:'low'};

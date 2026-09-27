@@ -178,6 +178,70 @@ test('text-only compatibility is explicit and never selects a fallback model', a
   assert.match(f.cfg.agent['azpr-review-check'].prompt,/# Output transport\nReturn one valid JSON object/);
 });
 
+for(const mode of ['review','deep']) for(const native of [true,false]) test(`finding key formatting preserves evidence, records changes and adds no request (${mode}, native=${native})`,async t=>{
+  let original;
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=native;s.outputRetries=0;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({result,role})=>{
+      if(role.endsWith('-risk')) {
+        const first=result.findings[0];first[' evidence']=first.evidence;delete first.evidence;
+        result.findings.push({...candidate('R-2'),evidence_note:''});
+        original=jclone(result);
+      }
+      return result;
+    },answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
+  const out=await f.command(`pr-${mode}`);
+  assert.match(out,/] COMPLETE/);
+  assert.match(out,/output-format-corrections=2/);
+  assert.match(out,/Output format notice:/);
+  assert.doesNotMatch(out,/output-retry=/);
+  assert.equal(f.prompts().length,4);
+  const packet=JSON.parse(f.prompts().find(p=>p.body.agent.endsWith('-verifier')).body.parts[0].text);
+  const review=packet.reviews.find(r=>r.findings[0].id==='R-1');
+  assert.deepEqual(review.findings,[candidate('R-1'),candidate('R-2')]);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const files=await readdir(dir), saved=JSON.parse(await readFile(join(dir,files.find(n=>n.endsWith('-risk.response.json'))),'utf8'));
+  assert.deepEqual(native?saved.structured:JSON.parse(saved.text),original);
+  const record=JSON.parse(await readFile(join(dir,files.find(n=>n.endsWith('-risk.result.json'))),'utf8'));
+  assert.equal(record.attempt,1);assert.equal(record.retryOf,undefined);
+  assert.deepEqual(record.outputFormatCorrections,[
+    {path:'findings[0].evidence',action:'trim-key-whitespace'},
+    {path:'findings[1]',action:'remove-empty-unknown-field',propertyIndex:7},
+  ]);
+  assert.deepEqual(record.result.findings,review.findings);
+});
+for(const defect of ['missingEvidence','nonemptyExtra','collision','badSeverity','duplicateId','coverage','snapshot','invalidStatus']) test(`format normalization cannot hide ${defect} or trigger another model request`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({result,role})=>{
+    if(!role.endsWith('-risk'))return result;
+    const first=result.findings[0];first[' evidence']=first.evidence;delete first.evidence;first.empty_note='';
+    if(defect==='missingEvidence')delete first[' evidence'];
+    if(defect==='nonemptyExtra')first.PRIVATE_KEY_SENTINEL='PRIVATE_VALUE_SENTINEL';
+    if(defect==='collision')first.evidence=first[' evidence'];
+    if(defect==='badSeverity')first.severity='certain';
+    if(defect==='duplicateId')result.findings.push(candidate('R-1'));
+    if(defect==='coverage')result.coverage.files=[];
+    if(defect==='snapshot')result.snapshot.head='c'.repeat(40);
+    if(defect==='invalidStatus')result.status='CCOMPLETE';
+    return result;
+  }});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/azpr-review-risk: FAILED/);
+  assert.doesNotMatch(out,/PRIVATE_|output-format-corrections=|output-retry=/);
+  assert.equal(f.prompts().length,3);
+});
+test('verifier formatting is disclosed without debug logging or model resubmission',async t=>{
+  const f=await fixture(t,{result:({result,role})=>{
+    if(role.endsWith('-verifier')) {
+      const found=result.dispositions[0].verifiedFinding;
+      found[' evidence ']=found.evidence;delete found.evidence;
+    }
+    return result;
+  }});
+  const out=await f.command();
+  assert.match(out,/] COMPLETE/);assert.match(out,/azpr-review-verifier: COMPLETE;.*output-format-corrections=1/);
+  assert.match(out,/Output format notice:/);assert.doesNotMatch(out,/Private debug directory/);
+  assert.equal(f.prompts().length,4);
+});
+
 for(const native of [true,false]) test(`normal role prompts contain only their configured output transport (native=${native})`,async t=>{
   const f=await fixture(t,{settings:s=>s.structuredOutput=native});
   for(const role of Object.keys(ROLES)) {

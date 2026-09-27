@@ -80,6 +80,14 @@ output, last-message recovery, deterministic model attribution and merge tables,
 and identical preview/publication disclosures. Tests do not prove a provider
 will support native structured output or obey language/attribution instructions.
 
+Finding-format regressions reproduce a padded evidence key and an empty unknown
+field in native/text output for both profiles. They verify unchanged evidence,
+raw-response retention, an explicit receipt/diagnostic audit and exactly four
+ordinary review requests. Conflicting aliases, nonempty/nonstring extras,
+misspellings, missing evidence, bad severity, duplicate IDs and snapshot/coverage
+failures cannot pass or start a retry. Verifier paths and stale/unknown-head gates
+remain covered. These are sanitized fixtures, not uploaded session exports.
+
 Status-retry regressions cover the invalid top-level enum token seen in a live
 review, immutable evidence, one-field amendments, the opt-in limit of one,
 separate same-model sessions, ordinary-tool denial, a single repair model
@@ -138,6 +146,12 @@ Read-only behavior is a prompt rule. Inspect tool history to check model complia
 and verify actual host/server permission enforcement on a disposable PR. The
 plugin does not copy agent-only restrictions from the originating Plan/Build
 agent. Do not mistake mock hook tests for a live permission or security audit.
+
+If a run reports output-format-corrections, compare the original response with
+the accepted stage result and outputFormatCorrections. Verify only allowed key
+formatting or exactly empty unknown fields changed, all required values stayed
+identical and no extra session was started. A recovered formatting defect still
+counts as a model output defect; report it separately from unmodified successes.
 
 If opting into `outputRetries: 1`, verify a qualifying failure's original FAILED
 record and new `retryOf` session. Confirm the amendment returns only `status`,

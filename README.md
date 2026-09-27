@@ -206,6 +206,15 @@ The verifier's current-head field uses a simple string schema for tool-parser
 compatibility. An unknown head remains INCOMPLETE; this never relaxes the full
 SHA comparison required for a completed review.
 
+Finding output tolerates two formatting defects locally: surrounding ASCII
+whitespace on an otherwise exact field name, and an unknown field whose value
+is exactly `""`. Required values stay unchanged. The complete envelope must then
+pass validation; missing evidence, conflicting keys and content-bearing extras
+still fail with field-specific diagnostics. Accepted changes appear as
+`output-format-corrections=N` in receipts and `outputFormatCorrections` in stage
+results; raw responses remain available for inspection. This adds no model call
+and does not change status retries, source checks or comment publication.
+
 With native output, two rejected `StructuredOutput` submissions in one review
 session stop the run as `INCOMPLETE`. The host may continue after the first
 rejection; the plugin adds no request or session and never edits the arguments.
@@ -216,7 +225,7 @@ Receipts show `invalid-structured-output=N` when any rejection was observed.
 
 Optional `outputRetries: 1` allows **one status-only resubmission per review
 stage**, for an invalid top-level status such as `CCOMPLETE`. Default `0` keeps
-recovery disabled. Every other evidence check must already pass, and the original
+status resubmission disabled. Every other evidence check must already pass, and the original
 session must have a completed tool call and a confirmed abort. The same model
 gets one request in a fresh session and can return only a status; ordinary tools
 are denied. The plugin preserves the original report, findings, coverage and

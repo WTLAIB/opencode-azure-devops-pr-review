@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, validateSettings } from './config.mjs';
-import { OutputStatusError, parseJSONReport, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, finalEnvelope } from './output.mjs';
+import { OutputStatusError, parseJSONReport, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution } from './attribution.mjs';
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -166,7 +166,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
       record.completedTools = g.completedTools.size;
       envelope = parseJSONReport(answer, state.settings);
-      const result = validate(envelope, record);
+      const prepared = retryOf ? { envelope, corrections: [] } : normalizeFindingFormat(envelope, role);
+      const result = validate(prepared.envelope, record);
+      if (prepared.corrections.length) record.outputFormatCorrections = prepared.corrections;
       record.status = result.status ?? 'INVALID';
       record.result = result;
       return result;
@@ -210,8 +212,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     finally { grants.delete(last.sessionID); }
   }
   function receipt(run, report, status, error) {
-    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
+    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.outputFormatCorrections?.length ? `; output-format-corrections=${s.outputFormatCorrections.length}` : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
     let body = `[AZPR ${run.id}] ${status}\n${error ? `Reason (${run.phase ?? 'workflow'}): ${error}\n` : ''}${rows}\n`;
+    if (run.stages.some(s => s.outputFormatCorrections?.length)) body += '\nOutput format notice: finding key whitespace or empty unknown fields were normalized locally, then the complete envelope was validated. Required field values were unchanged; no extra model request was made. Stage results record outputFormatCorrections; original responses remain in their sessions and any saved response diagnostics. Present this notice with the result.\n';
     body += diagnosticLocation(run);
     body += '\nStage status meanings: check READY means source access is ready; initial/verifier COMPLETE means that review stage completed. These are compatible success states, not a status mismatch. They do not approve the PR.\n';
     if (error && run.stages.some(s => s.status === 'FAILED')) body += '\nInspect a failed child session locally with: opencode export <sessionID> (use its session= value above, not the AZPR run ID). Exports may contain private source and credentials; do not upload them unredacted.\n';

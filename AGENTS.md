@@ -37,7 +37,13 @@ It describes the development process, not instructions for agents reviewing a PR
 - Keep strict snapshots, coverage ledgers, counterevidence, final dispositions,
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
-  The sole recovery exception is an explicitly enabled `outputRetries: 1`:
+  Local finding-format normalization may trim ASCII JSON whitespace from known
+  field names and remove exactly empty-string unknown fields. Reject collisions
+  and content-bearing extras; never change field values or supply missing data.
+  Preserve raw responses, fully validate the candidate, and disclose accepted
+  changes in stage diagnostics and receipts. Limit this to initial/verifier
+  findings with valid statuses, excluding status repair and comment sessions.
+  The sole model-based recovery exception is explicitly enabled `outputRetries: 1`:
   one status-only submission per review stage, with immutable evidence, no
   ordinary tools, and complete revalidation. Never extend it to comments,
   missing output/evidence, stale heads, or uncertain cancellation implicitly.

@@ -17,6 +17,11 @@ Implemented and covered by offline tests:
   only its selected submission policy. The verifier's head uses a scalar string
   schema while unknown/stale-head validation remains strict. Receipt/full
   presentation, opt-in diagnostics, final/comment language, model attribution.
+- Audited local finding-key whitespace/empty-extension normalization, exact
+  finding-key validation and field-path errors, without extra model requests or
+  altered evidence values. Collisions, missing evidence and meaningful extras
+  remain failures. Native/text regressions cover both profiles and retain the
+  raw responses; improved live repeatability still needs user-run evaluation.
 - Opt-in, one status-only resubmission per review stage with immutable evidence,
   bounded model requests, ordinary-tool denial and retained failure diagnostics.
   Amendment instructions are isolated to granted repair sessions; normal
@@ -36,7 +41,9 @@ Implemented and covered by offline tests:
 Repeated normal-profile smoke runs on one fixed synthetic PR are recorded
 privately. They completed with the expected defects but exposed variable latency,
 recoverable MCP errors and inaccurate final locations. The access/presentation
-changes above await new live evaluation; clean controls, the broader acceptance
+changes above need further live evaluation. A subsequent initial-stage failure
+exposed malformed finding keys; the local normalization and diagnostics now have
+offline regression coverage. Clean controls, the broader acceptance
 matrix and general review-quality improvement remain unestablished.
 CI is configured for Ubuntu 22.04/24.04 with Node 22;
 the workflow file alone is not evidence that a particular CI run passed.
@@ -108,6 +115,15 @@ Status: planned after P0; methodology proposed, not executed.
   if useful, a single-review baseline. Hold the verifier, snapshot, tool access,
   models/budgets, and evaluation protocol as constant as possible; repeat runs
   to expose variance and record any unavoidable differences.
+- Consider a three-session variant: concurrent functional/risk reviews followed
+  by the verifier, with `/pr-check` retained as a standalone diagnostic. Each
+  initial would establish its own fixed cumulative snapshot; repository/PR,
+  base/head, scope and the complete changed-file set must agree before verification.
+  Reject disagreements and partial coverage rather than silently reconciling
+  snapshots. Compare latency, duplicated discovery, mid-run PR changes and the
+  cost of discovering access failures late against the current shared check.
+  This is a future design/evaluation candidate, not an implemented mode or
+  authorization to remove the existing source-check stage.
 - Match claims by root cause/trigger/impact. Report missed defects, false positives,
   duplicate rate, evidence/coverage gaps, contract failures, and comment usefulness.
   Record latency and actual usage/cost where available as secondary measurements.
