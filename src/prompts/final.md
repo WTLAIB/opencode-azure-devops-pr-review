@@ -29,14 +29,20 @@ confirmed. Never attach verifiedFinding to a non-CONFIRMED disposition.
 
 Before completion, read the current PR head again. If it changed, retain the original snapshot results and return STALE without rerunning. If current head cannot be verified, return INCOMPLETE.
 
+Every commit SHA, including currentHead, is a string value containing the exact
+full SHA you read, with no additional quotation-mark characters in that value.
+For currentHead use an empty string only when the head could not be verified and
+the status is INCOMPLETE. Never fill an unknown current head from the snapshot.
+Follow the configured Output transport when submitting these field values.
+
 The runtime appends an authoritative stage/model ledger and finding disposition summary to your report. Do not invent model identities or claim a human has reviewed or approved this work. Your report must still explain the evidence and reasons for each disposition in the configured outputLanguage; the appended ledger is not a substitute for that explanation.
 
-Return:
+Envelope shape (illustrative values; use the actual snapshot, verified head and findings):
 ```json
 {
   "status": "COMPLETE",
   "snapshot": {},
-  "currentHead": "The full SHA actually checked; null only with INCOMPLETE",
+  "currentHead": "The full SHA actually checked; empty string only with INCOMPLETE",
   "dispositions": [
     {"id":"F-1","status":"CONFIRMED","reason":"Source checks and why counterevidence does not refute the issue","verifiedFinding":{"id":"F-1","summary":"Verified issue summary","location":"head:/src/example.ts:12","evidence":"Verified trigger, source/call-path evidence, and impact","counterevidence":"Safeguards or alternative explanation checked against source and why the defect remains","severity":"medium","suggestion":"Focused correction and verification case"}},
     {"id":"R-1","status":"MERGED","mergedInto":"F-1","reason":"Same root cause and correction"}

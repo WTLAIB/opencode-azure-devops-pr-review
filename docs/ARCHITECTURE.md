@@ -1,5 +1,53 @@
 # Architecture and trust boundaries
 
+## System map
+
+```text
+Explicit /pr-review or /pr-deep + URL + literal context
+  -> command hook / shared lifecycle / session grants
+  -> source check (selected profile's risk model)
+  -> fixed cumulative PR snapshot
+       +-> functional session --+
+       +-> risk session --------+  concurrent, independent, full coverage
+  -> verifier session (source checks + dispositions + current-head check)
+  -> final report + deterministic model/method disclosure
+  -> completed-review memory cache (only for COMPLETE)
+       -> explicit /pr-comment: preview
+       -> explicit /pr-comment --publish: one attempted saved batch
+
+Each stage -> OpenCode Session SDK -> configured providers and host tools/MCP
+Optional diagnostics <- stage records (private files; not a resumable cache)
+```
+
+`/pr-check` stops after the source check and uses the normal profile's risk model.
+`/pr-stop` revokes active grants and requests child-session cancellation. There is
+no Azure client, model SDK, background job, or automatic publishing path here.
+
+The source checkout, installed plugin, and PR-under-review are separate things.
+Editing the checkout does not update an installed plugin; installation and a host
+restart are explicit steps. A test repository is test data, not another copy of
+the plugin source. Machine-specific locations belong in the private local handover.
+
+## Accepted design decisions
+
+These are current constraints, not an instruction to reimplement completed work.
+Revisit them with an explicit decision and evidence, not as incidental cleanup.
+
+| Decision | Reason and tradeoff | Revisit when |
+| --- | --- | --- |
+| Two full-scope initial reviews with different emphasis, then one verifier | Independent candidates plus evidence checking; costs more than one pass and does not prove better recall. | Representative, independently labeled PR evaluations support a change. |
+| Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
+| Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
+| Strict contracts with opt-in, single status-only resubmission | Recovers an invalid status without changing evidence or rerunning source work; adds at most one model request per stage. All other failures remain terminal. | Reproduced failures support a separately evaluated recovery class. |
+| Explicit saved comment preview and one publication attempt | Keeps human inspection before account-owned comments and limits duplicate attempts; publication is still model-reported. | Verified provider evidence or resumability is explicitly requested and designed. |
+| Seven runtime modules, editable policies, source-only installation | Small auditable boundaries and manual-copy support; file catalogs need synchronized tests. | Measured complexity or distribution needs justify more structure. |
+| In-place settings migration, no retained install backup | Preserves preferences with missing-default merging; malformed settings require correction before install. | The owner explicitly changes the backup/retention requirement. |
+| OpenCode 1.18.31 compatibility baseline | Host hooks and pre-hook expansion are version-sensitive. | A host upgrade is requested and audited with offline and live checks. |
+
+Development procedure lives in [AGENTS.md](../AGENTS.md); planned work and its
+acceptance gates live in [ROADMAP.md](ROADMAP.md). The rest of this document is
+the current implementation and its limits, not a feature wishlist.
+
 ## Workflow ownership
 
 The local plugin controls a fixed workflow through the OpenCode-provided Session SDK. It does not use nested Task orchestration, a global review skill, an external model SDK, or a separate launcher.
@@ -43,6 +91,14 @@ Concurrent cancellation and cleanup await the same abort operation. Unconfirmed
 aborts are disclosed; local grant revocation does not prove that remote work or
 billing stopped.
 
+The deadline covers the whole workflow, including stage transitions, status
+amendments and report display. It returns TIMED_OUT with the configured limit;
+explicit `/pr-stop` and disposal return CANCELLED with their respective causes.
+The controller carries the original reason so an SDK abort error cannot replace
+it with a generic message. An output-submission guard can revoke the same grants
+and request abort while retaining INCOMPLETE as the outcome. Stage results keep
+completed-tool and invalid-submission counts even when prompt() never returns.
+
 Completed review records become available for comments only after the workflow
 finishes without cancellation. Cancelling during report display does not leave a
 publishable completed review. Cancelling or failing a refreshed comment preview
@@ -52,6 +108,10 @@ uncertain/reported records and are never automatically retried or rolled back.
 ## Evidence contract
 
 Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The opt-in status-only exception below does not weaken evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
+
+Shared review policy is transport-neutral. The compiler appends exactly one
+submission instruction: native StructuredOutput or JSON text. Envelope examples
+describe field contents; they are not an additional text-output requirement.
 
 Source checks, initial reviews, final verification, comment plans, and publication
 receipts all pass their local contract validator inside the stage boundary before
@@ -87,6 +147,16 @@ be retained in the confirmed representative rather than silently discarded.
 
 The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
+The native `currentHead` schema has scalar `type: "string"`, avoiding tool
+converters that mishandle array-valued nullable types. Its value is the full SHA,
+without extra quote characters; an unavailable head is an empty string with
+INCOMPLETE. Existing runtime validation still accepts historical null/incomplete
+results, rejects unknown or malformed heads for COMPLETE/STALE, supports full
+40/64-character hashes, and marks a different current head STALE. It never strips
+quotes, copies the snapshot head into missing output, or parses XML tool markup
+as a substitute for an accepted envelope. This is a schema compatibility measure,
+not proof of any hosted provider's parser implementation or live reliability.
+
 Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
 
 ### Bounded status resubmission
@@ -107,6 +177,20 @@ containing only `status`; text transport requires the same one-field object.
 The plugin combines the model's explicit amendment with the original fields and
 runs the entire original validator again. It never uses the probe's status.
 
+Normal agent definitions contain no status-amendment instructions, even when
+outputRetries is enabled. For a granted repair session only, the system-transform
+hook replaces exactly one occurrence of that role's known reviewer prompt with
+the standalone amendment instructions, mutating the host's retained system array
+in place. Host/provider/other-plugin context is preserved. Static agents, model
+bindings and configuration fingerprints do not change. Auxiliary requests without
+the reviewer prompt are left alone, even if they share the repair session ID.
+
+The grant, not a model-supplied operation field, selects this path. The model-
+parameter hook requires proof that the isolated repair prompt was applied before
+allowing the one request. Missing, duplicate or unsupported host prompt layout
+stops repair; it never falls back to combining full-review and one-field rules.
+The repair request's private diagnostic instructions show the amendment prompt.
+
 Repair grants deny all ordinary tools and a second `chat.params` model request.
 The pinned host's native StructuredOutput tool executes outside ordinary tool
 hooks; it remains available solely for the one-field submission. The existing
@@ -121,6 +205,28 @@ session and diagnostic files; the amendment records `attempt: 2` and `retryOf`.
 Receipts retain the first error even after recovery. Final provenance uses only
 validated results, with at most one accepted result per role. Live model
 compatibility and reliability improvement still require acceptance testing.
+
+### Rejected native submissions
+
+The pinned host routes rejected StructuredOutput arguments to its built-in
+`invalid` tool through `tool.execute.before`. Native review sessions stop on the
+second distinct invalid structured call; status-amendment and comment sessions
+stop on the first. Call IDs deduplicate hook delivery; counters belong to the
+individual session and do not combine independent reviewers. Built-in invalid
+results never count as completed source work for the status-amendment gate.
+
+This bounds an existing host loop, independently of outputRetries. It neither
+starts another request/session nor repairs malformed JSON. The first review
+rejection can still be followed by the host's next normal turn, within the same
+step/time budget; other provider retries remain outside this guard. Only native
+StructuredOutput rejections are counted. Ordinary chat, text transport and MCP
+tool errors retain host behavior and permissions.
+
+At the limit, authorization is revoked synchronously for the entire run, including
+concurrent siblings, and the receipt reports INCOMPLETE with the role and count.
+The hook does not await its own SDK abort; lifecycle cleanup awaits bounded
+acknowledgement. Raw rejected arguments/errors stay in the host session, not in
+the receipt. No incomplete report becomes available for publication.
 
 ### Quality-first policy
 
@@ -146,7 +252,7 @@ require evaluation on representative PRs with independent ground truth.
 
 ## Tools and reports
 
-Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Generic tool hooks retain lifecycle checks and completed-call bookkeeping, never semantic read/write classification. Display and status-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
+Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Tool hooks retain lifecycle checks, completed-call bookkeeping and the native-submission guard above, never semantic MCP read/write classification. Display and status-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
 
 The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 
@@ -250,5 +356,6 @@ The host compatibility baseline is **OpenCode 1.18.31**. The source references b
 - [Keybinds](https://opencode.ai/docs/keybinds/)
 - [Plugin hook types](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/plugin/src/index.ts)
 - [Session prompt implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts)
+- [System transform and model-parameter hook order](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/llm/request.ts)
 - [Task implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/tool/task.ts)
 - [SDK request/response types](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/sdk/js/src/gen/types.gen.ts)

@@ -46,6 +46,13 @@ returns the envelope in `info.structured`. This is a host output mechanism,
 not an ADO tool name or allowlist. The plugin still validates snapshots,
 finding IDs, dispositions, and comment-plan constraints.
 
+Only the chosen transport's submission instructions appear in each role prompt.
+The verifier declares currentHead as a scalar string: a full SHA, or an empty
+string only for INCOMPLETE when the current head could not be verified. JSON text
+needs normal JSON string serialization; quotation marks are not part of the SHA
+value passed to a tool. Older null/incomplete envelopes remain readable, but no
+unknown or quoted-inside-the-value head can complete a review.
+
 No extra formatter/reviewer model is started by default. The plugin does not
 rerun full stages or switch models. The opt-in status amendment below uses the
 same model in a new session. If a provider cannot use the native mechanism, select
@@ -73,9 +80,14 @@ abort. Completion bookkeeping is not independent proof of a source read. The
 same model gets a fresh session with the original envelope and must return only
 `{"status":"COMPLETE"}` (or another allowed, truthful status). The plugin keeps
 all original evidence/report fields and validates the amended envelope again.
+Normal reviewer prompts contain no one-field amendment instructions. Only the
+new repair session receives them through a scoped system-prompt replacement;
+the host must apply it before the repair model request is allowed. Its private
+request artifact records that effective plugin prompt, not the full-review rules.
 Ordinary tool use and a second model request in that repair session are denied.
-Both transports support this; host `format.retryCount` stays zero so retry
-ownership remains explicit in the plugin.
+Both transports support this; host `format.retryCount` stays zero. This field
+does not prevent the host from continuing after an invalid tool call within the
+same session; the separate guard below bounds native structured rejections.
 
 This is not recovery for `StructuredOutputError`, missing/malformed JSON,
 authentication or transport errors, incomplete coverage, missing evidence,
@@ -89,6 +101,39 @@ The receipt retains the failed attempt and its error, then lists
 files retain both responses; a retry result records `attempt: 2` and `retryOf`.
 The first result remains FAILED even when the overall review later completes.
 Inspect all attempts when evaluating reliability, not just the final status.
+
+## Repeated native submission failures and timeouts
+
+`StructuredOutput` belongs to OpenCode's output transport, not Azure MCP. In the
+pinned host, JSON/tool-argument rejection is routed to the built-in `invalid`
+tool with the intended tool name. The plugin counts distinct call IDs targeting
+StructuredOutput only. Review sessions stop at the second rejection; status-only
+repair and comment sessions stop at the first. Counters are per session, apply
+with native output only, and do not depend on outputRetries.
+
+The receipt shows `invalid-structured-output=N` and, at the limit, INCOMPLETE
+with a concrete stopping reason. The plugin never repairs quotes or adopts the
+rejected result. It adds no model request or session; any continuation after the
+first ordinary-review rejection is the host's existing loop. Completed built-in
+invalid calls do not count as source/tool evidence. Other provider retries and
+MCP errors are outside this guard.
+
+Inspect the failed child export's tool entries for the actual parser error.
+Distinguish the recorded native arguments from any visible tool markup and the
+host's interruption of a rejected call. Markup alone does not prove the model
+ignored tool instructions: serving systems can convert their own markup into
+native calls. Compare field values, schema types and finish reasons before
+attributing truncation to a model or token limit. Some converters mishandle
+array-valued schema types; currentHead deliberately uses a scalar string.
+Source reads may succeed even when the final submission cannot be parsed.
+Increasing the timeout does not resolve a repeated syntax error, and the plugin
+does not recover a result by extracting XML or repairing partial arguments.
+
+The run timeout covers all stages together. TIMED_OUT identifies this deadline
+and states the configured seconds. CANCELLED retains the explicit `/pr-stop` or
+disposal reason. INCOMPLETE identifies a workflow/output failure, including the
+submission limit. None of these statuses supplies an accepted final review.
+Abort acknowledgement warnings remain meaningful for every stopping cause.
 
 ## Enable local diagnostics
 
@@ -111,10 +156,10 @@ printed in its receipt:
 
 | File | Contents |
 | --- | --- |
-| `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time; no provider configuration. |
+| `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time and whole-run timeout; no provider configuration. |
 | `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, selected model/session, and schema. |
 | `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated stage result or error, profile, model/session IDs, timestamps. |
+| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated stage result or error, profile, model/session IDs, timestamps, completedTools and invalidStructuredOutputs counts, including interrupted stages. |
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
@@ -130,6 +175,12 @@ Stage results are written after local contract validation. A model can claim
 READY/DONE in its visible response while the stage result is FAILED because the
 snapshot, plan, or publication report is invalid. Inspect both files. Only the
 explicitly enabled, status-only case above can start a bounded resubmission.
+
+Initial-review diagnostics identify absent or mistyped snapshot, coverage,
+findings and report fields without copying their values. A normal initial
+submission containing only status is missing the review itself; it cannot use
+status-only recovery, even if source tools ran. Do not fill those fields from
+the other reviewer or reinterpret the missing report as a completed review.
 
 For quality-contract failures, compare the saved response to its request schema:
 

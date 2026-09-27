@@ -23,7 +23,9 @@ export function stageFormat(role, statusOnly = false) {
   }, ['status', 'report']);
   else if (kind === 'final') schema = object({
     status: status('COMPLETE', 'INCOMPLETE', 'STALE'), snapshot,
-    currentHead: { type: ['string', 'null'] },
+    // A scalar type avoids nullable-union conversion failures in tool parsers.
+    // Empty does not establish a verified head; finalEnvelope keeps that gate.
+    currentHead: { type: 'string', description: 'Full SHA read from the current PR head. The string value contains only the SHA, with no extra quotation marks. Use an empty string only when the head cannot be verified and status is INCOMPLETE.' },
     dispositions: array(object({ id: string, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
       verifiedFinding: { ...finding, description: 'Required for CONFIRMED: the complete corrected finding under this same ID. Omit for every other disposition.' },
     }, ['id', 'status', 'reason'])),
@@ -129,7 +131,14 @@ function validateFindings(findings, prefix) {
   }
 }
 export function initialEnvelope(result, expected, prefix) {
-  if (!isObject(result) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
+  if (!isObject(result)) throw new Error('Invalid initial-review envelope: expected an object.');
+  const invalid = [
+    !isObject(result.snapshot) && 'snapshot must be an object',
+    !isObject(result.coverage) && 'coverage must be an object',
+    !Array.isArray(result.findings) && 'findings must be an array',
+    !text(result.report) && 'report must be nonempty text',
+  ].filter(Boolean);
+  if (invalid.length) throw new Error(`Invalid initial-review envelope: ${invalid.join('; ')}.`);
   requireStatus(result, ['COMPLETE', 'PARTIAL'], 'initial-review');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
   const coverage = result.coverage;

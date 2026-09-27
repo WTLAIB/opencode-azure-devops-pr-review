@@ -72,6 +72,28 @@ preview/publication never retry. Installer checks retain explicit opt-in while
 adding missing `outputRetries` as zero. These tests use synthetic fixtures,
 not private session exports, and do not establish improved live success rates.
 
+Prompt-isolation regressions check that ordinary review sessions never receive
+one-field amendment instructions, while granted repairs replace only the known
+reviewer prompt and retain unrelated system context. They model the pinned host's
+system-transform-before-params order and retained array reference. Missing or
+ambiguous prompt replacement prevents repair inference. A status-only initial
+submission reports the missing full-review fields and is never repaired.
+
+Transport regressions require only the selected native/text submission policy
+in each compiled role. The verifier schema uses a scalar string currentHead;
+tests retain 40/64-character SHA support, reject missing or extra-quoted heads
+for COMPLETE/STALE, keep unknown heads INCOMPLETE and different heads STALE.
+These contract tests do not emulate every hosted tool parser or prove that a
+schema change fixes a particular provider's streaming conversion.
+
+Native-submission regressions reproduce bare-SHA JSON rejection through the
+pinned host's invalid-tool hook shape. They cover the per-session limit, duplicate
+hook delivery, independent reviewers, revocation of a hanging sibling, rejection
+of another model request after the limit, comment uncertainty and exclusion of
+invalid calls from source bookkeeping. Timeout tests retain the explicit cause
+even when an SDK ignores or replaces the abort signal, and distinguish TIMED_OUT
+from manual CANCELLED. No test repairs or adopts the malformed output.
+
 ## What remains unverified
 
 Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing, Azure MCP capabilities, child-session navigation, cancellation propagation, or actual billing. No live end-to-end result is claimed.

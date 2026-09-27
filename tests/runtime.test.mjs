@@ -52,6 +52,14 @@ async function fixture(t, opts={}) {
       const packet=JSON.parse(o.body.parts[0].text);
       if(opts.beforePrompt) await opts.beforePrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
       if(!opts.skipMessageHook) await hooks['chat.message']({sessionID:id,agent:role,model},{message:{agent:role,model},parts:jclone(o.body.parts)});
+      // Pinned llm/request.ts combines the agent and host system text before
+      // system.transform, then runs chat.params before provider execution.
+      const system={system:[cfg.agent[role].prompt+'\nHOST_SYSTEM_SENTINEL','OTHER_PLUGIN_SYSTEM_SENTINEL']};
+      const systemArray=system.system;
+      if(opts.beforeSystem)await opts.beforeSystem({hooks,role,id,model,packet,system});
+      if(!opts.skipSystemHook&&hooks['experimental.chat.system.transform'])await hooks['experimental.chat.system.transform']({sessionID:id,model:{providerID:model.providerID,id:model.modelID}},system);
+      assert.equal(system.system,systemArray,'The host retains the original system array.');
+      if(opts.afterSystem)await opts.afterSystem({hooks,role,id,model,packet,system,cfg});
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
       if(!opts.skipAzure && !spec.comment && packet.operation !== 'output-status-repair') {
@@ -134,7 +142,186 @@ test('text-only compatibility is explicit and never selects a fallback model', a
   assert.match(await f.command(),/] COMPLETE/);
   assert.equal(f.prompts().length,4);
   assert.ok(f.prompts().every(p=>p.body.format===undefined));
-  assert.doesNotMatch(f.cfg.agent['azpr-review-check'].prompt,/# Output transport/);
+  assert.match(f.cfg.agent['azpr-review-check'].prompt,/# Output transport\nReturn one valid JSON object/);
+});
+
+for(const native of [true,false]) test(`normal role prompts contain only their configured output transport (native=${native})`,async t=>{
+  const f=await fixture(t,{settings:s=>s.structuredOutput=native});
+  for(const role of Object.keys(ROLES)) {
+    const prompt=f.cfg.agent[role].prompt;
+    assert.equal(prompt.match(/# Output transport/g)?.length,1);
+    if(native) {
+      assert.match(prompt,/submit the required envelope once through the host StructuredOutput tool/);
+      assert.doesNotMatch(prompt,/optionally in a single JSON code fence|This overrides instructions/);
+    } else {
+      assert.match(prompt,/# Output transport\nReturn one valid JSON object, optionally in a single JSON code fence/);
+      assert.doesNotMatch(prompt,/host StructuredOutput tool/);
+    }
+  }
+});
+
+for(const native of [true,false]) test(`normal and status-repair instructions are isolated (native=${native})`,async t=>{
+  const seen=[];
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.structuredOutput=native;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({role,result,packet})=>role.endsWith('-risk')&&packet.operation!=='output-status-repair'?{...result,status:'CREATE'}:result,
+    afterSystem:async({packet,system,cfg,role,hooks,id})=>{
+      const text=system.system.join('\n');seen.push(packet.operation??'review');
+      assert.match(text,/HOST_SYSTEM_SENTINEL/);assert.match(text,/OTHER_PLUGIN_SYSTEM_SENTINEL/);
+      assert.doesNotMatch(cfg.agent[role].prompt,/Bounded status resubmission|originalEnvelope|output-status-repair/);
+      if(packet.operation==='output-status-repair'){
+        assert.match(text,/# Bounded status resubmission/);
+        assert.doesNotMatch(text,/# Role:|# Private Azure PR review rules|Snapshot and coverage/);
+        assert.match(text,native?/StructuredOutput/:/JSON text/);
+        // Auxiliary model system prompts in the same session are unchanged.
+        const auxiliary={system:['TITLE_SYSTEM_SENTINEL']};
+        await hooks['experimental.chat.system.transform']({sessionID:id,model:{providerID:'original',id:'title'}},auxiliary);
+        assert.deepEqual(auxiliary,{system:['TITLE_SYSTEM_SENTINEL']});
+      }else{
+        assert.match(text,/# Private Azure PR review rules/);
+        assert.doesNotMatch(text,/Bounded status resubmission|originalEnvelope|output-status-repair/);
+      }
+    }});
+  const out=await f.command();assert.match(out,/] COMPLETE/);assert.equal(seen.filter(s=>s==='output-status-repair').length,1);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  for(const name of (await readdir(dir)).filter(n=>n.endsWith('.request.json'))){
+    const d=JSON.parse(await readFile(join(dir,name),'utf8'));
+    if(d.retryOf){assert.match(d.instructions,/# Bounded status resubmission/);assert.doesNotMatch(d.instructions,/# Role:/);}
+    else assert.doesNotMatch(d.instructions,/Bounded status resubmission/);
+  }
+});
+for(const defect of ['missingHook','missingRolePrompt','duplicateRolePrompt']) test(`status repair refuses model invocation with ${defect}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,skipSystemHook:defect==='missingHook',
+    result:({role,result,packet})=>role.endsWith('-risk')&&packet.operation!=='output-status-repair'?{...result,status:'CREATE'}:result,
+    beforeSystem:({packet,system})=>{
+      if(packet.operation!=='output-status-repair')return;
+      if(defect==='missingRolePrompt')system.system.splice(0,1,'UNRECOGNIZED_HOST_LAYOUT');
+      if(defect==='duplicateRolePrompt')system.system.push(system.system[0]);
+    }});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/isolated status-repair instructions/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,2);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+});
+test('a status-only initial result reports missing evidence fields and cannot enter status repair',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,
+    result:({role,result})=>role.endsWith('-risk')?{status:'CCOMPLETE'}:result});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/snapshot.*coverage.*findings.*report/);
+  assert.doesNotMatch(out,/output-retry=/);assert.equal(f.prompts().length,3);
+});
+
+// v1.18.31/1.18.32 llm.ts routes failed tool arguments to the built-in
+// `invalid` tool; session/tools.ts dispatches it through ordinary tool hooks.
+// Successful native StructuredOutput calls bypass those hooks.
+async function invalidSubmission(hooks, id, callID, tool = 'StructuredOutput') {
+  const input={sessionID:id,tool:'invalid',callID};
+  const args={tool,error:'JSON parsing failed: {"currentHead": 11abcdef, "report": "PRIVATE_ERROR_SENTINEL"}'};
+  await hooks['tool.execute.before'](input,{args});
+  await hooks['tool.execute.after']({...input,args},{title:'Invalid',output:args.error,metadata:{}});
+}
+for(const mode of ['review','deep']) test(`repeated invalid structured submissions stop the host loop (${mode})`,async t=>{
+  let nextRequestAllowed=false, finished;
+  const observed=new Promise(r=>finished=r);
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},
+    duringPrompt:async({hooks,role,id,model})=>{
+      if(!role.endsWith('-verifier'))return;
+      const read={sessionID:id,tool:'arbitrary_mcp_read',callID:'real-read'};
+      await hooks['tool.execute.before'](read,{args:{}});
+      await hooks['tool.execute.after']({...read,args:{}},{title:'Source',output:'source',metadata:{}});
+      // The host may catch a hook error as a tool error. It must still be
+      // impossible to start a third model turn after the second rejection.
+      try {
+        await invalidSubmission(hooks,id,'invalid-1');
+        await invalidSubmission(hooks,id,'invalid-1'); // Duplicate hook delivery.
+        await invalidSubmission(hooks,id,'invalid-2');
+      } catch { /* Emulate host tool-error handling. */ }
+      try {
+        await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
+        nextRequestAllowed=true;
+      } catch { /* Expected grant revocation. */ }
+      finished();
+    }});
+  const out=await f.command(mode==='deep'?'pr-deep':'pr-review');await observed;
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/StructuredOutput.*2\/2/);
+  assert.doesNotMatch(out,/CANCELLED|PRIVATE_ERROR_SENTINEL|output-retry=|FINAL_MARKDOWN_REPORT_SENTINEL/);
+  assert.equal(nextRequestAllowed,false);assert.equal(f.prompts().length,4);
+  const verifier=f.prompts().find(p=>p.body.agent.endsWith('-verifier'));
+  assert.ok(f.calls.some(c=>c.kind==='abort'&&c.path.id===verifier.path.id));
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const saved=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  const stage=saved.stages.find(s=>s.stage==='verifier');
+  assert.equal(stage.status,'FAILED');assert.equal(stage.invalidStructuredOutputs,2);
+  assert.equal(stage.completedTools,1);assert.match(stage.error,/StructuredOutput.*2\/2/);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+  assert.match(await f.command('pr-check'),/] READY/);
+});
+test('one invalid submission per independent stage can still finish without a plugin retry',async t=>{
+  const f=await fixture(t,{settings:s=>{s.outputRetries=0;s.debug={enabled:true,directory:'.azpr-debug'};},
+    duringPrompt:({hooks,id})=>invalidSubmission(hooks,id,'invalid-1'),
+    answer:({answer,result})=>({data:{...answer,info:{...answer.info,structured:result},parts:[]}})});
+  const out=await f.command();assert.match(out,/] COMPLETE/);assert.equal(f.prompts().length,4);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const saved=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  for(const stage of saved.stages){assert.equal(stage.invalidStructuredOutputs,1);assert.equal(stage.completedTools,1);}
+});
+test('invalid initial submissions revoke both concurrent grants even if the sibling SDK hangs', {timeout:3000},async t=>{
+  let started;const ready=new Promise(r=>started=r);
+  const f=await fixture(t,{duringPrompt:async({hooks,role,id})=>{
+    if(role.endsWith('-functional')){started();await new Promise(()=>{});}
+    if(role.endsWith('-risk')){
+      await ready;
+      await invalidSubmission(hooks,id,'invalid-1');
+      await invalidSubmission(hooks,id,'invalid-2');
+    }
+  }});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/StructuredOutput.*2\/2/);
+  assert.equal(f.prompts().length,3);assert.doesNotMatch(out,/azpr-review-verifier/);
+  for(const p of f.prompts().filter(p=>!p.body.agent.endsWith('-check'))){
+    assert.ok(f.calls.some(c=>c.kind==='abort'&&c.path.id===p.path.id));
+    await assert.rejects(f.hooks['tool.execute.before']({sessionID:p.path.id,tool:'arbitrary_tool',callID:'late'},{args:{}}),/expired/);
+  }
+  assert.match(await f.command('pr-check'),/] READY/);
+});
+test('invalid-tool results cannot satisfy the completed-source-call gate for status recovery',async t=>{
+  const f=await fixture(t,{skipAzure:true,settings:s=>s.outputRetries=1,
+    duringPrompt:({hooks,id})=>invalidSubmission(hooks,id,'invalid-1'),
+    result:({result})=>({...result,status:'RREADY'})});
+  const out=await f.command('pr-check');
+  assert.match(out,/] INCOMPLETE/);assert.doesNotMatch(out,/output-retry=/);assert.equal(f.prompts().length,1);
+});
+test('the structured-submission guard leaves ordinary chat, unrelated tool errors and text transport alone',async t=>{
+  const f=await fixture(t,{duringPrompt:async({hooks,id})=>{
+    for(let n=0;n<3;n++)await invalidSubmission(hooks,id,'bad-mcp-'+n,'custom_mcp_read');
+  }});
+  for(let n=0;n<3;n++)await invalidSubmission(f.hooks,'ordinary-session','normal-'+n);
+  assert.match(await f.command(),/] COMPLETE/);
+  const textOnly=await fixture(t,{settings:s=>s.structuredOutput=false,duringPrompt:async({hooks,id})=>{
+    for(let n=0;n<3;n++)await invalidSubmission(hooks,id,'text-'+n);
+  }});
+  assert.match(await textOnly.command(),/] COMPLETE/);
+});
+test('a malformed status-only repair stops at its first invalid structured submission',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,
+    result:({role,result,packet})=>role.endsWith('-risk')&&packet.operation!=='output-status-repair'?{...result,status:'CCOMPLETE'}:result,
+    duringPrompt:({hooks,id,packet})=>packet.operation==='output-status-repair'?invalidSubmission(hooks,id,'bad-repair'):undefined});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/StructuredOutput.*1\/1/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,2);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+});
+for(const publish of [false,true]) test(`invalid structured comment ${publish?'publication':'preview'} stops immediately`,async t=>{
+  const f=await fixture(t,{settings:enableComments,result:async({role,result,id})=>{
+    if(role.endsWith(publish?'-comment-publish':'-comment-plan'))await invalidSubmission(f.hooks,id,'bad-comment');
+    return result;
+  }});
+  const id=reviewId(await f.command());
+  if(publish)assert.match(await f.command('pr-comment',id),/] PREVIEW/);
+  const before=f.prompts().length;
+  const out=await f.command('pr-comment',id+(publish?' --publish':''));
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/StructuredOutput.*1\/1/);
+  assert.equal(f.prompts().length,before+1);
+  await assert.rejects(f.command('pr-comment',id+' --publish'),publish?/already had a publication attempt/:/Preview first/);
 });
 for(const mode of ['review','deep']) for(const native of [true,false]) test(`one status-only retry preserves evidence and routing (${mode}, native=${native})`,async t=>{
   const role=`azpr-${mode}-risk`;
@@ -677,7 +864,30 @@ test('cancellation aborts only review sessions and revokes authorization',async 
   let release,started;const wait=new Promise(r=>release=r);const ready=new Promise(r=>started=r);
   const f=await fixture(t,{duringPrompt:async({role})=>{if(ROLES[role].stage==='check'){started();await wait;}}});
   const running=f.command('pr-deep');await ready;
-  assert.match(await f.command('pr-stop',''),/cancellation requested/);release();const out=await running;assert.match(out,/] CANCELLED/);assert.ok(f.calls.some(c=>c.kind==='abort'));assert.ok(f.calls.filter(c=>c.kind==='abort').every(c=>c.path.id!=='ses_original'));assert.equal(f.prompts().length,1);
+  assert.match(await f.command('pr-stop',''),/cancellation requested/);release();const out=await running;assert.match(out,/] CANCELLED/);assert.match(out,/User requested \/pr-stop/);assert.doesNotMatch(out,/timed out/);assert.ok(f.calls.some(c=>c.kind==='abort'));assert.ok(f.calls.filter(c=>c.kind==='abort').every(c=>c.path.id!=='ses_original'));assert.equal(f.prompts().length,1);
+});
+for(const sdkRejects of [false,true]) test(`whole-run timeout preserves its reason when SDK ${sdkRejects?'rejects':'ignores'} abort`,{timeout:3000},async t=>{
+  let started;const ready=new Promise(r=>started=r);
+  const opts={settings:s=>{s.runTimeoutSeconds=10;s.debug={enabled:true,directory:'.azpr-debug'};},
+    duringPrompt:async({o})=>{
+      started();
+      await new Promise((resolve,reject)=>{if(sdkRejects)o.signal.addEventListener('abort',()=>reject(new Error('SDK_GENERIC_ABORT')),{once:true});});
+    }};
+  const f=await fixture(t,opts);
+  t.mock.timers.enable({apis:['setTimeout']});
+  const running=f.command('pr-check');await ready;t.mock.timers.tick(10001);
+  const out=await running;
+  assert.match(out,/] TIMED_OUT/);assert.match(out,/10-second whole-run time limit/);
+  assert.doesNotMatch(out,/CANCELLED|SDK_GENERIC_ABORT|cancelled or timed out/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const saved=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  assert.equal(saved.status,'TIMED_OUT');assert.equal(saved.abortUnconfirmed,false);
+  assert.equal(saved.stages[0].completedTools,0);
+  assert.match(saved.stages[0].error,/10-second whole-run time limit/);
+  const meta=JSON.parse(await readFile(join(dir,'run.json'),'utf8'));
+  assert.equal(meta.runTimeoutSeconds,10);
+  assert.ok(f.calls.filter(c=>c.kind==='abort').every(c=>c.path.id!=='ses_original'));
+  opts.duringPrompt=undefined;assert.match(await f.command('pr-check'),/] READY/);
 });
 test('second review from the same origin is rejected rather than double billed',async t=>{
   let release,started;const wait=new Promise(r=>release=r);const ready=new Promise(r=>started=r);

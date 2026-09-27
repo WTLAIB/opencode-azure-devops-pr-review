@@ -82,6 +82,6 @@ If execution is needed, propose a minimal verification case instead of running i
 
 ## Output
 
-Return one valid JSON object, optionally in a single JSON code fence, without surrounding commentary. Write intermediate reports and structured finding explanations in English. For the final verifier only, human-facing Markdown in the report field uses the configured outputLanguage instead. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
+Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reports and structured finding explanations in English. For the final verifier only, human-facing Markdown in the report field uses the configured outputLanguage instead. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
 
 If you cannot meet the required output contract, do not rerun, switch models, or repair the workflow yourself. The plugin will retain the session and mark the run incomplete.

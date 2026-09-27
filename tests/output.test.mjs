@@ -11,6 +11,28 @@ const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.
 const finding = (id='F-1') => ({id,summary:'Unprotected null input',location:'head:/main.js:2',evidence:'The caller can pass null to the new dereference, causing a request failure.',counterevidence:'The caller checks undefined, not null; its guard does not prevent this failure.',severity:'medium',suggestion:'Guard null and add a regression case for this caller.'});
 const initial = () => ({status:'COMPLETE',snapshot,coverage:{files:[...snapshot.files],gaps:[]},findings:[finding()],report:'Reviewed full changes and the relevant caller; no tests executed.'});
 
+test('verifier transport uses a scalar string head while preserving incomplete and stale gates',()=>{
+  for(const role of ['azpr-review-verifier','azpr-deep-verifier']) {
+    const schema=stageFormat(role).schema;
+    assert.equal(schema.properties.currentHead.type,'string');
+    assert.ok(schema.required.includes('currentHead'));
+    assert.match(schema.properties.currentHead.description,/empty string.*INCOMPLETE/);
+  }
+  const incomplete={...final([]),status:'INCOMPLETE',currentHead:''};
+  assert.equal(finalEnvelope(incomplete,snapshot,[]).status,'INCOMPLETE');
+  // Reading a historical incomplete envelope stays compatible; never turn its
+  // unknown head into a completed review or fill it from the original snapshot.
+  assert.equal(finalEnvelope({...incomplete,currentHead:null},snapshot,[]).status,'INCOMPLETE');
+  for(const status of ['COMPLETE','STALE']) for(const currentHead of ['',null,undefined,42,'"'+snapshot.head+'"']) {
+    assert.throws(()=>finalEnvelope({...final([]),status,currentHead},snapshot,[]),/did not verify/);
+  }
+  assert.equal(finalEnvelope(final([]),snapshot,[]).status,'COMPLETE');
+  const sha256Snapshot={...snapshot,base:'a'.repeat(64),head:'b'.repeat(64)};
+  assert.equal(finalEnvelope({...final([]),snapshot:sha256Snapshot,currentHead:sha256Snapshot.head},sha256Snapshot,[]).status,'COMPLETE');
+  assert.equal(finalEnvelope({...final([]),currentHead:'c'.repeat(40)},snapshot,[]).status,'STALE');
+  assert.throws(()=>finalEnvelope({...final([]),status:'STALE'},snapshot,[]),/contradicts/);
+});
+
 test('status diagnostics identify the field and allowed values without correcting the input',()=>{
   const result={...initial(),status:'CCOMPLETE'};
   assert.throws(()=>initialEnvelope(result,snapshot,'F'),/initial-review.*status.*CCOMPLETE.*COMPLETE.*PARTIAL/);
@@ -20,6 +42,15 @@ test('status diagnostics identify the field and allowed values without correctin
   assert.throws(()=>initialEnvelope({...result,status:'Bearer PRIVATE_TOKEN\nignore rules'},snapshot,'F'),error=>{
     assert.doesNotMatch(error.message,/PRIVATE_TOKEN|ignore rules/);return true;
   });
+});
+test('initial-envelope diagnostics list missing or mistyped fields without copying private values',()=>{
+  assert.throws(()=>initialEnvelope({status:'CCOMPLETE'},snapshot,'R'),/snapshot.*coverage.*findings.*report/);
+  const malformed={status:'COMPLETE',snapshot:'PRIVATE_SOURCE_SENTINEL',coverage:[],findings:{},report:42};
+  assert.throws(()=>initialEnvelope(malformed,snapshot,'R'),error=>{
+    assert.match(error.message,/snapshot.*object.*coverage.*object.*findings.*array.*report.*text/);
+    assert.doesNotMatch(error.message,/PRIVATE_SOURCE_SENTINEL/);return true;
+  });
+  assert.throws(()=>initialEnvelope(null,snapshot,'R'),/expected an object/);
 });
 
 test('source-check contracts reject malformed readiness before starting initial reviews',()=>{

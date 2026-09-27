@@ -206,7 +206,8 @@
       "type": "integer",
       "minimum": 10,
       "maximum": 7200,
-      "default": 1200
+      "default": 1200,
+      "description": "Whole-command time limit including all stages, status amendments and report display. Exceeding it returns TIMED_OUT. The budget does not restart for each stage and is not a spending cap."
     },
     "maxStageCharacters": {
       "type": "integer",

@@ -127,8 +127,9 @@ schemas, and normal permission checks; each model selects the appropriate calls.
 There is no plugin tool-name, prefix, or action allowlist. Unknown/new MCP names do
 not require a code change. Prompts instruct reviewers to read and analyze without
 changing code, PRs, work items, votes, or pipelines. Prompt compliance is not a
-security guarantee. The only tool-specific orchestration restriction is disabling
-nested `task` delegation, so models cannot start unbudgeted reviewer agents.
+security guarantee. Nested `task` delegation is disabled so models cannot start
+unbudgeted reviewer agents. A separate guard stops repeated rejected native
+`StructuredOutput` submissions; it does not filter MCP operations.
 
 Old installed `azure` settings are accepted but ignored, with a startup warning.
 You may remove that obsolete block; the installer preserves your private settings.
@@ -190,7 +191,20 @@ Saved inline comments also contain an AI/model attribution footer and a notice t
 
 ### Output reliability and private debug files
 
-By default, `structuredOutput: true` uses OpenCode 1.18.31's native JSON-schema output mechanism. This improves envelope reliability without selecting another model or automatically rerunning a failed stage. A provider must support the host's tool-based structured output. If it cannot, set `structuredOutput: false` and restart to use JSON text; a single fenced JSON response is supported, but malformed/truncated JSON is never silently repaired. Snapshot and finding checks apply to both transports. Host/provider-internal retries are outside this plugin's control.
+By default, `structuredOutput: true` uses OpenCode 1.18.31's native JSON-schema output mechanism. This improves envelope reliability without selecting another model or automatically rerunning a failed stage. A provider must support the host's tool-based structured output. If it cannot, set `structuredOutput: false` and restart to use JSON text; a single fenced JSON response is supported, but malformed/truncated JSON is never silently repaired. Snapshot and finding checks apply to both transports.
+
+Role prompts include only the selected transport's submission instructions.
+The verifier's current-head field uses a simple string schema for tool-parser
+compatibility. An unknown head remains INCOMPLETE; this never relaxes the full
+SHA comparison required for a completed review.
+
+With native output, two rejected `StructuredOutput` submissions in one review
+session stop the run as `INCOMPLETE`. The host may continue after the first
+rejection; the plugin adds no request or session and never edits the arguments.
+Status-repair and comment sessions stop on the first rejection. This guard is
+independent of `outputRetries` and only observes the host's built-in `invalid`
+tool for structured submissions. It is not a general provider retry/spending cap.
+Receipts show `invalid-structured-output=N` when any rejection was observed.
 
 Optional `outputRetries: 1` allows **one status-only resubmission per review
 stage**, for an invalid top-level status such as `CCOMPLETE`. Default `0` keeps
@@ -200,6 +214,12 @@ gets one request in a fresh session and can return only a status; ordinary tools
 are denied. The plugin preserves the original report, findings, coverage and
 snapshot and validates the complete envelope again. Original failures and retry
 session IDs remain visible in the receipt and diagnostics.
+
+Normal reviewers receive only their full-review instructions. The one-field
+amendment instructions replace the reviewer prompt only in an authorized repair
+session; enabling retries does not expose an alternative output format to normal
+reviews. If the host cannot apply that isolated prompt, repair stops before a
+model request. Provider/host system context and ordinary agents are preserved.
 
 This does not retry malformed/missing JSON, host/provider errors, incomplete
 evidence, changed PR heads, cancellations, or comment preview/publication. A
@@ -221,7 +241,7 @@ Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE
 
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
-Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds; iteration and time limits are not spending caps.
+Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or a status retry. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
 
 If OpenCode does not acknowledge an abort, the receipt warns that remote work may
 still be running or billed; the plugin's grants are revoked regardless. Cancelling
@@ -313,3 +333,11 @@ npm run check
 ```
 
 Use Node.js 22 or later for development. There are no external package dependencies, so npm install is unnecessary. Tests use mock model responses and disposable configuration directories. They do not call live models or Azure.
+
+For AI-assisted development, start with [AGENTS.md](AGENTS.md). It routes changes
+to the relevant source/tests and defines the verification and handoff process.
+[Architecture](docs/ARCHITECTURE.md) records current behavior and accepted design
+decisions; the [roadmap](docs/ROADMAP.md) records pending work and acceptance gates.
+Machine-specific continuation notes may live in `.local/HANDOVER.md`, which is
+Git-ignored, not installed, and normally absent from a clone. These development
+documents are not additional requirements for the 24-file manual installation.

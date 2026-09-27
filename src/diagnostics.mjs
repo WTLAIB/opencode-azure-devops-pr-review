@@ -37,6 +37,7 @@ export async function createDiagnostics(settings, context, run) {
     await log.write('run.json', { id: run.id, origin: run.origin, mode: run.mode, profile: run.profile, sourceReview: run.review?.id,
       startedAt: new Date().toISOString(), project: context.directory, outputLanguage: settings.outputLanguage,
       returnReport: settings.returnReport, structuredOutput: settings.structuredOutput, outputRetries: settings.outputRetries,
+      runTimeoutSeconds: settings.runTimeoutSeconds,
       privacy: 'Private review data. May contain source, PR details, model IDs, or secrets echoed by the model. Do not upload or commit. No automatic retention cleanup.' });
   } catch { log.warnings.push('Debug logging could not start; no diagnostic data was intentionally written. Inspect the OpenCode session instead.'); }
   return log;
