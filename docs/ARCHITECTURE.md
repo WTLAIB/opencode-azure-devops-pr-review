@@ -63,6 +63,17 @@ the original request. All stages receive those fields directly; context is never
 replaced by the checker's summary or inherited from earlier commands. Receipt
 diagnostics identify the failing workflow phase without echoing supplementary text.
 
+Recognized cloud URL layouts also produce `urlIdentity` hints separating the
+organization/project/repository; unknown server layouts remain untouched. Hints
+are not verified server identity and never drive an API call. The checker's
+optional `sourceAccess` string map carries observed identity, successful argument
+recipes, failed attempts and checked alternatives through the existing packet to
+both initials and the verifier. These untrusted notes do not replace independent
+source reads or expose sibling findings. Prompt policy discourages deterministic
+retry loops and unrelated discovery while preserving cumulative scope, pagination
+and freshness. No MCP catalog, argument adapter or programmatic retry was added.
+See [source-access discipline](AZURE_MCP.md#avoiding-repeated-lookup-failures).
+
 ## Authorization
 
 Only explicit command events create grants. Commands must have the expected ownership marker and must not override the original agent or model.
@@ -135,6 +146,12 @@ observable impact, exact-commit source/call-path evidence, checks for safeguards
 or alternative explanations, and a focused correction and verification case.
 These are checkable summaries, not private reasoning traces or confidence scores.
 Runtime checks establish field presence and types, not the truth of their text.
+
+Location guidance requires one-based lines recounted from the exact source,
+including blank lines/comments and excluding transport wrappers. The verifier
+must correct initial locations in both verifiedFinding and the report rather
+than inherit a merge representative's offsets. Unknown locations remain unresolved;
+these are prompt/schema descriptions, not runtime validation against source.
 
 CONFIRMED requires a complete `verifiedFinding` with the same original ID. It is
 the verifier's authoritative corrected claim, including revised scope, conditions,
@@ -297,6 +314,12 @@ bounded to five seconds and without resuming a model. Unique directories,
 exclusive files, owner-only modes, and per-run Git ignores reduce accidental
 overwrites and commits. Debug write failure is nonfatal and visible in receipts.
 This is not DLP or automatic secret redaction. See [diagnostics](DEBUGGING.md).
+
+Receipts explain that check READY and reviewer COMPLETE are compatible success
+states. In receipt mode, child-session navigation is a human read-only UI action,
+not an instruction to resume a revoked reviewer with Task or a new prompt. When
+navigation is unavailable the parent should present the receipt and diagnostic
+location. Full mode remains the explicit choice for returning the report text.
 
 ## Host and cost limits
 

@@ -14,6 +14,28 @@ available finish/error names and character counts, without dumping source into
 the receipt. Do not resolve these failures by automatically repeating reviews
 or a publishing attempt.
 
+`azpr-*-check: READY` is a successful source-readiness result; later review stages
+use COMPLETE. This difference is intentional. A completed review can contain
+intermediate MCP errors: `warnings: []` concerns diagnostics/cleanup, not every
+tool invocation. Inspect the local child history for actual tool failures.
+
+Receipt mode points the human to read-only session navigation. It does not
+authorize the parent model to invoke Task or prompt a finished reviewer. The
+reuse-denied error after a completed review may therefore be a report-retrieval
+attempt, not a failed review stage. Check `displayed` in the aggregate result and
+the saved report. If UI navigation is unavailable, the parent should present the
+receipt and diagnostic location without retrieving or regenerating the report.
+A later explicit diagnostic request can read local artifacts; full return mode
+is an opt-in for including the entire report in the ordinary conversation.
+
+For repeated source lookups, inspect `sourceAccess` and the next stage's request:
+confirmed identity, successful argument shapes, failed attempts and checked
+alternatives should travel together. Compare tool errors by operation/arguments,
+not just final status or elapsed time. Incorrect types, object kinds and version
+selection need correction; identical retries do not repair them. A zero-result
+search is not evidence of an unavailable index. The prompt's transient-read retry
+guidance is separate from `outputRetries` and is not a runtime-enforced MCP cap.
+
 ## Inspect an existing failed session
 
 Use the **child session ID** shown beside the failing stage (`session=ses_...`),

@@ -151,6 +151,33 @@ test('native schemas and role prompt examples describe the same quality contract
     }
   }
 });
+test('source guidance records observed access recipes, preserves cumulative proof, and bounds exploration',async()=>{
+  const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');
+  const check=await readFile(new URL('../src/prompts/check.md',import.meta.url),'utf8');
+  const result=JSON.parse(/```json\n([\s\S]*?)\n```/.exec(check)[1]);
+  for(const key of ['identity','successfulCalls','failedCalls']) assert.equal(typeof result.sourceAccess[key],'string');
+  assert.match(common,/blob.*commit/s);
+  assert.match(common,/array.*string/s);
+  assert.match(common,/short branch name.*refs\/heads\//s);
+  assert.match(common,/at\s+most one identical retry/s);
+  assert.match(check,/search is not a commit-ancestry API/);
+  assert.match(check,/before and after.*listing/s);
+  assert.match(check,/Do not enumerate unrelated/);
+  result.snapshot=snapshot;
+  assert.equal(checkEnvelope(result).status,'READY');
+});
+test('finding locations must be recounted from exact source without transport wrappers',async()=>{
+  const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');
+  const finalPrompt=await readFile(new URL('../src/prompts/final.md',import.meta.url),'utf8');
+  const location=stageFormat('azpr-review-verifier').schema.properties.dispositions.items.properties.verifiedFinding.properties.location;
+  assert.match(location.description,/one-based/);
+  assert.match(common,/blank lines.*comments/s);
+  assert.match(common,/MCP.*wrapper/s);
+  assert.match(finalPrompt,/Recount.*source/s);
+  assert.match(finalPrompt,/not.*initial\s+reviewer.*line/s);
+  assert.match(finalPrompt,/NEEDS_INFO/);
+  assert.match(common,/zero search results.*index/s);
+});
 
 test('structured results are read from info.structured without text and still reject errors', () => {
   assert.deepEqual(parseJSONReport({ info: { structured: { status: 'READY' } }, parts: [] }, settings), { status: 'READY' });

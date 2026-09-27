@@ -28,10 +28,17 @@ Implemented and covered by offline tests:
 - Saved inline-comment previews and explicit, uncertainty-aware publication.
 - Shared lifecycle/cancellation handling, private-role grants, literal context,
   direct settings conversion, and the 24-file minimal installer.
+- Source-access identity hints and observed-call handoff, prompt guidance against
+  deterministic lookup loops/unrelated discovery, exact-source line recounting,
+  and receipt guidance that does not resume completed reviewers. Offline routing
+  and policy checks are not proof of improved live MCP error rates or report quality.
 
-Initial normal-profile smoke validation is recorded privately. Repeatability,
-the broader live acceptance matrix, and empirical review-quality improvement
-remain unestablished. CI is configured for Ubuntu 22.04/24.04 with Node 22;
+Repeated normal-profile smoke runs on one fixed synthetic PR are recorded
+privately. They completed with the expected defects but exposed variable latency,
+recoverable MCP errors and inaccurate final locations. The access/presentation
+changes above await new live evaluation; clean controls, the broader acceptance
+matrix and general review-quality improvement remain unestablished.
+CI is configured for Ubuntu 22.04/24.04 with Node 22;
 the workflow file alone is not evidence that a particular CI run passed.
 
 ## P0: Establish one reproducible live acceptance run

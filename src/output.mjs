@@ -7,7 +7,8 @@ const status = (...values) => ({ type: 'string', enum: values });
 const snapshot = object({ repository: string, prId: { type: 'integer' }, base: string, head: string, scope: { const: 'cumulative', type: 'string' }, files: array(string) });
 const finding = object({ id: string, summary: string, evidence: string,
   counterevidence: { ...string, description: 'Source-based safeguards or alternative explanations checked, their effect on the claim, and any unavailable evidence; not private reasoning.' },
-  location: string, severity: status('high', 'medium', 'low'), suggestion: string });
+  location: { ...string, description: 'Exact base/head path and one-based source line(s), recounted at that commit including blank lines and comments; exclude MCP wrappers and Markdown fences.' },
+  severity: status('high', 'medium', 'low'), suggestion: string });
 const coverage = object({
   files: { ...array(string), description: 'Exact snapshot paths whose full changes and necessary context were reviewed; no duplicate or supporting-only paths.' },
   gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
@@ -96,7 +97,26 @@ export function parseReviewRequest(raw) {
   if (url.protocol !== 'https:' || url.username || url.password || !/\/pullrequest\/[1-9][0-9]*\/?$/i.test(url.pathname)) {
     throw new Error('[AZPR] Use an HTTPS Azure PR URL ending in /pullrequest/<id>, without embedded credentials.');
   }
-  return { request: raw, prUrl: match[1], userContext: match[2] ?? '' };
+  const urlIdentity = identityFromURL(url);
+  return { request: raw, prUrl: match[1], userContext: match[2] ?? '', ...(urlIdentity ? { urlIdentity } : {}) };
+}
+
+/** URL-derived hints, not server-verified identity or MCP argument bindings. */
+function identityFromURL(url) {
+  let match, organization, project, repository;
+  if (url.hostname === 'dev.azure.com') {
+    match = /^\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/[1-9][0-9]*\/?$/i.exec(url.pathname);
+    if (match) [, organization, project, repository] = match;
+  } else if (/^[^.]+\.visualstudio\.com$/.test(url.hostname)) {
+    match = /^\/([^/]+)\/_git\/([^/]+)\/pullrequest\/[1-9][0-9]*\/?$/i.exec(url.pathname);
+    if (match) { organization = url.hostname.split('.')[0]; [, project, repository] = match; }
+  }
+  if (!match) return; // Preserve custom server/collection URLs without guessing.
+  try {
+    const values = [organization, project, repository].map(decodeURIComponent);
+    if (values.some(value => !value.trim() || /[\x00-\x1f\x7f]/.test(value))) return;
+    return Object.fromEntries(['organization', 'project', 'repository'].map((key, i) => [key, values[i]]));
+  } catch { /* Malformed encoding remains in the original URL for source checking. */ }
 }
 
 const sha = value => typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value);

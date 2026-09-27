@@ -55,6 +55,24 @@ and old-to-nested installation migration/rollback.
 
 Test output is generated on demand rather than committed as a historical log.
 
+Source-access regressions cover cloud URL identity hints without rewriting literal
+context or guessing custom layouts, propagation of arbitrary successful/failed
+call notes to both independent initials and the verifier, and unchanged host MCP
+configuration/permissions. Prompt checks retain cumulative proof, before/after
+tip checks for branch-listing fallback, bounded query exploration and independent
+reads. Location guidance requires counting actual source lines without transport
+wrappers; receipt checks distinguish successful READY from COMPLETE and forbid
+retasking a reviewer to retrieve a report. These tests do not execute a model or
+MCP server and cannot establish fewer errors, accurate line numbers or lower cost.
+
+For live comparisons, keep the snapshot/configuration fixed and record all MCP
+errors (including recovered ones), query arguments, per-stage/whole-run duration,
+structured rejections and status amendments. Verify successful exact-commit reads,
+complete coverage, source-access notes, final line anchors and evidence wording.
+Check report retrieval separately from review completion. Do not interpret empty
+warnings or a passing output schema as proof of error-free tool use or correct
+claims. Repeat seeded and clean controls before generalizing a reliability gain.
+
 Output/debug tests cover native structured envelopes, text compatibility,
 ambiguous/malformed/oversized responses, identical receipt/full stage requests,
 private diagnostic file modes, Git ignores, symlink refusal, failed-stage visible

@@ -20,6 +20,15 @@ Keep the original defect identity: if it is refuted and you discover an unrelate
 defect, reject the original and add a V-prefixed finding instead of repurposing
 the original ID.
 
+Recount every confirmed location from the exact source yourself, including blank
+lines and comments and excluding transport wrappers. Do not adopt an initial
+reviewer's line numbers merely because its finding is the merge representative.
+Resolve disagreements against source and put the corrected side/path/lines in
+both verifiedFinding and the final report. If the location or supporting source
+cannot be established, use NEEDS_INFO; use INCOMPLETE for unfinished verification.
+Keep inferred test failures and unavailable optional data clearly distinguished
+from observed execution or proven service outages.
+
 REJECTED requires a concrete source-based refutation, not a vote or absence of
 confirmation. Use NEEDS_INFO for unresolved assumptions or missing evidence and
 name what would settle the issue; do not publish it as a defect. MERGED requires

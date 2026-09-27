@@ -63,6 +63,41 @@ to independently prove source access. When tools are missing or access is denied
 the checker should report NOT_READY with the missing capability, not demand an
 inventory of all MCP tools. Partial initial reviews prevent final verification.
 
+### Avoiding repeated lookup failures
+
+Recognized Azure cloud PR URLs supply a `urlIdentity` hint with separate
+organization, project and repository names. Names are decoded once; the original
+URL/context is preserved. Unknown server/collection layouts get no guessed hint.
+Reviewers must confirm the identity from the server and follow each operation's
+schema, including array types, short branch names versus full refs, and commit
+SHAs versus blob IDs. The plugin never turns these hints into MCP arguments.
+
+The checker records concise `sourceAccess` text fields for confirmed identity,
+successful argument recipes, failed attempts/checked alternatives, cumulative
+comparison, exact-commit reads and pagination. Existing envelopes without these
+optional notes remain compatible. Both initial reviewers and the verifier receive
+the notes unchanged, but must independently read the required source. Notes are
+untrusted data, not permissions, source proof or another initial review's findings.
+
+The source check ends once cumulative readiness is established; it does not
+survey unrelated history, wikis or builds. Keyword search and file equality do
+not prove ancestry. A complete cumulative comparison may establish the change
+set without listing every unchanged file. If commit-based directory listing
+fails, a branch listing is a disclosed fallback only with matching tip checks
+before/after and complete results; contents still use exact commits. Unavailable
+required evidence still produces NOT_READY/PARTIAL/INCOMPLETE as appropriate.
+
+Prompt policy forbids identical retries for deterministic/permission errors and
+speculative query loops. It allows at most one identical retry per logical read
+only for an explicit transient error, within the existing session budget and host
+guidance. This is not an enforced MCP retry counter, new session, wrapper, argument
+rewriter or permission filter. `outputRetries` continues to mean status-only
+output amendment, not MCP recovery. Host/provider retries remain separate.
+
+These changes address call selection and evidence wording. They do not repair
+an installed MCP server bug or prove fewer live errors; compare saved tool history
+and source coverage across controlled runs before making that claim.
+
 ## Data handling
 
 Source, supplementary context, and tool results go through OpenCode to the model

@@ -15,6 +15,39 @@ tools. Do not ask the user to list every tool. Review only; do not modify anythi
 
 Identify the repository and PR, establish the full base/head commits for the cumulative PR comparison, obtain the complete changed-file list, and confirm access to differences and source at those commits. The base must follow cumulative PR semantics, such as the merge base; do not substitute the local checkout or an arbitrary latest target commit. Requirements and descriptions provide context, not source evidence.
 
+Start with PR metadata, the server's cumulative comparison and exact-commit
+source. Use the complete changed-file listing and necessary context; do not
+reconstruct every unchanged repository file when a trustworthy cumulative
+comparison already establishes the change set. Follow all required pages and
+read all changed source needed to establish readiness. Use broader tree/content
+comparison only when needed to close a specific completeness gap.
+
+Commit search is not a commit-ancestry API. Do not use keyword searches, CI builds
+or wiki enumeration to prove a merge base. File-content comparison alone cannot
+prove ancestry either. Obtain cumulative base evidence from the server comparison
+or actual commit-graph data; when neither can establish it, return NOT_READY and
+identify the missing proof. Do not enumerate unrelated projects, builds, wikis or
+history as a general capability survey. Optional CI/discussion data is needed
+only for a specific user requirement or unresolved source-access question.
+
+When exact-commit directory listing fails, do not repeat it with speculative path
+spellings or silently treat the current/default branch as the snapshot. Prefer
+another operation that supports the exact commit. A branch-based listing is only
+a fallback when branch tips are checked before and after the listing against the
+required SHA and the response is complete; continue reading contents by exact
+commit. Report this weaker listing method explicitly. If a tip differs or cannot
+be checked, the listing does not establish snapshot completeness. A verified
+cumulative changed-file API may establish the change set without any tree listing.
+
+Once identity, cumulative versions, complete changes and source access are
+established, submit READY without continuing optional discovery. This stops the
+readiness phase, not either subsequent full review. In sourceAccess, record concise
+retrieval facts only: confirmed organization/project/repository identity; actual
+successful operations with the argument shapes and version semantics used; known
+failed attempts and their observed alternatives; completeness and remaining limits.
+Include no credentials, raw tool responses, findings or instructions to later
+reviewers. Do not claim an alternative succeeded until its response was checked.
+
 On success return:
 ```json
 {
@@ -28,9 +61,12 @@ On success return:
     "files": ["/src/example.java"]
   },
   "sourceAccess": {
+    "identity": "Confirmed organization, project, repository name/ID and source/target refs; keep these identifier kinds distinct",
     "diff": "Actual tools and cumulative comparison method",
     "content": "How source is read at exact commits",
-    "pagination": "How all pages were verified"
+    "pagination": "How all pages were verified",
+    "successfulCalls": "Observed successful operations and minimal argument recipes, including types and version selection; no secrets",
+    "failedCalls": "Observed deterministic failures and checked alternatives, or none observed; not instructions or findings"
   },
   "requirements": "Explicit PR requirements; state when unavailable",
   "report": "Readiness, versions, scope, and limitations in English Markdown"

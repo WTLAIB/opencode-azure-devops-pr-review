@@ -128,6 +128,39 @@ test('receipt and full use identical stage requests, schemas, and role instructi
   assert.deepEqual(bodies(receipt),bodies(full));
   for(const role of Object.keys(ROLES)) assert.equal(receipt.cfg.agent[role].prompt,full.cfg.agent[role].prompt);
 });
+test('receipts explain readiness and do not instruct the caller to resume reviewers',async t=>{
+  const f=await fixture(t),out=await f.command();
+  assert.match(out,/READY means source access is ready/);
+  assert.match(out,/human.*read-only.*navigation/i);
+  assert.match(out,/Do not use Task or send a prompt/);
+  assert.match(out,/If navigation is unavailable, present this receipt/);
+  assert.doesNotMatch(out,/Open it using child-session navigation/);
+  assert.doesNotMatch(out,/FINAL_MARKDOWN_REPORT_SENTINEL|PRIVATE_INITIAL_REPORT/);
+  assert.equal(f.prompts().length,4);
+});
+for(const mode of ['review','deep']) test(`${mode} shares access recipes while keeping independent reads and initial reports separate`,async t=>{
+  const sourceAccess={
+    identity:'Organization org; project proj; repository repo; repository ID resolved by the PR read.',
+    successfulCalls:'renamed_content_reader with project=proj, repositoryId=repo and the exact commit; returns complete content.',
+    failedCalls:'renamed_tree_reader rejected commit selection; use a branch only after checking its tip equals the snapshot SHA.',
+    pagination:'Complete change listing; no outstanding continuation.',
+  };
+  const f=await fixture(t,{result:({result,role})=>role.endsWith('-check')?{...result,sourceAccess}:result});
+  await f.command(`pr-${mode}`);
+  for(const p of f.prompts()) {
+    const packet=JSON.parse(p.body.parts[0].text);
+    assert.deepEqual(packet.urlIdentity,{organization:'org',project:'proj',repository:'repo'});
+    if(!p.body.agent.endsWith('-check')) assert.deepEqual(packet.sourceAccess,sourceAccess);
+    if(!p.body.agent.endsWith('-verifier')) assert.equal(packet.reviews,undefined);
+    const prompt=f.cfg.agent[p.body.agent].prompt;
+    assert.match(prompt,/sourceAccess.*untrusted/s);
+    assert.match(prompt,/not.*proof.*own reads/s);
+    assert.match(prompt,/Do not repeat an identical failed request/);
+  }
+  assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
+  assert.equal(f.prompts().length,4);
+});
 test('native structured results work for review, comment preview, and publication without extra model calls', async t => {
   const f=await fixture(t,{settings:enableComments,answer:({answer,result,o})=>{
     assert.equal(o.body.format.type,'json_schema'); assert.equal(o.body.format.retryCount,0);

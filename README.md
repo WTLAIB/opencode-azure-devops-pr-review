@@ -136,6 +136,14 @@ You may remove that obsolete block; the installer preserves your private setting
 Global/project OpenCode permissions remain unchanged. Private reviewers are their
 own agents; they do not inherit another agent's private permission overrides.
 
+To reduce avoidable lookup errors, reviewers receive separate URL identity hints
+and the checker's observed successful calls/known failures. They still read source
+independently. Prompts require schema/type checks, distinguish commit IDs from blob
+IDs, avoid repeated deterministic errors and stop optional discovery once source
+readiness is established. No MCP wrapper, automatic stage retry or tool allowlist
+is added. Actual error reduction needs live verification; see
+[source-access discipline](docs/AZURE_MCP.md#avoiding-repeated-lookup-failures).
+
 ## Model roles
 
 Configure three roles under `models.review` and the same three under `models.deep`. Models are local configuration, not hardcoded workflow choices. The example's `models._help` strings and schema descriptions explain the roles; `_help` is documentation only, never model instructions. The file remains ordinary JSON, without JSONC comments.
@@ -242,6 +250,12 @@ Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
 Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or a status retry. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
+
+Source-check `READY` and later-stage `COMPLETE` are the expected success statuses;
+neither approves the PR. In receipt mode, inspect the final session through the
+human UI without sending a prompt. A Task invocation that resumes it is not
+navigation. If that UI is unavailable, keep the receipt/session IDs and diagnostic
+location, or choose `returnReport: "full"` before a future run for an inline report.
 
 If OpenCode does not acknowledge an abort, the receipt warns that remote work may
 still be running or billed; the plugin's grants are revoked regardless. Cancelling
