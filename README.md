@@ -192,6 +192,22 @@ Saved inline comments also contain an AI/model attribution footer and a notice t
 
 By default, `structuredOutput: true` uses OpenCode 1.18.31's native JSON-schema output mechanism. This improves envelope reliability without selecting another model or automatically rerunning a failed stage. A provider must support the host's tool-based structured output. If it cannot, set `structuredOutput: false` and restart to use JSON text; a single fenced JSON response is supported, but malformed/truncated JSON is never silently repaired. Snapshot and finding checks apply to both transports. Host/provider-internal retries are outside this plugin's control.
 
+Optional `outputRetries: 1` allows **one status-only resubmission per review
+stage**, for an invalid top-level status such as `CCOMPLETE`. Default `0` keeps
+recovery disabled. Every other evidence check must already pass, and the original
+session must have a completed tool call and a confirmed abort. The same model
+gets one request in a fresh session and can return only a status; ordinary tools
+are denied. The plugin preserves the original report, findings, coverage and
+snapshot and validates the complete envelope again. Original failures and retry
+session IDs remain visible in the receipt and diagnostics.
+
+This does not retry malformed/missing JSON, host/provider errors, incomplete
+evidence, changed PR heads, cancellations, or comment preview/publication. A
+second failure ends that stage. The existing run timeout is not reset. A full
+review has four stages, so enabling this setting permits at most four extra
+formatting requests; it is not a spending cap or proof of review quality.
+Restart OpenCode after changing the setting. See [bounded status retries](docs/DEBUGGING.md#bounded-status-retries).
+
 Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):
 
 ```json
@@ -261,8 +277,9 @@ The installer does not edit your main OpenCode configuration, providers, MCP con
 
 Install runtime files and prompts from the same revision. Review envelopes now
 require coverage, counterevidence, and corrected confirmed findings; older custom
-prompts that omit them will fail validation. No new setting, model slot, or
-mandatory installation file is needed. Existing private settings are preserved.
+prompts that omit them will fail validation. No new model slot or mandatory
+installation file is needed. Existing private settings are preserved; a missing
+`outputRetries` is added as `0`, leaving recovery off until explicitly enabled.
 
 ## Repository layout
 

@@ -13,7 +13,7 @@ const coverage = object({
   gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
 });
 
-export function stageFormat(role) {
+export function stageFormat(role, statusOnly = false) {
   const kind = ROLES[role]?.format;
   if (!kind) throw new Error('Unknown review role.');
   let schema;
@@ -38,13 +38,24 @@ export function stageFormat(role) {
     status: status('DONE', 'INCOMPLETE'), posted: array(object({ findingId: string, threadId: { type: ['string', 'integer'] } })),
   });
   else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(finding), report: string });
-  return { type: 'json_schema', schema, retryCount: 0 };
+  return { type: 'json_schema', schema: statusOnly ? object({ status: schema.properties.status }) : schema, retryCount: 0 };
 }
 
 export function visibleText(response) {
   return (response?.parts ?? []).filter(p => p.type === 'text' && !p.ignored).map(p => p.text ?? '').join('\n');
 }
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+export class OutputStatusError extends Error {
+  constructor(label, value, allowed) {
+    // Receipts must not echo arbitrary model text, source, or credentials.
+    const shown = typeof value === 'string' && /^[A-Z_]{1,24}$/.test(value) ? JSON.stringify(value) : `<${value === null ? 'null' : typeof value}>`;
+    super(`Invalid ${label} envelope: status received ${shown}; expected ${allowed.join(' or ')}.`);
+    this.name = 'OutputStatusError';
+  }
+}
+function requireStatus(result, allowed, label) {
+  if (!allowed.includes(result.status)) throw new OutputStatusError(label, result.status, allowed);
+}
 export function parseJSONReport(response, settings) {
   const finish = String(response.info?.finish ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
   if (response.info?.error) {
@@ -98,7 +109,8 @@ export function validateSnapshot(s) {
 }
 function snapshotKey(s) { return JSON.stringify(validateSnapshot(s)); }
 export function checkEnvelope(result, prUrl) {
-  if (!isObject(result) || !['READY', 'NOT_READY'].includes(result.status) || !text(result.report)) throw new Error('Invalid source-check envelope: a status and report are required.');
+  if (!isObject(result) || !text(result.report)) throw new Error('Invalid source-check envelope: a status and report are required.');
+  requireStatus(result, ['READY', 'NOT_READY'], 'source-check');
   if (result.requirements !== undefined && typeof result.requirements !== 'string') throw new Error('Source-check requirements must be text.');
   if (result.sourceAccess !== undefined && (!isObject(result.sourceAccess) || Object.values(result.sourceAccess).some(value => typeof value !== 'string'))) throw new Error('Source-check sourceAccess must describe capabilities as text fields.');
   if (result.status !== 'READY') return result;
@@ -117,7 +129,8 @@ function validateFindings(findings, prefix) {
   }
 }
 export function initialEnvelope(result, expected, prefix) {
-  if (!isObject(result) || !['COMPLETE', 'PARTIAL'].includes(result.status) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
+  if (!isObject(result) || !Array.isArray(result.findings) || !text(result.report)) throw new Error('Invalid initial-review envelope.');
+  requireStatus(result, ['COMPLETE', 'PARTIAL'], 'initial-review');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
   const coverage = result.coverage;
   if (!isObject(coverage) || !Array.isArray(coverage.files) || !Array.isArray(coverage.gaps) ||
@@ -129,7 +142,8 @@ export function initialEnvelope(result, expected, prefix) {
   return result;
 }
 export function finalEnvelope(result, expected, originals) {
-  if (!isObject(result) || !['COMPLETE', 'INCOMPLETE', 'STALE'].includes(result.status) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
+  if (!isObject(result) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
+  requireStatus(result, ['COMPLETE', 'INCOMPLETE', 'STALE'], 'final-review');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Final reviewer used a different snapshot.');
   const ids = new Set(originals.map(f => f.id));
   const accounted = new Set();

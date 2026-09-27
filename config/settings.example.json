@@ -32,6 +32,7 @@
   "enabled": true,
   "returnReport": "receipt",
   "structuredOutput": true,
+  "outputRetries": 0,
   "debug": {
     "enabled": false,
     "directory": ""

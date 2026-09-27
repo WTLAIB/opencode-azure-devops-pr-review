@@ -46,8 +46,9 @@ returns the envelope in `info.structured`. This is a host output mechanism,
 not an ADO tool name or allowlist. The plugin still validates snapshots,
 finding IDs, dispositions, and comment-plan constraints.
 
-No extra formatter/reviewer model is started. The plugin does not retry failed
-stages or switch models. If a provider cannot use the native mechanism, select
+No extra formatter/reviewer model is started by default. The plugin does not
+rerun full stages or switch models. The opt-in status amendment below uses the
+same model in a new session. If a provider cannot use the native mechanism, select
 `structuredOutput: false` locally and restart. Text mode accepts a JSON object
 or one unambiguous fenced object with optional commentary. It does not guess
 among multiple envelopes, repair truncated JSON, or ignore host/model errors.
@@ -57,6 +58,37 @@ types omit it; the JavaScript SDK forwards the supplied body. Compatibility
 must still be tested with the actual provider. See the pinned
 [prompt implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts)
 and [SDK implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/sdk/js/src/gen/sdk.gen.ts).
+
+## Bounded status retries
+
+Set `"outputRetries": 1` and restart to enable one status-only resubmission per
+review stage. `0` is the default; other values are rejected. This is useful when
+the model returned a complete JSON envelope with an invalid top-level status
+token, such as `CCOMPLETE`, while every other evidence check passes. Error
+messages identify the status field and allowed values without echoing arbitrary
+model text. Missing/non-token statuses do not qualify.
+
+The original failed session must have a completed tool call and a confirmed
+abort. Completion bookkeeping is not independent proof of a source read. The
+same model gets a fresh session with the original envelope and must return only
+`{"status":"COMPLETE"}` (or another allowed, truthful status). The plugin keeps
+all original evidence/report fields and validates the amended envelope again.
+Ordinary tool use and a second model request in that repair session are denied.
+Both transports support this; host `format.retryCount` stays zero so retry
+ownership remains explicit in the plugin.
+
+This is not recovery for `StructuredOutputError`, missing/malformed JSON,
+authentication or transport errors, incomplete coverage, missing evidence,
+changed heads, cancellation, or comments. Those still stop. No whole workflow is
+rerun, and the existing timeout is not reset. Each of the four review stages can
+have at most one extra formatting request; extra usage may still be billed by
+the selected provider. Host-internal retries and auxiliary calls are separate.
+
+The receipt retains the failed attempt and its error, then lists
+`output-retry=1/1` and `retry-of=<original-session>` beside the new session. Debug
+files retain both responses; a retry result records `attempt: 2` and `retryOf`.
+The first result remains FAILED even when the overall review later completes.
+Inspect all attempts when evaluating reliability, not just the final status.
 
 ## Enable local diagnostics
 
@@ -88,15 +120,16 @@ printed in its receipt:
 | `result.json` | Overall outcome/error and all completed stage records. |
 | `report.md` | Runtime final report, including model attribution and dispositions; or the comment preview/publication receipt. Absent if no report was produced. |
 
-A complete normal or deep review has four stage records: source check, functional
-initial review, risk initial review, and final verification. `MODE` is `review`
+A complete normal or deep review normally has four stage records: source check,
+functional initial review, risk initial review, and final verification. An
+enabled status retry adds one attempt record for the affected stage. `MODE` is `review`
 or `deep`; the two initial file numbers may vary because the sessions start
 concurrently. A comment command uses the originating review's profile.
 
 Stage results are written after local contract validation. A model can claim
 READY/DONE in its visible response while the stage result is FAILED because the
-snapshot, plan, or publication report is invalid. Inspect both files. No retry is
-started to repair the envelope.
+snapshot, plan, or publication report is invalid. Inspect both files. Only the
+explicitly enabled, status-only case above can start a bounded resubmission.
 
 For quality-contract failures, compare the saved response to its request schema:
 
@@ -111,7 +144,7 @@ For quality-contract failures, compare the saved response to its request schema:
 
 Both native and text output use these checks. Install matching runtime/prompts
 and restart after an update; old custom prompts must satisfy the new contract.
-No output repair or fallback to the original candidate is performed. Debug data
+No evidence repair or fallback to the original candidate is performed. Debug data
 lets you inspect coverage claims, counterevidence and corrected findings, not
 independently prove that source reads or reasoning were correct.
 

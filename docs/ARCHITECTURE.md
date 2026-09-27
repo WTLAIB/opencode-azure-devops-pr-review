@@ -51,7 +51,7 @@ uncertain/reported records and are never automatically retried or rolled back.
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no failed stage is automatically rerun. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The opt-in status-only exception below does not weaken evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Source checks, initial reviews, final verification, comment plans, and publication
 receipts all pass their local contract validator inside the stage boundary before
@@ -89,6 +89,39 @@ The final verifier reports the current PR head. A mismatch becomes `STALE`, with
 
 Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
 
+### Bounded status resubmission
+
+`outputRetries` accepts only `0` (default) or `1`. Recovery applies only to the
+check/initial/final review roles and an invalid top-level uppercase status token
+of at most 24 characters. The original response must parse as one object, pass
+all other contracts when checked with its successful status, and have at least
+one completed ordinary tool call. This local probe is not adopted as a result
+and does not establish source authenticity or infer the intended status.
+
+The failed attempt remains FAILED with its response, error and revoked grant.
+Only after a confirmed abort, while the original run is active, can a fresh
+session request a status amendment from the same role/model. Its payload contains
+the immutable original envelope, allowed statuses and the validation error; it
+does not add another initial reviewer's material. Native transport uses a schema
+containing only `status`; text transport requires the same one-field object.
+The plugin combines the model's explicit amendment with the original fields and
+runs the entire original validator again. It never uses the probe's status.
+
+Repair grants deny all ordinary tools and a second `chat.params` model request.
+The pinned host's native StructuredOutput tool executes outside ordinary tool
+hooks; it remains available solely for the one-field submission. The existing
+run deadline, cancellation, configuration/model checks and cleanup still apply.
+No recursive retry, provider/model switch, or revoked-session reuse is allowed.
+Host/provider-internal retries and auxiliary requests are outside this bound.
+
+Malformed/missing output, provider/SDK errors, incomplete evidence, changed heads,
+unconfirmed aborts and cancellations do not qualify. Comment preview/publication
+never qualify. A second format failure ends the stage. Each attempt has its own
+session and diagnostic files; the amendment records `attempt: 2` and `retryOf`.
+Receipts retain the first error even after recovery. Final provenance uses only
+validated results, with at most one accepted result per role. Live model
+compatibility and reliability improvement still require acceptance testing.
+
 ### Quality-first policy
 
 The design borrows independent candidate verification and scoped repository-rule
@@ -113,7 +146,7 @@ require evaluation on representative PRs with independent ground truth.
 
 ## Tools and reports
 
-Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Generic tool hooks retain only lifecycle checks and completed-call bookkeeping, never semantic read/write classification. See [MCP ownership and limitations](AZURE_MCP.md).
+Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Generic tool hooks retain lifecycle checks and completed-call bookkeeping, never semantic read/write classification. Display and status-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
 
 The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 

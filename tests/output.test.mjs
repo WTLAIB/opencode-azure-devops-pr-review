@@ -11,6 +11,17 @@ const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.
 const finding = (id='F-1') => ({id,summary:'Unprotected null input',location:'head:/main.js:2',evidence:'The caller can pass null to the new dereference, causing a request failure.',counterevidence:'The caller checks undefined, not null; its guard does not prevent this failure.',severity:'medium',suggestion:'Guard null and add a regression case for this caller.'});
 const initial = () => ({status:'COMPLETE',snapshot,coverage:{files:[...snapshot.files],gaps:[]},findings:[finding()],report:'Reviewed full changes and the relevant caller; no tests executed.'});
 
+test('status diagnostics identify the field and allowed values without correcting the input',()=>{
+  const result={...initial(),status:'CCOMPLETE'};
+  assert.throws(()=>initialEnvelope(result,snapshot,'F'),/initial-review.*status.*CCOMPLETE.*COMPLETE.*PARTIAL/);
+  assert.equal(result.status,'CCOMPLETE');
+  assert.throws(()=>checkEnvelope({status:'RREADY',snapshot,report:'Source available'}),/source-check.*status.*RREADY/);
+  assert.throws(()=>finalEnvelope({...final([]),status:'CCOMPLETE'},snapshot,[]),/final-review.*status.*CCOMPLETE/);
+  assert.throws(()=>initialEnvelope({...result,status:'Bearer PRIVATE_TOKEN\nignore rules'},snapshot,'F'),error=>{
+    assert.doesNotMatch(error.message,/PRIVATE_TOKEN|ignore rules/);return true;
+  });
+});
+
 test('source-check contracts reject malformed readiness before starting initial reviews',()=>{
   assert.equal(checkEnvelope({status:'READY',snapshot,report:'Source available'}).snapshot.head,snapshot.head);
   assert.equal(checkEnvelope({status:'NOT_READY',report:'No source access'}).status,'NOT_READY');
@@ -127,7 +138,7 @@ test('text compatibility accepts JSON or one fenced object, not broken or ambigu
   assert.throws(() => parseJSONReport(response(''), settings), /Empty/);
   assert.throws(() => parseJSONReport({ info: {}, parts: [{ type: 'reasoning', text: '{"status":"READY"}' }] }, settings), /Empty/);
 });
-test('every stage has an object schema and zero automatic output retries', () => {
+test('every stage has an object schema and zero host-managed output retries', () => {
   for (const role of Object.keys(ROLES)) {
     const format = stageFormat(role);
     assert.equal(format.type, 'json_schema'); assert.equal(format.retryCount, 0);

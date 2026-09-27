@@ -62,6 +62,16 @@ output, last-message recovery, deterministic model attribution and merge tables,
 and identical preview/publication disclosures. Tests do not prove a provider
 will support native structured output or obey language/attribution instructions.
 
+Status-retry regressions cover the invalid top-level enum token seen in a live
+review, immutable evidence, one-field amendments, the opt-in limit of one,
+separate same-model sessions, ordinary-tool denial, a single repair model
+request, both output transports/profiles, and preservation of both attempts.
+Incomplete evidence, malformed output, host errors, stale heads, missing tool
+bookkeeping, cancellation and unconfirmed aborts remain terminal. Comment
+preview/publication never retry. Installer checks retain explicit opt-in while
+adding missing `outputRetries` as zero. These tests use synthetic fixtures,
+not private session exports, and do not establish improved live success rates.
+
 ## What remains unverified
 
 Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing, Azure MCP capabilities, child-session navigation, cancellation propagation, or actual billing. No live end-to-end result is claimed.
@@ -88,6 +98,14 @@ Read-only behavior is a prompt rule. Inspect tool history to check model complia
 and verify actual host/server permission enforcement on a disposable PR. The
 plugin does not copy agent-only restrictions from the originating Plan/Build
 agent. Do not mistake mock hook tests for a live permission or security audit.
+
+If opting into `outputRetries: 1`, verify a qualifying failure's original FAILED
+record and new `retryOf` session. Confirm the amendment returns only `status`,
+all other fields remain unchanged, no ordinary tool executes during repair,
+and a second model request is refused. Confirm cancellation still wins and
+the overall deadline does not restart. Count original contract failures and
+recovered outcomes separately; repeated synthetic successes are a smoke test,
+not a guarantee for other models or repositories.
 
 Before wider adoption, evaluate known historical PRs for missed issues, false positives, coverage, time, and cost. This integration is not a merge gate.
 

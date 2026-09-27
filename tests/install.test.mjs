@@ -367,6 +367,7 @@ for(const legacy of [false,true]) test(`replacement migrates models and merges m
   const merged=JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'));
   for(const key of ['outputLanguage','returnReport','structuredOutput','custom','enabled']) assert.deepEqual(merged[key],old[key]);
   assert.equal(merged.version,2);
+  assert.equal(merged.outputRetries,0);
   assert.deepEqual(merged.models.review,{functional:old.models.freeA,risk:old.models.freeB,verifier:old.models.freeB});
   assert.deepEqual(merged.models.deep,{functional:old.models.freeA,risk:'',verifier:''});
   for(const key of ['freeA','freeB','final']) assert.equal(Object.hasOwn(merged.models,key),false);
@@ -377,6 +378,14 @@ for(const legacy of [false,true]) test(`replacement migrates models and merges m
   assert.equal(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'),once);
   assert.equal(statSync(join(s.root,'plugins/azpr/settings.json')).mode&0o777,0o600);
   original(s);clean(s);
+});
+test('replacement preserves explicit retry opt-in without changing models or keeping a backup',()=>{
+  const s=setup(),file=profile(s),settings=JSON.parse(readFileSync(file,'utf8'));
+  settings.outputRetries=1;writeFileSync(file,JSON.stringify(settings));
+  ok(install(s,['--settings',file]));ok(install(s,['--replace']));
+  const merged=JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'));
+  assert.equal(merged.outputRetries,1);assert.deepEqual(merged.models,settings.models);
+  assert.ok(!existsSync(join(s.root,'azpr-backups')));original(s);clean(s);
 });
 test('explicit partial profiles are merged without modifying the source or retaining the previous profile',()=>{
   const s=setup();ok(install(s));const file=join(s.temp,'partial.json');

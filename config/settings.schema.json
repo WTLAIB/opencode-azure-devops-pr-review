@@ -174,7 +174,14 @@
     "structuredOutput": {
       "type": "boolean",
       "default": true,
-      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false only for a provider that cannot use it; no automatic retry or fallback model."
+      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false only for a provider that cannot use it; no automatic transport or model fallback."
+    },
+    "outputRetries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0,
+      "description": "Opt in to at most one status-only resubmission per review stage when every other evidence check passes. Uses the same model in a fresh session with ordinary tools denied and one model request. Never retries missing/malformed output, incomplete evidence, stale heads, cancellation, transport failures, or comments. Existing run timeout still applies; extra model usage may be billed."
     },
     "debug": {
       "type": "object",

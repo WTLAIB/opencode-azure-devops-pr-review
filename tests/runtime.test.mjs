@@ -54,14 +54,15 @@ async function fixture(t, opts={}) {
       if(!opts.skipMessageHook) await hooks['chat.message']({sessionID:id,agent:role,model},{message:{agent:role,model},parts:jclone(o.body.parts)});
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
-      if(!opts.skipAzure && !spec.comment) {
+      if(!opts.skipAzure && !spec.comment && packet.operation !== 'output-status-repair') {
         const tool=opts.readTool ?? 'ado_repo_pull_request'; const callID=`read-${id}`;
         const args = opts.readTool ? {repositoryId:'repo',project:'proj',pullRequestId:123} : {action:'get'};
         await hooks['tool.execute.before']({sessionID:id,tool,callID},{args});
         if(!opts.skipAzureAfter) await hooks['tool.execute.after']({sessionID:id,tool,callID,args},{title:'fixture read',output:'fixture code',metadata:opts.readMetadata ?? {}});
       }
       let result;
-      if(spec.comment) {
+      if(packet.operation === 'output-status-repair') result={status:spec.stage==='check'?'READY':'COMPLETE'};
+      else if(spec.comment) {
         let seq=0;
         const invoke=async(tool,args,result,response={})=>{
           const input={sessionID:id,tool,callID:`${id}-comment-${++seq}`,args};
@@ -134,6 +135,134 @@ test('text-only compatibility is explicit and never selects a fallback model', a
   assert.equal(f.prompts().length,4);
   assert.ok(f.prompts().every(p=>p.body.format===undefined));
   assert.doesNotMatch(f.cfg.agent['azpr-review-check'].prompt,/# Output transport/);
+});
+for(const mode of ['review','deep']) for(const native of [true,false]) test(`one status-only retry preserves evidence and routing (${mode}, native=${native})`,async t=>{
+  const role=`azpr-${mode}-risk`;
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.structuredOutput=native;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({role:r,result,packet})=>r===role && packet.operation!=='output-status-repair'?{...result,status:'CCOMPLETE'}:result,
+    answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
+  const out=await f.command(mode==='deep'?'pr-deep':'pr-review');
+  assert.match(out,/] COMPLETE/);assert.match(out,/output-retry=1\/1/);assert.match(out,/CCOMPLETE/);
+  assert.equal(f.prompts().length,5);
+  const attempts=f.prompts().filter(p=>p.body.agent===role);
+  assert.equal(attempts.length,2);assert.notEqual(attempts[0].path.id,attempts[1].path.id);
+  assert.deepEqual(attempts[0].body.model,attempts[1].body.model);
+  const packet=JSON.parse(attempts[1].body.parts[0].text);
+  assert.equal(packet.operation,'output-status-repair');assert.equal(packet.originalEnvelope.status,'CCOMPLETE');
+  assert.deepEqual(packet.originalEnvelope.findings,[candidate('R-1')]);
+  assert.ok(!('reviews' in packet));
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const diagnostic=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  const records=diagnostic.stages.filter(s=>s.role===role);
+  assert.equal(records[0].status,'FAILED');assert.equal(records[1].status,'COMPLETE');
+  assert.equal(records[1].retryOf,records[0].sessionID);assert.equal(records[1].attempt,2);
+  assert.equal(records[1].completedTools,0);
+  const responseFiles=(await readdir(dir)).filter(n=>n.endsWith(`${role}.response.json`));
+  assert.equal(responseFiles.length,2);
+  for(const p of attempts) await assert.rejects(()=>f.hooks['tool.execute.before']({sessionID:p.path.id,tool:'any_tool',callID:'late'},{args:{}}),/expired/);
+});
+test('repeated invalid status stops after one retry and never reaches final verification',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result})=>role.endsWith('-risk')?{...result,status:'CCOMPLETE'}:result});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,2);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-functional')).length,1);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+});
+for(const change of ['findings','snapshot','coverage','report','extra']) test(`status retry rejects changed ${change}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result,packet})=>{
+    if(!role.endsWith('-risk'))return result;
+    if(packet.operation!=='output-status-repair')return {...result,status:'CCOMPLETE'};
+    if(change==='findings')result.findings=[{...candidate('R-1'),summary:'A new claim'}];
+    if(change==='snapshot')result.snapshot={...SNAP,head:'c'.repeat(40)};
+    if(change==='coverage')result.coverage={files:[],gaps:['Missing source']};
+    if(change==='report')result.report='Rewritten report';
+    if(change==='extra')result.extra='invented';
+    return result;
+  }});
+  assert.match(await f.command(),/INCOMPLETE[\s\S]*only.*status/i);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,2);
+});
+for(const defect of ['partial','coverage','snapshot','evidence','missingStatus','hostError','invalidJSON','noTools']) test(`no status retry for ${defect}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,skipAzure:defect==='noTools',
+    result:({role,result})=>{
+      if(!role.endsWith('-risk'))return result;
+      result.status=defect==='partial'?'PARTIAL':'CCOMPLETE';
+      if(defect==='partial'||defect==='coverage')result.coverage.gaps=['Missing source'];
+      if(defect==='snapshot')result.snapshot.head='c'.repeat(40);
+      if(defect==='evidence')delete result.findings[0].evidence;
+      if(defect==='missingStatus')delete result.status;
+      return result;
+    },answer:({role,answer})=>({data:!role.endsWith('-risk')?answer:defect==='hostError'?{...answer,info:{...answer.info,error:{name:'StructuredOutputError'}}}:defect==='invalidJSON'?{...answer,parts:[{type:'text',text:'bad envelope'}]}:answer})});
+  assert.match(await f.command(),/] INCOMPLETE/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,1);
+});
+test('status retry denies every ordinary tool and cannot resume its original session',async t=>{
+  let original;
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result,packet,id})=>{
+    if(role.endsWith('-risk')&&packet.operation!=='output-status-repair'){original=id;return {...result,status:'CCOMPLETE'};}return result;
+  },duringPrompt:async({packet,hooks,id,role,model})=>{
+    if(packet.operation!=='output-status-repair')return;
+    for(const tool of ['mcp_arbitrary','bash','read','task']) await assert.rejects(()=>hooks['tool.execute.before']({sessionID:id,tool,callID:tool},{args:{}}),/status repair.*tools/i);
+    await assert.rejects(()=>hooks['tool.execute.before']({sessionID:original,tool:'mcp_arbitrary',callID:'old'},{args:{}}),/expired/);
+    await assert.rejects(()=>hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{}),/only one model request/);
+  }});
+  assert.match(await f.command(),/] COMPLETE/);
+});
+for(const action of ['cancel','abortUnconfirmed']) test(`${action} prevents status retry`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({result})=>({...result,status:'RREADY'}),client:client=>{
+    client.session.abort=async()=>{
+      if(action==='cancel')await f.command('pr-stop','','ses_original');
+      return {data:action!=='abortUnconfirmed'};
+    };
+  }});
+  const out=await f.command('pr-check');
+  assert.match(out,action==='cancel'?/] CANCELLED/:/INCOMPLETE[\s\S]*did not confirm/);
+  assert.equal(f.prompts().length,1);
+});
+test('cancellation during status retry prevents final verification and releases the run',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result,packet})=>role.endsWith('-risk')&&packet.operation!=='output-status-repair'?{...result,status:'CCOMPLETE'}:result,
+    duringPrompt:async({packet})=>{if(packet.operation==='output-status-repair')await f.command('pr-stop','');}});
+  assert.match(await f.command(),/] CANCELLED/);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+  assert.match(await f.command('pr-check'),/] READY/);
+});
+test('retry settings are opt-in and capped at one extra submission',async t=>{
+  const f=await fixture(t,{settings:s=>delete s.outputRetries});
+  assert.equal(validateSettings(f.settings).outputRetries,0);
+  for(const outputRetries of [-1,2,99,0.5,'1',true,null])assert.throws(()=>validateSettings({...f.settings,outputRetries}),/outputRetries/);
+  for(const outputRetries of [0,1])assert.equal(validateSettings({...f.settings,outputRetries}).outputRetries,outputRetries);
+  const schema=JSON.parse(await readFile(join(ROOT,'config/settings.schema.json'),'utf8'));
+  const example=JSON.parse(await readFile(join(ROOT,'config/settings.example.json'),'utf8'));
+  assert.equal(example.outputRetries,0);assert.equal(schema.properties.outputRetries.default,0);assert.equal(schema.properties.outputRetries.maximum,1);
+});
+for(const slot of ['check','verifier']) test(`status-only retry works for ${slot} without changing its original result`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.returnReport='full';},result:({role,result,packet})=>role.endsWith(`-${slot}`)&&packet.operation!=='output-status-repair'?{...result,status:slot==='check'?'RREADY':'CCOMPLETE'}:result});
+  const out=await f.command();
+  assert.match(out,/] COMPLETE/);assert.match(out,/FINAL_MARKDOWN_REPORT_SENTINEL/);
+  assert.equal(f.prompts().length,5);
+  const repair=f.prompts().find(p=>JSON.parse(p.body.parts[0].text).operation==='output-status-repair');
+  assert.deepEqual(repair.body.format.schema.required,['status']);assert.deepEqual(Object.keys(repair.body.format.schema.properties),['status']);
+});
+for(const status of ['STALE','CCOMPLETE']) test(`changed final HEAD is not retried (${status})`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result})=>role.endsWith('-verifier')?{...result,status,currentHead:'c'.repeat(40)}:result});
+  const out=await f.command();
+  assert.match(out,status==='STALE'?/] STALE/:/] INCOMPLETE/);assert.equal(f.prompts().length,4);
+});
+test('status retries can be disabled without changing error diagnosis',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=0,result:({role,result})=>role.endsWith('-risk')?{...result,status:'CCOMPLETE'}:result});
+  assert.match(await f.command(),/INCOMPLETE[\s\S]*CCOMPLETE/);assert.equal(f.prompts().length,3);
+});
+test('status retry does not turn a contradictory PARTIAL amendment into success',async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result,packet})=>role.endsWith('-risk')?{...result,status:packet.operation==='output-status-repair'?'PARTIAL':'CCOMPLETE'}:result});
+  assert.match(await f.command(),/INCOMPLETE[\s\S]*PARTIAL requires/);assert.equal(f.prompts().length,4);
+});
+for(const publish of [false,true]) test(`comment ${publish?'publication':'preview'} is never retried`,async t=>{
+  const f=await fixture(t,{settings:s=>{enableComments(s);s.outputRetries=1;},result:({role,result})=>role.endsWith(publish?'-comment-publish':'-comment-plan')?{...result,status:publish?'DDONE':'RREADY'}:result});
+  const id=reviewId(await f.command());
+  if(publish)assert.match(await f.command('pr-comment',id),/] PREVIEW/);
+  const before=f.prompts().length;
+  assert.match(await f.command('pr-comment',id+(publish?' --publish':'')),/] INCOMPLETE/);
+  assert.equal(f.prompts().length,before+1);
 });
 for(const mode of ['receipt','full']) test(`malformed ${mode} source output remains incomplete with session diagnostics and no model retry`, async t => {
   const f=await fixture(t,{invalidJSON:true,settings:s=>s.returnReport=mode});

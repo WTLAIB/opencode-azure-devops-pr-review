@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, validateSettings } from './config.mjs';
-import { parseJSONReport, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, finalEnvelope } from './output.mjs';
+import { OutputStatusError, parseJSONReport, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution } from './attribution.mjs';
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -97,8 +97,35 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     return run.stopping;
   }
   async function stage(run, role, payload, validate) {
+    try { return await stageAttempt(run, role, payload, validate); }
+    catch (error) {
+      const spec = ROLES[role], failed = error instanceof OutputStatusError ? error.submission : undefined;
+      if (!state.settings.outputRetries || !spec || spec.comment || !failed?.completedTools || !run.active ||
+          run.controller.signal.aborted || run.abortUnconfirmed ||
+          typeof failed.envelope.status !== 'string' || !/^[A-Z_]{1,24}$/.test(failed.envelope.status)) throw error;
+      const original = clone(failed.envelope), completeStatus = spec.format === 'check' ? 'READY' : 'COMPLETE';
+      // This probe only establishes that every other contract passes. Never
+      // adopt its result or infer the model's intended status from a typo.
+      try {
+        if (validate({ ...clone(original), status: completeStatus }).status !== completeStatus) throw error;
+      } catch { throw error; }
+      await current();
+      if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
+      const repair = { operation: 'output-status-repair', originalEnvelope: original,
+        allowedStatuses: stageFormat(role).schema.properties.status.enum, error: error.message };
+      toast(`${role}: output status retry 1/1; original session=${failed.sessionID}. No source work is repeated.`);
+      // Exactly one fresh session with the same model; never recurse through
+      // stage(), reuse a revoked session, or restart the run deadline.
+      return stageAttempt(run, role, repair, amendment => {
+        if (Object.keys(amendment).length !== 1 || !Object.hasOwn(amendment, 'status')) throw new Error('Output retry may contain only the status field; original evidence must remain unchanged.');
+        return validate({ ...original, status: amendment.status });
+      }, failed.sessionID);
+    }
+  }
+  async function stageAttempt(run, role, payload, validate, retryOf) {
     await current();
     if (!run.active) throw new Error('Review stopped.');
+    if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     checkRole(role);
     if (typeof validate !== 'function') throw new Error('Every stage requires an explicit output validator.');
     const input = JSON.stringify(payload);
@@ -107,18 +134,20 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (spec.mode !== run.profile) throw new Error('[AZPR] Reviewer profile mismatch before invocation.');
     const idModel = state.settings.models[spec.mode][spec.slot];
     if (!idModel) throw new Error('Required model is not configured.');
-    const title = `[AZPR ${run.id}] ${spec.label}`;
+    const title = `[AZPR ${run.id}] ${spec.label}${retryOf ? ' (output retry 1/1)' : ''}`;
     const made = data(await bounded(() => context.client.session.create({ body: { parentID: run.origin, title }, signal: run.controller.signal }), run.controller.signal), 'session.create');
     if (!text(made.id) || made.id === run.origin || seenSessions.has(made.id)) throw new Error('SDK did not return a new independent session.');
     if (!run.active) throw new Error('Review stopped before model invocation.');
+    if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     seenSessions.add(made.id);
-    const g = { run, role, model: idModel, messages: 0, calls: 0, toolCalls: new Set(), completedTools: new Set() };
+    const g = { run, role, model: idModel, statusRepair: Boolean(retryOf), messages: 0, calls: 0, toolCalls: new Set(), completedTools: new Set() };
     grants.set(made.id, g);
-    const record = { role, profile: spec.mode, stage: spec.stage, model: idModel, sessionID: made.id, title, status: 'RUNNING', startedAt: new Date().toISOString() };
+    const record = { role, profile: spec.mode, stage: spec.stage, model: idModel, sessionID: made.id, title, attempt: retryOf ? 2 : 1, ...(retryOf ? { retryOf } : {}), status: 'RUNNING', startedAt: new Date().toISOString() };
     run.stages.push(record);
     const stem = `${String(run.stages.length).padStart(2, '0')}-${role}`;
-    const format = state.settings.structuredOutput ? stageFormat(role) : undefined;
+    const format = state.settings.structuredOutput ? stageFormat(role, Boolean(retryOf)) : undefined;
     let receivedAnswer = false;
+    let envelope;
     try {
       await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions: state.config.agent[role].prompt });
       if (!run.active) throw new Error('Review stopped before model invocation.');
@@ -132,12 +161,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (!run.active) throw new Error('Review stopped before output validation.');
       if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
       record.completedTools = g.completedTools.size;
-      const result = validate(parseJSONReport(answer, state.settings), record);
+      envelope = parseJSONReport(answer, state.settings);
+      const result = validate(envelope, record);
       record.status = result.status ?? 'INVALID';
       record.result = result;
       return result;
     } catch (error) {
       record.status = 'FAILED'; record.error = errorText(error);
+      if (error instanceof OutputStatusError && !retryOf) error.submission = { envelope, sessionID: made.id, completedTools: g.completedTools.size };
       grants.delete(made.id); // Revoke even if a failed HTTP request left work on the server.
       if (!run.controller.signal.aborted) await abortSession(run, made.id);
       if (!receivedAnswer && state.settings.debug.enabled && typeof context.client.session.messages === 'function') {
@@ -172,7 +203,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     finally { grants.delete(last.sessionID); }
   }
   function receipt(run, report, status, error) {
-    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}`).join('\n');
+    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}` : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
     let body = `[AZPR ${run.id}] ${status}\n${error ? `Reason (${run.phase ?? 'workflow'}): ${error}\n` : ''}${rows}\n`;
     body += diagnosticLocation(run);
     if (error && run.stages.some(s => s.status === 'FAILED')) body += '\nInspect a failed child session locally with: opencode export <sessionID> (use its session= value above, not the AZPR run ID). Exports may contain private source and credentials; do not upload them unredacted.\n';
@@ -375,6 +406,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const g = authorize(input.sessionID, input.agent, `${input.model?.providerID}/${input.model?.id}`);
       if (g.displayOnly) throw new Error('[AZPR] Display-only report must never invoke a model.');
       if (!g.messages) throw new Error('[AZPR] Missing authorized initial reviewer message.');
+      if (g.statusRepair && g.calls) throw new Error('[AZPR] Status repair permits only one model request.');
       g.calls++;
     },
     async 'tool.execute.before'(input, output) {
@@ -383,6 +415,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const g = grants.get(input.sessionID);
       if (!g?.run.active) throw new Error('[AZPR] Review tool authorization has expired.');
       if (g.displayOnly) throw new Error('[AZPR] Report display cannot invoke tools.');
+      if (g.statusRepair) throw new Error('[AZPR] Status repair cannot invoke ordinary tools.');
       await current();
       // Cancellation can revoke a grant while the asynchronous settings read runs.
       if (!g.run.active || grants.get(input.sessionID) !== g) throw new Error('[AZPR] Review tool authorization has expired.');
