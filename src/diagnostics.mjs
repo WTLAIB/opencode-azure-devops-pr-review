@@ -4,6 +4,64 @@ import { homedir } from 'node:os';
 import { join, resolve, parse, relative, isAbsolute } from 'node:path';
 import { visibleText } from './output.mjs';
 
+// Local hook intervals, not provider inference/queue time or Azure server time.
+// Keep only tool names and offsets: no call IDs, arguments, output or reasoning.
+export function createStageTiming(clock = () => performance.now()) {
+  const start = clock(), requests = [], tools = new Map();
+  let promptStart = null, response = null, responseOutcome = null, saved;
+  const now = () => Math.max(0, clock() - start);
+  const ms = value => Math.round(value * 1000) / 1000;
+  const open = () => saved === undefined && response === null;
+  function activeBetween(from, to) {
+    const intervals = [];
+    for (const tool of tools.values()) {
+      if (tool.startMs >= to) continue;
+      if (tool.endMs === null) return null; // Missing after-hook is unknown, not zero.
+      const a = Math.max(from, tool.startMs), b = Math.min(to, tool.endMs);
+      if (b > a) intervals.push([a, b]);
+    }
+    intervals.sort((a, b) => a[0] - b[0]);
+    let total = 0, end = from;
+    for (const [a, b] of intervals) { total += Math.max(0, b - Math.max(a, end)); end = Math.max(end, b); }
+    return total;
+  }
+  return {
+    promptStarted() { if (open() && promptStart === null) promptStart = now(); },
+    modelRequest() { if (open()) requests.push(now()); },
+    toolStarted(id, tool) {
+      if (open() && !tools.has(id)) tools.set(id, { tool, startMs: now(), endMs: null });
+    },
+    toolEnded(id) {
+      const tool = tools.get(id);
+      if (open() && tool && tool.endMs === null) tool.endMs = now();
+    },
+    promptSettled(outcome) { if (open()) { response = now(); responseOutcome = outcome; } },
+    finish() {
+      if (saved) return saved;
+      const end = now(), requestEnd = response ?? end, rows = [...tools.values()];
+      const active = activeBetween(0, requestEnd), unfinishedTools = rows.filter(t => t.endMs === null).length;
+      saved = {
+        elapsedMs: ms(end), responseOutcome,
+        promptMs: promptStart === null || response === null ? null : ms(response - promptStart),
+        responseProcessingMs: response === null ? null : ms(end - response),
+        toolActiveMs: unfinishedTools || active === null ? null : ms(active), unfinishedTools,
+        lastToolToResponseMs: responseOutcome !== 'returned' || !rows.length || unfinishedTools ? null
+          : ms(Math.max(0, response - rows.reduce((last, t) => Math.max(last, t.endMs), 0))),
+        toolCalls: rows.map(t => ({ tool: t.tool, startMs: ms(t.startMs), endMs: t.endMs === null ? null : ms(t.endMs),
+          durationMs: t.endMs === null ? null : ms(t.endMs - t.startMs) })),
+        modelRounds: requests.map((startMs, index) => {
+          const endMs = requests[index + 1] ?? requestEnd, active = activeBetween(startMs, endMs);
+          return { startMs: ms(startMs), endMs: ms(endMs), durationMs: ms(endMs - startMs),
+            toolActiveMs: active === null ? null : ms(active),
+            outsideToolMs: active === null ? null : ms(Math.max(0, endMs - startMs - active)),
+            endReason: index + 1 < requests.length ? 'next-request' : responseOutcome ?? 'stage-stop' };
+        }),
+      };
+      return saved;
+    },
+  };
+}
+
 async function ensureDirectory(path) {
   const root = parse(path).root;
   let current = root;

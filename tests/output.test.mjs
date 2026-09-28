@@ -344,7 +344,7 @@ test('review guidance uses PR versions; standalone check retains cumulative proo
   assert.match(check,/Do not perform a code review or diagnose defects/);
   assert.match(check,/missing required evidence prevents\s+READY/);
   assert.match(common,/does not imply directory-listing Commit support/);
-  assert.match(common,/Reuse complete exact-commit content\s+already obtained in your own session/s);
+  assert.match(common,/Reuse complete exact-commit content\s+already\s+obtained in your own session/s);
   result.snapshot=snapshot;
   assert.equal(checkEnvelope(result).status,'READY');
 });
@@ -353,7 +353,7 @@ test('single-source verifier report retains evidence and requires every structur
   assert.match(prompt,/trigger, scope, severity, evidence, counterevidence/);
   assert.match(prompt,/exactly one structured\s+disposition per original ID/);
   assert.match(prompt,/runtime renders the validated snapshot, findings/);
-  assert.match(prompt,/checks\/limits even when no findings survive/);
+  assert.match(prompt,/Explain material limits\s+and unexecuted tests even when no findings survive/);
   assert.match(prompt,/read the same PR metadata again/);
 });
 test('finding locations must be recounted from exact source without transport wrappers',async()=>{

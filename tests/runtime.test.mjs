@@ -168,6 +168,48 @@ test('receipt and full use identical stage requests, schemas, and role instructi
   assert.deepEqual(bodies(receipt),bodies(full));
   for(const role of Object.keys(ROLES)) assert.equal(receipt.cfg.agent[role].prompt,full.cfg.agent[role].prompt);
 });
+for(const native of [true,false]) test(`timing diagnostics preserve requests and use only observed metadata (native=${native})`,async t=>{
+  const settings=s=>s.structuredOutput=native;
+  const plain=await fixture(t,{settings}),timed=await fixture(t,{settings:s=>{settings(s);s.debug={enabled:true,directory:'.azpr-debug'};}});
+  assert.match(await plain.command(),/] COMPLETE/);const out=await timed.command();assert.match(out,/] COMPLETE/);
+  const bodies=f=>f.prompts().map(p=>p.body).sort((a,b)=>a.agent.localeCompare(b.agent));
+  assert.deepEqual(bodies(timed),bodies(plain));assert.equal(timed.prompts().length,3);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const result=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  for(const key of ['renderMs','displayMs','cleanupMs']) assert.ok(Number.isFinite(result.timing[key])&&result.timing[key]>=0);
+  for(const stage of result.stages){
+    const timing=stage.timing;
+    assert.equal(timing.responseOutcome,'returned');assert.equal(timing.unfinishedTools,0);
+    assert.equal(timing.toolCalls.length,1);assert.equal(timing.modelRounds.length,stage.modelRequests);
+    assert.equal(timing.toolCalls[0].tool,'ado_repo_pull_request');
+    assert.ok(timing.lastToolToResponseMs>=0);assert.ok(timing.promptMs>=timing.toolActiveMs);
+    assert.ok(timing.responseProcessingMs>=0);
+    assert.doesNotMatch(JSON.stringify(timing),/ses_fixture|repositoryId|arguments|fixture code|PRIVATE_INITIAL_REPORT/);
+  }
+});
+test('timing diagnostics expose a missing tool after-hook without treating it as zero latency',async t=>{
+  const f=await fixture(t,{skipAzureAfter:true,settings:s=>s.debug={enabled:true,directory:'.azpr-debug'}});
+  const out=await f.command('pr-check');assert.match(out,/] READY/); // Timing gaps do not change validation.
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages[0];
+  assert.equal(stage.timing.responseOutcome,'returned');assert.equal(stage.timing.unfinishedTools,1);
+  assert.equal(stage.timing.toolActiveMs,null);assert.equal(stage.timing.lastToolToResponseMs,null);
+  assert.equal(stage.timing.modelRounds[0].outsideToolMs,null);
+});
+test('timing diagnostics stop at cancellation and cannot be completed by a late tool hook',async t=>{
+  let f;
+  f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,id})=>{
+    await hooks['tool.execute.before']({sessionID:id,tool:'custom_read',callID:'pending-read'},{args:{private:'DO_NOT_LOG'}});
+    await f.command('pr-stop','');
+    await hooks['tool.execute.after']({sessionID:id,tool:'custom_read',callID:'pending-read'},{output:'DO_NOT_LOG'});
+  }});
+  const out=await f.command('pr-check');assert.match(out,/] CANCELLED/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages[0];
+  assert.equal(stage.timing.responseOutcome,'interrupted');assert.equal(stage.timing.unfinishedTools,1);
+  assert.equal(stage.timing.toolCalls[0].endMs,null);
+  assert.doesNotMatch(JSON.stringify(stage.timing),/DO_NOT_LOG|pending-read/);
+});
 test('receipts explain readiness and do not instruct the caller to resume reviewers',async t=>{
   const f=await fixture(t),out=await f.command();
   assert.match(out,/COMPLETE means that review stage completed/);
@@ -609,6 +651,8 @@ for(const mode of ['review','deep']) for(const native of [true,false]) test(`mis
   assert.equal(records.length,2);assert.equal(records[0].status,'FAILED');assert.match(records[0].error,/location is missing/);
   assert.equal(records[1].retryOf,originalID);assert.equal(records[1].sessionID,originalID);
   assert.equal(records[1].completedTools,0);assert.equal(records[1].modelRequests,1);assert.deepEqual(records[1].result,original);
+  assert.ok(records[0].timing.toolCalls.length>0);assert.deepEqual(records[1].timing.toolCalls,[]);
+  assert.equal(records[1].timing.modelRounds.length,1);assert.equal(records[1].timing.lastToolToResponseMs,null);
   const raw=JSON.parse(await readFile(join(dir,(await readdir(dir)).find(n=>n.endsWith('-verifier.response.json'))),'utf8'));
   assert.equal(Object.hasOwn((native?raw.structured:JSON.parse(raw.text)).newFindings[0],'location'),false);
   await assert.rejects(()=>f.hooks['tool.execute.before']({sessionID:originalID,tool:'any_tool',callID:'late'},{args:{}}),/expired/);

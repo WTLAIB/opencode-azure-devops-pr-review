@@ -4,7 +4,54 @@ import { mkdtemp, rm, readdir, readFile, stat, symlink, writeFile } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { createDiagnostics } from '../src/diagnostics.mjs';
+import { createDiagnostics, createStageTiming } from '../src/diagnostics.mjs';
+
+test('stage timing separates overlapping tool intervals from model request windows',()=>{
+  let now=0;const timing=createStageTiming(()=>now);
+  now=2;timing.promptStarted();now=4;timing.modelRequest();
+  now=10;timing.toolStarted('private-call-a','custom_read');
+  now=14;timing.toolStarted('private-call-b','custom_read');
+  now=20;timing.toolEnded('private-call-a');now=24;timing.toolEnded('private-call-b');
+  now=30;timing.modelRequest();now=60;timing.promptSettled('returned');now=65;
+  const result=timing.finish();
+  assert.equal(result.promptMs,58);assert.equal(result.toolActiveMs,14);
+  assert.equal(result.lastToolToResponseMs,36);assert.equal(result.responseProcessingMs,5);
+  assert.deepEqual(result.modelRounds.map(r=>[r.durationMs,r.toolActiveMs,r.outsideToolMs,r.endReason]),
+    [[26,14,12,'next-request'],[30,0,30,'returned']]);
+  assert.deepEqual(result.toolCalls.map(t=>t.durationMs),[10,10]);
+  assert.doesNotMatch(JSON.stringify(result),/private-call/);
+});
+test('stage timing leaves unmatched tools unknown on interruption and ignores late completions',()=>{
+  let now=0;const timing=createStageTiming(()=>now);
+  timing.promptStarted();timing.modelRequest();
+  now=2;timing.toolStarted('read','custom_read');now=12;timing.promptSettled('interrupted');now=20;
+  const result=timing.finish();
+  assert.equal(result.promptMs,12);assert.equal(result.responseProcessingMs,8);
+  assert.equal(result.toolActiveMs,null);assert.equal(result.unfinishedTools,1);
+  assert.equal(result.toolCalls[0].durationMs,null);
+  assert.equal(result.lastToolToResponseMs,null);
+  assert.equal(result.modelRounds[0].outsideToolMs,null);
+  assert.equal(result.modelRounds[0].endReason,'interrupted');
+  now=30;timing.toolEnded('read');timing.modelRequest();
+  assert.deepEqual(timing.finish(),result);
+});
+test('stage timing counts each tool once and does not invent a last read for tool-free amendments',()=>{
+  let now=0;const timing=createStageTiming(()=>now);
+  timing.promptStarted();timing.modelRequest();now=2;timing.toolStarted('a','read');
+  now=3;timing.toolStarted('a','read');now=7;timing.toolEnded('a');
+  now=8;timing.toolEnded('a');now=9;timing.promptSettled('rejected');
+  const result=timing.finish();assert.equal(result.toolActiveMs,5);assert.equal(result.toolCalls.length,1);
+  const empty=createStageTiming(()=>now);empty.promptStarted();empty.modelRequest();
+  now=10;empty.promptSettled('returned');const repaired=empty.finish();
+  assert.equal(repaired.toolActiveMs,0);assert.equal(repaired.lastToolToResponseMs,null);
+  assert.deepEqual(repaired.toolCalls,[]);assert.equal(repaired.modelRounds.length,1);
+});
+test('stage timing records an early stage stop without fabricating a prompt response',()=>{
+  let now=0;const timing=createStageTiming(()=>now);now=5;
+  const result=timing.finish();assert.equal(result.elapsedMs,5);
+  assert.equal(result.promptMs,null);assert.equal(result.responseProcessingMs,null);
+  assert.equal(result.responseOutcome,null);assert.deepEqual(result.modelRounds,[]);
+});
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'azpr-debug-test-'));

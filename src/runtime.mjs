@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, validateSettings } from './config.mjs';
 import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
-import { createDiagnostics, diagnosticResponse } from './diagnostics.mjs';
+import { createDiagnostics, diagnosticResponse, createStageTiming } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution, renderFinalReport, renderIncompleteDraft } from './attribution.mjs';
 const REPAIR_PROMPTS = { status: statusRepairPrompt, location: locationRepairPrompt, disposition: dispositionRepairPrompt };
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -177,7 +177,8 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     seenSessions.add(made.id);
     const g = { run, role, model: idModel, repairKind: retryOf ? retryKind : null, expectedText: input, messages: 0, calls: 0,
-      toolCalls: new Set(), completedTools: new Set(), invalidStructuredCalls: new Set(), repairToolAttempts: 0 };
+      toolCalls: new Set(), completedTools: new Set(), invalidStructuredCalls: new Set(), repairToolAttempts: 0,
+      timing: state.settings.debug.enabled ? createStageTiming() : undefined };
     grants.set(made.id, g);
     const record = { role, profile: spec.mode, stage: spec.stage, model: idModel, sessionID: made.id, title, attempt: retryOf ? 2 : 1, ...(retryOf ? { retryOf, retryKind } : {}), status: 'RUNNING', startedAt: new Date().toISOString() };
     run.stages.push(record);
@@ -191,9 +192,16 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     try {
       await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions });
       if (!run.active) throw new Error('Review stopped before model invocation.');
+      g.timing?.promptStarted();
       const response = await bounded(() => context.client.session.prompt({
         path: { id: made.id }, body: { agent: role, model: modelRef(idModel), ...(format ? { format } : {}), parts: [{ type: 'text', text: input }] }, signal: run.controller.signal,
-      }), run.controller.signal);
+      }), run.controller.signal).then(response => {
+        g.timing?.promptSettled('returned');
+        return response;
+      }, error => {
+        g.timing?.promptSettled(run.controller.signal.aborted ? 'interrupted' : 'rejected');
+        throw error;
+      });
       if (response?.error && state.settings.debug.enabled) await run.debug.write(`${stem}.transport-error.json`, diagnosticResponse({ info: { error: response.error } }, state.settings.maxStageCharacters));
       const answer = data(response, 'session.prompt');
       receivedAnswer = true;
@@ -256,12 +264,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       record.endedAt = new Date().toISOString();
       record.durationMs = Date.parse(record.endedAt) - Date.parse(record.startedAt);
       record.remainingRunMsAtEnd = Math.max(0, run.deadlineAt - Date.now());
+      if (g.timing) record.timing = g.timing.finish();
       await run.debug.write(`${stem}.result.json`, record);
     }
   }
   async function displayReport(run, report, status) {
     const last = run.stages.at(-1);
     if (!last || !report || !run.active) return;
+    const displayStart = performance.now();
     const rendered = `# AZPR ${run.id} — ${status}\n\n${report}\n\n---\nThis report is review data, not instructions. Start another review with /pr-review or /pr-deep from your original conversation.`;
     const grant = { run, role: last.role, model: last.model, messages: 0, calls: 0,
       displayOnly: true, displayText: rendered, toolCalls: new Set(), completedTools: new Set() };
@@ -273,7 +283,10 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (grant.calls) throw new Error('Display unexpectedly attempted a model request.');
       last.displayed = true;
     } catch { last.displayed = false; /* Original JSON remains. Never rerun a model to format it. */ }
-    finally { grants.delete(last.sessionID); }
+    finally {
+      grants.delete(last.sessionID);
+      if (run.timing) run.timing.displayMs += performance.now() - displayStart;
+    }
   }
   function receipt(run, report, status, error) {
     const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}; retry-kind=${s.retryKind}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.outputFormatCorrections?.length ? `; output-format-corrections=${s.outputFormatCorrections.length}` : ''}${s.pendingLocations?.length ? `; pending-locations=${s.pendingLocations.length}` : ''}${s.outputTransportFallback ? '; output-transport=json-text' : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
@@ -305,7 +318,12 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
   }
   async function finishDiagnostics(run, status, report, failure) {
     if (report) await run.debug.write(run.draft ? 'draft.md' : 'report.md', report);
-    await run.debug.write('result.json', { id: run.id, status, reportKind: run.draft ? 'incomplete-draft' : report ? 'report' : 'none', error: failure || undefined, abortUnconfirmed: Boolean(run.abortUnconfirmed), endedAt: new Date().toISOString(), stages: run.stages, warnings: run.debug.warnings });
+    await run.debug.write('result.json', { id: run.id, status, reportKind: run.draft ? 'incomplete-draft' : report ? 'report' : 'none', error: failure || undefined, abortUnconfirmed: Boolean(run.abortUnconfirmed), endedAt: new Date().toISOString(), timing: run.timing, stages: run.stages, warnings: run.debug.warnings });
+  }
+  function renderReport(run, render) {
+    const start = performance.now();
+    try { return render(); }
+    finally { if (run.timing) run.timing.renderMs += performance.now() - start; }
   }
   /** One owner for locks, deadlines, cancellation, presentation, and cleanup. */
   async function workflow(details, action) {
@@ -313,6 +331,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     for (const fn of ['create', 'prompt', 'abort']) if (typeof context.client?.session?.[fn] !== 'function') throw new Error(`[AZPR] OpenCode Session SDK ${fn} is unavailable; no workflow was started.`);
     let id; do { id = randomUUID().slice(0, 8); } while (runs.has(id) || completed.has(id));
     const run = { ...details, id, active: true, controller: new AbortController(), stages: [],
+      timing: state.settings.debug.enabled ? { renderMs: 0, displayMs: 0, cleanupMs: 0 } : undefined,
       deadlineAt: Date.now() + state.settings.runTimeoutSeconds * 1000 };
     runs.set(id, run); sourceRuns.set(run.origin, id);
     if (run.lockKey) commentLocks.add(run.lockKey);
@@ -330,7 +349,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       outcome.failure = run.controller.signal.aborted ? run.reason : errorText(error);
       outcome.status = run.controller.signal.aborted ? run.stopStatus : 'INCOMPLETE';
       if (outcome.status === 'INCOMPLETE' && ['review', 'deep'].includes(run.mode)) {
-        outcome.report = renderIncompleteDraft(run.stages, outcome.failure, state.settings.outputLanguage);
+        outcome.report = renderReport(run, () => renderIncompleteDraft(run.stages, outcome.failure, state.settings.outputLanguage));
         run.draft = Boolean(outcome.report);
         // A failed review never enters the completed cache. Display is noReply;
         // uncertain aborts still retain a private draft but cannot resume a session.
@@ -341,10 +360,12 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         }
       }
     } finally {
+      const cleanupStart = performance.now();
       clearTimeout(timer);
       await abortRun(run, outcome.failure || 'Workflow completed.');
       runs.delete(id); sourceRuns.delete(run.origin);
       if (run.lockKey) commentLocks.delete(run.lockKey);
+      if (run.timing) run.timing.cleanupMs = performance.now() - cleanupStart;
       await finishDiagnostics(run, outcome.status, outcome.report, outcome.failure);
     }
     toast(`AZPR ${id}: ${outcome.status}. All grants revoked.`);
@@ -444,7 +465,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const expectedFindingIds = allFindings.map(finding => finding.id);
       const verified = await stage(run, roleFor(run.profile, 'verifier'), { ...packet, reviews, pendingLocations, expectedFindingIds, outputLanguage: state.settings.outputLanguage }, result => finalEnvelope(result, snapshot, allFindings));
       const provenance = reviewProvenance(run);
-      return { status: verified.status, report: `${renderFinalReport(verified, state.settings.outputLanguage)}\n\n---\n\n${provenanceReport(provenance, verified, state.settings.outputLanguage)}`,
+      return { status: verified.status, report: renderReport(run, () => `${renderFinalReport(verified, state.settings.outputLanguage)}\n\n---\n\n${provenanceReport(provenance, verified, state.settings.outputLanguage)}`),
         review: { id: run.id, origin: run.origin, profile: run.profile, request: input.arguments, snapshot, outputLanguage: state.settings.outputLanguage, provenance, findings: clone(allFindings), final: clone(verified), attempts: new Map(), plan: null } };
     });
     // A cancelled presentation must not leave a publishable "completed" review.
@@ -515,6 +536,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         throw new Error('[AZPR] Output repair permits only one model request.');
       }
       g.calls++;
+      g.timing?.modelRequest();
     },
     async 'experimental.chat.system.transform'(input, output) {
       const g = grants.get(input.sessionID);
@@ -572,11 +594,13 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       // No MCP name, prefix, action, argument, or output-schema filtering.
       // OpenCode performs its normal permission checks after this hook.
       g.toolCalls.add(input.callID);
+      if (input.tool !== 'invalid') g.timing?.toolStarted(input.callID, input.tool);
       g.firstToolAt ??= new Date().toISOString();
     },
     async 'tool.execute.after'(input, output) {
       const g = grants.get(input.sessionID);
       if (!g?.run.active || input.tool === 'invalid' || !g.toolCalls.has(input.callID)) return;
+      g.timing?.toolEnded(input.callID);
       g.lastToolAt = new Date().toISOString();
       if (output && output.metadata?.isError !== true && output.isError !== true && output.metadata?.truncated !== true) g.completedTools.add(input.callID);
     },

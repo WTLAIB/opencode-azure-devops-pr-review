@@ -69,6 +69,14 @@ server patch or tool filter. Evaluate live error rate, first-pass completion,
 latency, merge decisions and content quality; offline recovery alone proves none
 of these improvements.
 
+Report guidance now removes repeated version/coverage/finding inventories from
+overview prose without length gates or lost evidence. Known supporting paths can
+be read alongside changed source by the independent verifier, with final freshness
+retained. Optional monotonic tool/model-window/response-processing timings and
+workflow rendering/display/cleanup measurements support latency comparisons;
+overlap and missing completions are explicit. Offline tests cover instrumentation
+and unchanged requests; live speed/quality gains still require measurement.
+
 The automatic check stage has been removed from normal/deep reviews. Initials
 establish PR-reference snapshots independently; runtime compares identity and
 versions and passes their combined paths to the verifier. Missing metadata can

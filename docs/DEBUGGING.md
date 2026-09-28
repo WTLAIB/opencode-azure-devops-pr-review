@@ -324,6 +324,44 @@ network durations. Compare attempt timing and raw sessions when measuring latenc
 neither a long post-tool interval nor a completed tool alone proves a model or MCP
 failure. Failed calls that never reach the after-hook may lack an end timestamp.
 
+### Timing without replaying a session
+
+Debug-enabled stage results include `timing`. Offsets are monotonic milliseconds
+relative to that attempt's grant creation (after session creation), independent of
+wall-clock adjustments. Collection uses the existing hooks and SDK promise; it
+does not fetch messages, add a model request, or alter validation/permissions.
+
+| Field | Interpretation |
+| --- | --- |
+| `elapsedMs` | Attempt time through validation/error cleanup, before writing its result file. |
+| `promptMs`, `responseOutcome` | SDK prompt dispatch until its promise settles: returned, rejected, or interrupted. A returned response can still fail validation. Null means dispatch/settlement was not observed. |
+| `toolCalls` | Ordinary tool name, startMs/endMs and durationMs from before/after hooks. No call ID, arguments, output or reasoning. End/duration remain null without an after-hook. |
+| `toolActiveMs`, `unfinishedTools` | Union of tool intervals, counting overlap once; null if any completion is missing. A completed hook does not imply a successful tool result. |
+| `modelRounds` | Windows from an authorized chat.params hook to the next one or prompt settlement/stage stop. Each has startMs/endMs, durationMs, toolActiveMs, outsideToolMs and endReason. |
+| `lastToolToResponseMs` | Last observed ordinary tool completion to a returned SDK response; null with no tools, missing completions or rejected/interrupted dispatch. |
+| `responseProcessingMs` | Prompt settlement to attempt end, including response diagnostics, validation and any failure cleanup/history lookup. |
+
+Model windows include tool execution, permissions, host scheduling and provider
+waiting/generation; even `outsideToolMs` is **not** pure inference time. Tool
+intervals can include permission prompts and host overhead, not just Azure/MCP
+server work. Missing after-hooks make overlapping windows' active/outside values
+unknown rather than treating that time as model work. Duplicate hooks do not
+double-count a call; late callbacks cannot mutate a finished attempt. An amendment
+has its own timing even when it reuses the verifier session.
+
+The pinned host's native StructuredOutput can bypass ordinary tool hooks. The
+last-tool-to-response interval therefore measures an observed boundary, not a
+separate StructuredOutput execution or token streaming rate. Provider queue time,
+time to first token, hidden retries and auxiliary model work are not measured.
+
+Aggregate `result.json.timing` has `renderMs` for the local review/draft renderer,
+`displayMs` for the noReply report append, and `cleanupMs` for the workflow's final
+abort acknowledgement and lock release. It excludes diagnostic file writes and
+does not replace per-attempt failure cleanup timing. These values are not additional
+model time and should not be added to overlapping stage intervals indiscriminately.
+
+### Sizes and remaining budget
+
 `inputCharacters` is the serialized plugin payload length; `instructionCharacters`
 is the selected plugin policy length (the isolated amendment policy for a repair).
 These omit host/provider instructions, MCP schemas and retained history, and are

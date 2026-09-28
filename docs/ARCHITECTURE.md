@@ -91,6 +91,13 @@ pagination, independent reads and final freshness. No MCP catalog, adapter or
 programmatic retry is added. See
 [source-access discipline](AZURE_MCP.md#avoiding-repeated-lookup-failures).
 
+Known, relevant supporting paths in initial evidence are untrusted lookup hints
+for the verifier, never shared source evidence. Its own exact-commit reads can be
+batched with changed source when selectors are known; unresolved dependencies and
+guidance discovery still require follow-up. The final PR metadata read remains
+after source checks. Compact report prose adds exclusions/corrections/limits to
+the structured ledger instead of repeating it; no new word-count gate is imposed.
+
 ## Authorization
 
 Only explicit command events create grants. Commands must have the expected ownership marker and must not override the original agent or model.
@@ -482,6 +489,15 @@ bounded to five seconds and without resuming a model. Unique directories,
 exclusive files, owner-only modes, and per-run Git ignores reduce accidental
 overwrites and commits. Debug write failure is nonfatal and visible in receipts.
 This is not DLP or automatic secret redaction. See [diagnostics](DEBUGGING.md).
+
+Optional timing uses existing hook boundaries and a monotonic attempt-local clock.
+It stores tool names/intervals and authorized model-request windows without tool
+arguments, outputs or call IDs. Overlapping tools form a union; missing after-hooks
+remain unknown. Timing never grants tools, proves source access or changes output
+acceptance. Each amendment gets a fresh collector, including same-session repairs.
+SDK response settlement separates request time from response processing; workflow
+render/display/cleanup timers describe local work. Provider queue/inference cannot
+be isolated from these observations. Debug-disabled runs collect no timeline.
 
 Receipts explain the applicable standalone READY or reviewer COMPLETE status;
 neither is PR approval. In receipt mode, child-session navigation is a human read-only UI action,

@@ -90,10 +90,16 @@ from an explicitly incomplete response. Without a native diff, compare complete
 before/after source for the changed paths at the chosen commits. Do not search
 unrelated history, builds or wikis just to strengthen a readiness claim.
 
-Batch independent reads when supported. Reuse complete exact-commit content
-already obtained in your own session, including when recounting lines. Retrieve
-again for missing content, paging or the final PR freshness check. Another
-reviewer's source claims are not proof that your own reads succeeded.
+Batch independent reads when supported. Once repository identity, versions and
+paths are known, request both sides of changed source and already-needed contract
+or test files in the same round; do not wait for each file before requesting an
+independent one. Do necessary path/guidance discovery alongside those reads when
+its inputs are already known, rather than deferring it to a separate late round.
+Follow genuine dependencies and pagination; never guess supporting paths or skip
+required context just to reduce calls. Reuse complete exact-commit content already
+obtained in your own session, including when recounting lines. Retrieve again for
+missing content, paging or the final PR freshness check. Another reviewer's source
+claims are not proof that your own reads succeeded.
 
 Label comparisons explicitly: base = snapshot.base (target reference), head =
 snapshot.head (source). Check returned versions; retrieval order is not version

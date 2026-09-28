@@ -217,8 +217,10 @@ With the default `returnReport: "receipt"`, your original conversation gets the 
 Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; the child-session report and optional debug `report.md` preserve the runtime's version.
 
 Final findings and disposition reasons are written once in structured fields.
-The runtime renders their details and tables; the verifier's `report` contains
-only its independent checks, important exclusions, corrections and limitations.
+The runtime renders their details and tables. Initial and final `report` prose
+adds important exclusions, material corrections, open questions and testing/scope
+limitations; it does not repeat version, coverage or finding inventories.
+This is writing guidance, not a new word limit or evidence truncation rule.
 No model is invoked for formatting. If final adjudication fails, a clearly marked
 incomplete draft preserves valid initial observations in their original language,
 with missing IDs and the failure reason. It is not a completed review and cannot
@@ -324,6 +326,13 @@ Debug is opt-in and works with both `receipt` and `full`. Add these fields to yo
 ```
 
 Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE_HOME:-~/.local/state}/opencode/azpr-debug/`. To save in the active project instead, use `"directory": ".azpr-debug"`. An absolute directory is also supported; `~` is not expanded. Each command gets a unique private directory, printed in its receipt. Debug files include each stage's input, role instructions, visible output, model errors, validated result, session/model IDs, and the final report. They do not include private reasoning fields, full tool traffic, provider configuration, or HTTP headers. See [debug files and failed-session inspection](docs/DEBUGGING.md).
+
+With debug enabled, stage `timing` separates observed tool intervals, model-request
+windows and time from the last tool completion to the SDK response. Aggregate
+timing records report rendering, display and final cleanup. Overlapping tool calls
+are counted once; missing completion hooks remain unknown. These intervals include
+host/provider waiting and are not pure model inference or MCP server timings.
+Collection adds no model request and stores no tool arguments or outputs.
 
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
