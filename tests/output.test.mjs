@@ -312,7 +312,7 @@ test('native schemas and role prompt examples describe the same quality contract
       assert.deepEqual(schema.properties.findings.items.required,required.filter(key=>key!=='location'));
     }
   }
-  for(const [name,prefix] of [['functional','F'],['risk','R'],['final','V']]) {
+  for(const [name,prefix] of [['functional','F'],['risk','R']]) {
     const prompt=await readFile(new URL(`../src/prompts/${name}.md`,import.meta.url),'utf8');
     const result=JSON.parse(/```json\n([\s\S]*?)\n```/.exec(prompt)[1]);
     result.snapshot=snapshot;
@@ -348,12 +348,12 @@ test('review guidance uses PR versions; standalone check retains cumulative proo
   result.snapshot=snapshot;
   assert.equal(checkEnvelope(result).status,'READY');
 });
-test('compact verifier prose keeps evidence and delegates only the duplicate status table to runtime',async()=>{
+test('single-source verifier report retains evidence and requires every structured disposition',async()=>{
   const prompt=await readFile(new URL('../src/prompts/final.md',import.meta.url),'utf8');
-  assert.match(prompt,/trigger, impact, source, counterevidence, location/);
-  assert.match(prompt,/Explain every original ID's disposition once/);
-  assert.match(prompt,/runtime supplies the complete disposition table from your validated entries/);
-  assert.match(prompt,/independent checks performed even when no findings survive/);
+  assert.match(prompt,/trigger, scope, severity, evidence, counterevidence/);
+  assert.match(prompt,/exactly one structured\s+disposition per original ID/);
+  assert.match(prompt,/runtime renders the validated snapshot, findings/);
+  assert.match(prompt,/checks\/limits even when no findings survive/);
   assert.match(prompt,/read the same PR metadata again/);
 });
 test('finding locations must be recounted from exact source without transport wrappers',async()=>{
@@ -364,7 +364,7 @@ test('finding locations must be recounted from exact source without transport wr
   assert.match(common,/blank lines.*comments/s);
   assert.match(common,/MCP.*wrapper/s);
   assert.match(finalPrompt,/Recount.*source/s);
-  assert.match(finalPrompt,/not.*initial\s+reviewer.*line/s);
+  assert.match(finalPrompt,/do not inherit the representative's offsets/);
   assert.match(finalPrompt,/NEEDS_INFO/);
   assert.match(common,/zero search results.*index/s);
 });
@@ -432,4 +432,40 @@ test('PR version contract: initial failures may omit unknown snapshot but cannot
   assert.equal(initialEnvelope(value,null,'F').status,'PARTIAL');
   for(const bad of [{...value,status:'COMPLETE'},{...value,findings:[finding()]},{...value,coverage:{files:[],gaps:[]}}])
     assert.throws(()=>initialEnvelope(bad,null,'F'));
+});
+
+
+test('missing disposition diagnostics and multi-row merge amendments never change existing evidence',async()=>{
+  const { OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment }=await import('../src/output.mjs');
+  const originals=[finding('F-1'),finding('F-2'),finding('F-3'),finding('R-1'),finding('R-2'),finding('R-3')];
+  const raw=final(originals.slice(0,3).map(f=>({id:f.id,status:'CONFIRMED',reason:'Source verified',verifiedFinding:f})));
+  const before=JSON.stringify(raw);
+  const validate=x=>finalEnvelope(x,snapshot,originals);
+  let missing;
+  assert.throws(()=>validate(raw),e=>{
+    assert.ok(e instanceof OutputDispositionError);
+    missing=e.missingIds;
+    assert.deepEqual(missing,['R-1','R-2','R-3']);
+    assert.match(e.message,/R-1, R-2, R-3/);
+    return true;
+  });
+  const plan=dispositionRepairPlan(raw,missing,validate);
+  const amendment={dispositions:missing.map((id,i)=>({id,status:'MERGED',mergedInto:['F-2','F-3','F-1'][i],reason:'Same established root cause and fix'}))};
+  const amended=applyDispositionAmendment(raw,plan,amendment);
+  assert.equal(validate(amended).status,'COMPLETE');
+  assert.deepEqual(amended.dispositions.slice(0,3),raw.dispositions);
+  assert.equal(JSON.stringify(raw),before);
+  assert.ok(!JSON.stringify(amended).includes('ELIGIBILITY PROBE'));
+  for(const mutate of [
+    x=>{x.currentHead='c'.repeat(40);},
+    x=>{x.currentHead='';},
+    x=>{delete x.dispositions[0].verifiedFinding.evidence;},
+    x=>{x.dispositions[0]={id:'F-1',status:'MERGED',mergedInto:'R-1',reason:'Unresolved dependency'};},
+    x=>{x.dispositions[0]={id:'F-1',status:'MERGED',mergedInto:'F-2',reason:'Cycle'};x.dispositions[1]={id:'F-2',status:'MERGED',mergedInto:'F-1',reason:'Cycle'};},
+  ]){
+    const bad=structuredClone(raw);mutate(bad);
+    assert.equal(dispositionRepairPlan(bad,missing,validate),undefined);
+  }
+  const malicious=new OutputDispositionError(['PRIVATE_UNTRUSTED_VALUE']);
+  assert.doesNotMatch(malicious.message,/PRIVATE_UNTRUSTED_VALUE/);
 });

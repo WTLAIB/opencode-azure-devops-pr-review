@@ -39,7 +39,7 @@ Revisit them with an explicit decision and evidence, not as incidental cleanup.
 | Direct initial reviews with PR-reported versions | Removes preflight and ancestry investigation; discovery is duplicated and the target reference is not a proven merge base. | Live evaluation reveals unacceptable attribution gaps or instability. |
 | Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
 | Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
-| Strict evidence with audited format tolerance, deferred initial locations and one opt-in status OR final-location amendment | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
+| Strict evidence with audited format tolerance, deferred initial locations and one opt-in status, final-location OR missing-merge amendment | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
 | Explicit saved comment preview and one publication attempt | Keeps human inspection before account-owned comments and limits duplicate attempts; publication is still model-reported. | Verified provider evidence or resumability is explicitly requested and designed. |
 | Seven runtime modules, editable policies, source-only installation | Small auditable boundaries and manual-copy support; file catalogs need synchronized tests. | Measured complexity or distribution needs justify more structure. |
 | In-place settings migration, no retained install backup | Preserves preferences with missing-default merging; malformed settings require correction before install. | The owner explicitly changes the backup/retention requirement. |
@@ -102,6 +102,21 @@ Each profile has six private agents: check, functional, risk, verifier, comment-
 Normal model, default agent, auxiliary model, permission, provider, MCP, and subagent-depth settings are preserved. Ordinary chat and tool hooks return without reading review settings or calling the Session SDK, except to reject unauthorized access to private roles.
 
 Configuration fingerprints prevent route changes during a run. Editing settings requires a restart. Grants are revoked after each stage and at completion or cancellation.
+
+## Incomplete drafts
+
+After a normal/deep workflow exception yields INCOMPLETE with validated initial
+output, deterministic rendering retains those initial observations, coverage gaps, their separate
+snapshots, selected models, missing disposition IDs and the error. These are
+unconfirmed candidates, not accepted final findings; failed verifier prose is not
+promoted into the draft. Labels disclose incomplete adjudication and original
+language. No formatter/model request or additional tool is started.
+
+An active run with confirmed aborts can display the draft through the existing
+noReply grant; an inactive or abort-uncertain run can only retain diagnostic data.
+Drafts are stored as `draft.md` with `reportKind: incomplete-draft`, never as a
+successful `report.md`. Receipt/full visibility is preserved. Drafts never enter
+the completed-review cache, so preview/publication remain unavailable.
 
 ## Run lifecycle
 
@@ -197,11 +212,13 @@ be retained in the confirmed representative rather than silently discarded.
 
 The final verifier rereads the same PR and returns currentHead and currentBase. Either changed version becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
-The verifier explains each defect and every original disposition once in its
-localized prose, retaining evidence, counterevidence, corrections and limitations.
-The runtime appends the complete model and ID/status/merge tables from validated
-records; the model need not reproduce those tables. Structured finding fields
-and disposition requirements are unchanged.
+The verifier writes final human-readable structured finding fields and disposition
+reasons in outputLanguage; intermediate reviews remain English. Its report field
+is a short overview of independent checks, exclusions, corrections and limitations.
+The runtime renders versions, complete evidence packets, decisions and provenance
+from validated fields, without another model or a second full prose report. The
+required finding fields, immutable IDs and source/evidence checks remain intact.
+The verifier payload explicitly lists expectedFindingIds.
 
 Native `currentHead` and `currentBase` use scalar string schemas: full
 40/64-character SHAs without extra quote characters. An unavailable value uses
@@ -253,7 +270,7 @@ keys; normalization is not an alternative output format for reviewers.
 
 ### Bounded output amendments
 
-`outputRetries` accepts only `0` (default) or `1`. The two cases below share one
+`outputRetries` accepts only `0` (default) or `1`. The three cases below share one
 allowance per stage; a failed amendment cannot start another kind of repair.
 Native capture is not submission-time validation: the host can return parsed
 objects missing schema-required fields. AZPR validates after prompt completion
@@ -298,6 +315,25 @@ This does not independently verify the lines. Initial omissions are passed to
 the verifier instead of using this amendment. Raw responses and failures are retained.
 Any eligible local key-format corrections are disclosed only on final acceptance.
 
+#### Missing merged dispositions
+
+A missing-row error includes the omitted original IDs. An otherwise valid COMPLETE
+final envelope may receive one same-session amendment. An eligibility-only clone
+adds temporary unresolved rows and runs the full validator; no placeholder becomes
+a result. Unknown/stale versions, missing evidence/locations, invalid existing
+decisions or absence of a confirmed representative cannot qualify.
+
+The model may return only `dispositions: [{id, status: "MERGED", mergedInto, reason}]`,
+exactly the missing IDs. Targets must be already CONFIRMED originals, and existing
+merge chains cannot depend on missing rows. Original fields remain immutable.
+The verifier must already have established the shared root cause and correction;
+if any missing decision requires further research or a change to the representative,
+it must decline. No automatic natural-language extraction or arbitrary NEEDS_INFO
+completion is allowed. Full revalidation follows append-only application.
+The original error, `missingDispositionIds`, `retryKind: disposition` and accepted
+`amendedDispositions` remain auditable. This is model-authored bookkeeping, not
+independent source verification, and consumes the same single amendment allowance.
+
 #### Shared limits and isolation
 
 Normal agent definitions contain no amendment instructions, even when
@@ -320,15 +356,15 @@ hooks; it remains available solely for the scoped amendment. The message hook
 also checks the exact plugin-generated amendment text. The existing
 run deadline, cancellation, configuration/model checks and cleanup still apply.
 No recursive retry, provider/model switch or general reviewer resumption is
-allowed. Only the explicit location grant can reuse its stopped original session.
+allowed. Only an explicit location or disposition grant can reuse its stopped original session.
 Host/provider-internal retries and auxiliary requests are outside this bound.
 
 Malformed/missing output, general provider/SDK errors, incomplete evidence, changed heads,
 unconfirmed aborts and cancellations do not qualify. Comment preview/publication
 never qualify. A second format failure ends the stage. Each attempt has its own
 diagnostic files; the amendment records `attempt: 2`, `retryOf` and `retryKind`.
-Status repairs use a new session ID; location repairs retain the original ID.
-The location receipt notice distinguishes model amendments from local formatting.
+Status repairs use a new session ID; location/disposition repairs retain the original ID.
+Location/disposition receipt notices distinguish model amendments from local formatting.
 Stage diagnostics include modelRequests, durationMs, parsed outputCharacters and
 firstToolAt/lastToolAt when observed. These measure host-hook activity, not provider
 internal retries, total token usage, tool error categories or source authenticity.
@@ -403,7 +439,7 @@ require evaluation on representative PRs with independent ground truth.
 
 Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Tool hooks retain lifecycle checks, completed-call bookkeeping and the native-submission guard above, never semantic MCP read/write classification. Display and output-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
 
-The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
+The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original structured fields remain in the session; optional diagnostics preserve the rendered Markdown. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 
 The top-level `outputLanguage` (default `en`) is validated as a language tag and canonicalized. Only final-verifier and comment roles in each profile receive a generated language instruction and an input language field. Completed reviews retain that language for later comments. It controls final-report Markdown and comment prose, not intermediate review output, structured fields, code identifiers, or status receipts. Full-report receipts instruct the original agent not to translate the enclosed report. The publisher receives unchanged saved bodies and is instructed to send them verbatim. Language quality is model-dependent; no language detector or additional translation call is used.
 

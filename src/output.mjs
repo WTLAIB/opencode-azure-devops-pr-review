@@ -39,10 +39,10 @@ export function stageFormat(role, statusOnly = false) {
     // Empty does not establish a verified head; finalEnvelope keeps that gate.
     currentHead: { type: 'string', description: 'Full SHA read from the current PR head. The string value contains only the SHA, with no extra quotation marks. Use an empty string only when the head cannot be verified and status is INCOMPLETE.' },
     currentBase: { ...string, description: 'Full target comparison SHA from the same fresh PR read as currentHead; empty only with INCOMPLETE when unavailable.' },
-    dispositions: array(object({ id: string, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
+    dispositions: array(object({ id: { ...string, description: 'One unique original ID from expectedFindingIds, including merged and rejected candidates.' }, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
       verifiedFinding: { ...finding, description: 'Required for CONFIRMED: the complete corrected finding under this same ID. Omit for every other disposition.' },
     }, ['id', 'status', 'reason'])),
-    newFindings: array(finding), report: string,
+    newFindings: array(finding), report: { ...string, description: 'Brief independent checks, important exclusions, open questions and testing/scope limitations in outputLanguage. Do not repeat findings or disposition reasons: the runtime renders those structured fields.' },
   }, ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
   else if (kind === 'comment-plan') schema = object({
     status: status('READY', 'INCOMPLETE'),
@@ -57,7 +57,11 @@ export function stageFormat(role, statusOnly = false) {
     coverage, findings: array(initialFinding),
     report: { ...string, description: 'Review summary and limitations. Submit the full review, never a status-only acknowledgement or placeholder.' },
   }, ['status', 'coverage', 'findings', 'report']);
-  if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
+  if (statusOnly === 'disposition') schema = object({ dispositions: array(object({
+    id: string, status: status('MERGED'), mergedInto: string,
+    reason: { ...string, description: 'Existing source-based reason for the same root cause and correction, in outputLanguage. Do not invent a merge to fill a missing row.' },
+  })) });
+  else if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
     location: { ...string, description: 'Exact base:/path:line or head:/path:start-end from source already read in this session. No guesses or new source reads.' },
   })) });
   else if (statusOnly) schema = object({ status: schema.properties.status });
@@ -132,6 +136,49 @@ export class OutputStatusError extends Error {
   }
 }
 export class OutputLocationError extends Error {}
+export class OutputDispositionError extends Error {
+  constructor(missingIds) {
+    const shown = missingIds.filter(id => typeof id === 'string' && /^[FR]-[1-9][0-9]{0,20}$/.test(id)).slice(0, 20);
+    super(`Final reviewer omitted one or more original findings. Missing disposition IDs: ${shown.join(', ')}${missingIds.length > shown.length ? ' (additional IDs in diagnostics)' : ''}.`);
+    this.name = 'OutputDispositionError';
+    this.missingIds = [...missingIds];
+  }
+}
+
+/** Missing rows may only be amended as merges into already confirmed originals.
+ * The temporary NEEDS_INFO rows test other contracts; they are never accepted. */
+export function dispositionRepairPlan(original, missingIds, validate) {
+  if (!isObject(original) || original.status !== 'COMPLETE' || !missingIds.length ||
+      !Array.isArray(original.dispositions)) return;
+  try {
+    const mergeTargets = original.dispositions.filter(d => d.status === 'CONFIRMED').map(d => d.id);
+    if (!mergeTargets.length || original.dispositions.some(d => missingIds.includes(d.id) ||
+        (d.status === 'MERGED' && missingIds.includes(d.mergedInto)))) return;
+    const probe = JSON.parse(JSON.stringify(original));
+    probe.dispositions.push(...missingIds.map(id => ({ id, status: 'NEEDS_INFO', reason: 'ELIGIBILITY PROBE ONLY' })));
+    if (validate(probe).status !== 'COMPLETE') return;
+    return { missingDispositionIds: [...missingIds], mergeTargets };
+  } catch { return; }
+}
+
+/** Add only model-authored missing MERGED rows. Never infer a decision from prose. */
+export function applyDispositionAmendment(original, plan, amendment) {
+  if (!isObject(amendment) || Object.keys(amendment).length !== 1 ||
+      !Array.isArray(amendment.dispositions) || amendment.dispositions.length !== plan.missingDispositionIds.length) {
+    throw new Error('Disposition retry must return exactly the missing merge rows; no existing fields may change.');
+  }
+  const remaining = new Set(plan.missingDispositionIds);
+  for (const item of amendment.dispositions) {
+    if (!isObject(item) || Object.keys(item).length !== 4 ||
+        Object.keys(item).some(key => !['id', 'status', 'mergedInto', 'reason'].includes(key)) ||
+        !remaining.delete(item.id) || item.status !== 'MERGED' || !plan.mergeTargets.includes(item.mergedInto) ||
+        !text(item.reason)) throw new Error('Disposition retry requires unique requested IDs, existing confirmed targets and nonempty merge reasons.');
+  }
+  if (remaining.size) throw new Error('Disposition retry omitted requested IDs.');
+  const amended = JSON.parse(JSON.stringify(original));
+  amended.dispositions.push(...JSON.parse(JSON.stringify(amendment.dispositions)));
+  return amended;
+}
 
 function findingSlots(result, role) {
   if (ROLES[role]?.format === 'initial') return (result.findings ?? []).map((value, i) => ({ value, path: `findings[${i}].location` }));
@@ -382,7 +429,7 @@ export function finalEnvelope(result, expected, originals) {
     } else if (item.verifiedFinding !== undefined) throw new Error('Only a CONFIRMED disposition may contain verifiedFinding.');
     accounted.add(item.id);
   }
-  if (accounted.size !== ids.size) throw new Error('Final reviewer omitted one or more original findings.');
+  if (accounted.size !== ids.size) throw new OutputDispositionError([...ids].filter(id => !accounted.has(id)));
   const dispositions = new Map(result.dispositions.map(item => [item.id, item]));
   const resolved = new Set();
   for (let item of result.dispositions) {

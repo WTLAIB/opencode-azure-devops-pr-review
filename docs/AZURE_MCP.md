@@ -93,6 +93,16 @@ searches and commit-history queries used only to strengthen readiness claims.
 Extra context required for code review remains appropriate; the verifier still
 checks source independently.
 
+For the official MCP **2.10.0**, directory listing converts a Commit selector
+(including its default) to Branch, while file content supports Commit. Passing a
+SHA to that directory operation therefore treats it as a branch name. Prefer the
+PR change list and exact-commit content reads. Use an actual PR branch with an
+explicit Branch selector only when directory discovery is necessary; returned
+paths are hints, not proof of a commit tree or absent repository guidance.
+Read discovered contracts/source at the reviewed SHA. Other versions or servers
+may differ; this capability note is not a tool catalog or argument rewriter.
+See the [versioned implementation](https://github.com/microsoft/azure-devops-mcp/blob/v2.10.0/src/tools/repositories.ts#L483-L529).
+
 Group failures by operation, argument/version semantics and observed cause.
 Correct a specific argument or report the gap; do not probe speculative variants.
 Follow actual descriptions and schemas rather than an assumed tool catalog.
@@ -105,8 +115,8 @@ Prompt policy forbids identical retries for deterministic/permission errors and
 speculative query loops. It allows at most one identical retry per logical read
 only for an explicit transient error, within the existing session budget and host
 guidance. This is not an enforced MCP retry counter, new session, wrapper, argument
-rewriter or permission filter. `outputRetries` permits bounded status or final-
-location amendments, not MCP recovery. Host/provider retries remain separate.
+rewriter or permission filter. `outputRetries` permits bounded status, final-location or missing-merge
+amendments, not MCP recovery. Host/provider retries remain separate.
 
 These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history

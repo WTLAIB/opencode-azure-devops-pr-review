@@ -116,6 +116,18 @@ or evidence, duplicate/extra IDs, invalid line ranges, shared retry limits, deni
 tools, isolated prompts, cancellation and abort uncertainty. Missing other evidence,
 coverage gaps, empty existing locations and stale/unknown heads remain failures.
 
+Missing-merge regressions require explicit expected IDs, complete missing-ID
+diagnostics and one same-context amendment into already confirmed representatives.
+Exercise native/text output in both profiles, multi-ID merges, invalid/extra IDs,
+cycles, changed evidence/status/report, decline, exhausted budgets, source/target
+changes, missing source/location, denied tools, isolated instructions and cancellation.
+A diagnostic eligibility placeholder must never become an accepted decision.
+
+Rendered-report tests preserve full localized evidence and reasons without a
+duplicate report body. Incomplete drafts retain only valid initial candidates,
+label them unconfirmed and never populate the completed cache or comment plans.
+Verify noReply display, separate draft.md diagnostics and original-language data.
+
 Amendment text tests recognize only the pinned missing-native error, then require
 one complete JSON object and the original validators. Duplicate/escaped keys,
 ambiguous or truncated text, pending tools, ordinary tool attempts, denied extra
@@ -182,7 +194,8 @@ counts as a model output defect; report it separately from unmodified successes.
 If opting into `outputRetries: 1`, verify a qualifying failure's original FAILED
 record and `retryOf` attempt. A status amendment uses a new session and only
 `status`; a location amendment uses the original session and only the requested
-`locations`. Confirm all original field values remain unchanged, no ordinary tool executes during repair,
+`locations`; a missing-merge amendment uses the original session and only requested
+`dispositions` with MERGED targets already confirmed. Confirm all original field values remain unchanged, no ordinary tool executes during repair,
 and a second model request is refused. Confirm cancellation still wins and
 the overall deadline does not restart. Count original contract failures and
 recovered outcomes separately; repeated synthetic successes are a smoke test,

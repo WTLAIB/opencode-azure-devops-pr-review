@@ -63,6 +63,18 @@ Use returned paths instead of guessed filenames. File-content Commit support
 does not imply directory-listing Commit support. No root directory scan or
 branch-tip round trip is required to re-prove an available PR change list.
 Only request extra context when the code review needs it.
+Prefer PR changed paths -> exact-commit file content; do not list the root just
+to rediscover those paths. For repository guidance, use returned paths or a
+needed directory lookup, and read any discovered guidance at the reviewed SHA.
+
+Directory selectors are operation-specific. In official Azure DevOps MCP 2.10.0,
+directory listing interprets Commit as Branch (including its default); a SHA
+therefore behaves like a nonexistent branch. For that capability, never send a
+SHA to list a directory: use the actual PR branch name with Branch explicitly,
+or skip unnecessary listing. A branch/default-branch listing supplies path hints,
+not proof of a commit tree or absent guidance. Read discovered source/contracts
+with the supported exact-commit content selector. Do not retry a failing SHA
+directory call. Other servers/versions may differ; follow their actual contract.
 
 Do not repeat an identical failed request for a deterministic parameter, version,
 not-found or permission error. Correct the specific argument or report the gap;
@@ -128,8 +140,7 @@ private reasoning traces. Severity measures impact, not confidence.
 Count location lines from the exact base/head file content, starting at 1 and
 including blank lines and comments. Exclude MCP security wrappers, response
 headers, Markdown fences and diff hunk counters. Use the actual source statement
-and a tight range, not an initial reviewer's approximate line number. Verify the
-same location in the structured finding and the human report. If a trustworthy
+and a tight range, not an initial reviewer's approximate line number. Store the verified location once in the structured finding. If a trustworthy
 location cannot be established, state what is missing instead of guessing.
 An initial candidate may omit only the separate location field while retaining
 its source/call-path evidence and complete coverage. The verifier must establish
@@ -156,7 +167,7 @@ If execution is needed, propose a minimal verification case instead of running i
 
 ## Output
 
-Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reports and structured finding explanations in English. For the final verifier only, human-facing Markdown in the report field uses the configured outputLanguage instead. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
+Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reviews in English. The verifier uses outputLanguage for all human-readable structured descriptions and its brief report; the runtime renders their details. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
 
 Before submitting, check every finding object uses only these seven keys:
 id, summary, evidence, counterevidence, location, severity, suggestion. All are
@@ -166,9 +177,5 @@ spaces or extra fields. Put source notes inside evidence and limitations inside
 the appropriate existing field; do not add evidence_note or placeholder fields.
 Check unique role-prefixed IDs and nonempty required values. This formatting
 check cannot supply missing evidence or make an incomplete review COMPLETE.
-
-A normal initial submission includes status, snapshot (when known), coverage,
-findings and report together. A status-only object cannot represent a review.
-Use only COMPLETE or PARTIAL, never an acknowledgement or placeholder token.
 
 If you cannot meet the required output contract, do not rerun, switch models, or repair the workflow yourself. The plugin will retain the session and mark the run incomplete.

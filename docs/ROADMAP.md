@@ -28,12 +28,14 @@ Implemented and covered by offline tests:
   Scoped native amendments can accept complete, unambiguous JSON text after the
   pinned missing-submission error, with notices and no additional request.
   Live improvement remains unverified; offline recovery is not a completed run.
-- Opt-in, one status OR absent final-location amendment per stage, sharing one
+- Opt-in, one status, absent final-location OR missing merged-disposition amendment per stage, sharing one
   allowance, with immutable original values,
   bounded model requests, ordinary-tool denial and retained failure diagnostics.
   Amendment instructions are isolated to granted repair sessions; normal
   reviewers receive only the full-review contract. Location amendments retain
   that reviewer's existing session context; unavailable source cannot be guessed.
+  Missing-row recovery appends only model-authored merges into existing confirmed
+  originals; all other gates must pass and no evidence or existing decision changes.
   Live reliability gains remain unverified.
 - A per-session stop at two native structured-submission rejections (one for
   output repair/comments), with retained counts and explicit whole-run TIMED_OUT
@@ -56,6 +58,16 @@ Implemented and covered by offline tests:
   the runtime still supplies the complete attribution/disposition tables.
   Diagnostics add input/instruction sizes and remaining whole-run time per attempt.
   Live latency, model compliance and error-rate improvement remain unverified.
+
+Single-source report rendering now uses localized final structured findings and
+disposition reasons, with a short verifier overview instead of a duplicate full
+Markdown report. Missing-ID diagnostics and explicit expected IDs improve feedback.
+Incomplete drafts preserve unconfirmed valid initial observations, remain outside
+the comment cache, and have a separate diagnostic file. Selector guidance addresses
+the observed official MCP 2.10.0 directory Commit-to-Branch behavior without a
+server patch or tool filter. Evaluate live error rate, first-pass completion,
+latency, merge decisions and content quality; offline recovery alone proves none
+of these improvements.
 
 The automatic check stage has been removed from normal/deep reviews. Initials
 establish PR-reference snapshots independently; runtime compares identity and

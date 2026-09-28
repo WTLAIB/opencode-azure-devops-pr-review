@@ -62,10 +62,14 @@ It describes the development process, not instructions for agents reviewing a PR
   must be NEEDS_INFO and excluded from comments. Missing evidence/coverage is
   never a location exception.
   Model-based recovery requires explicitly enabled `outputRetries: 1`: at most
-  one status-only OR absent final-location amendment per stage, never both.
+  one status-only, absent final-location OR missing merge-disposition amendment
+  per stage, never more than one kind.
   All other contracts must pass an eligibility probe that is never accepted as
   evidence. Status repair uses a fresh session; location repair narrowly regrants
-  the same stopped session to retain that reviewer's source context. No ordinary
+  the same stopped session to retain that reviewer's source context. Missing-merge
+  amendments use that same context and may only append requested original IDs as
+  MERGED into already confirmed originals; never infer a merge from prose, add
+  new evidence, change existing fields or fill gaps with arbitrary decisions. No ordinary
   tools, no existing field changes, one model request, full revalidation, raw
   failure retention and explicit notices. Missing/empty evidence, empty existing
   locations, incomplete coverage, changed PR versions, comments and uncertain aborts
@@ -85,6 +89,12 @@ It describes the development process, not instructions for agents reviewing a PR
   rejected structured calls per review session (one for output repair/comments).
   It does not repair JSON, add requests, or filter MCP operations. Keep timeout,
   manual cancellation and output-failure causes distinct.
+- Render final details once from validated findings and dispositions. The final
+  report field is a short overview of checks, exclusions and limitations; human-
+  readable final fields follow outputLanguage. Preserve initial evidence in its
+  original language. Incomplete drafts show only validated initial observations,
+  clearly unconfirmed, plus failure/missing-ID diagnostics; never cache them as
+  completed reviews or use them for comments. No formatting/translation model.
 - Comment preview is distinct from publication. Publication needs explicit
   `--publish`, prior opt-in settings, and a saved plan in the same origin/process.
   An uncertain attempt is not permission to retry. Never call model-reported

@@ -77,7 +77,7 @@ unknown or quoted-inside-the-value head can complete a review.
 
 No extra formatter/reviewer model is started by default. The plugin does not
 rerun full stages or switch models. The opt-in amendments below use the
-same model, with distinct status and missing-location contracts. If a provider cannot use the native mechanism, select
+same model, with distinct status, missing-location and missing-merge contracts. If a provider cannot use the native mechanism, select
 `structuredOutput: false` locally and restart. Text mode accepts a JSON object
 or one unambiguous fenced object with optional commentary. It does not guess
 among multiple envelopes, repair truncated JSON, or ignore host/model errors.
@@ -122,8 +122,8 @@ result; native capture success must not bypass local evidence checks.
 
 ## Bounded output amendments
 
-`outputRetries: 1` enables one status OR absent final-location amendment per stage,
-with a shared limit of one extra request. Default `0` disables both. This is
+`outputRetries: 1` enables one status, absent final-location OR missing merge-disposition amendment per stage,
+with a shared limit of one extra request. Default `0` disables all three. This is
 post-response validation and bounded feedback, not a patch to OpenCode's native
 StructuredOutput implementation; native capture can succeed with missing fields.
 
@@ -162,6 +162,24 @@ The receipt retains the failed attempt and its error, then lists
 files retain both responses; a retry result records `attempt: 2` and `retryOf`.
 The first result remains FAILED even when the overall review later completes.
 Inspect all attempts when evaluating reliability, not just the final status.
+
+### Missing disposition rows
+
+The verifier receives `expectedFindingIds` explicitly. A missing-row error lists
+the absent original IDs, also saved as `missingDispositionIds`. Prose that explains
+a merge does not substitute for a structured row.
+
+With the single amendment budget available, an otherwise valid COMPLETE final
+submission can request only missing MERGED rows from the same stopped verifier
+context. Each target must already be CONFIRMED, every missing ID must occur once,
+and existing values cannot change. No new tools or decisions are allowed. The
+reviewer declines when its previous evidence cannot support all requested merges.
+The runtime does not infer them from prose. Existing merges that depend on missing
+rows, missing evidence/locations and unknown/stale versions are ineligible.
+
+A successful amendment records `retry-kind=disposition` and `amendedDispositions`
+while retaining the original FAILED record. A refusal or invalid amendment ends
+the run without another attempt. Source truth still depends on reviewer evidence.
 
 ### Missing locations
 
@@ -282,7 +300,8 @@ printed in its receipt:
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
-| `report.md` | Runtime final report, including model attribution and dispositions; or the comment preview/publication receipt. Absent if no report was produced. |
+| `report.md` | Rendered validated final fields plus overview/provenance; or comment preview/publication receipt. |
+| `draft.md` | Clearly unconfirmed initial observations after an incomplete review; never a completed report or comments input. Aggregate reportKind is incomplete-draft. |
 
 A complete normal or deep review normally has three stage records: functional
 initial review, risk initial review, and final verification. Standalone `/pr-check`
@@ -348,7 +367,7 @@ For quality-contract failures, compare the saved response to its request schema:
 
 Both native and text output use these checks. Install matching runtime/prompts
 and restart after an update; old custom prompts must satisfy the new contract.
-Apart from the explicit final-location amendment above, no missing fields are
+Apart from the explicit final-location and missing-merge amendments above, no missing fields are
 supplied; initial omissions remain absent until verification. No fallback to the
 original candidate is performed. Debug data
 lets you inspect coverage claims, counterevidence and corrected findings, not
@@ -375,10 +394,24 @@ permissions and per-run `.gitignore` files reduce accidental exposure, but force
 Git adds, shared drives, backups, and malicious local programs are outside this
 protection. No automatic deletion or retention policy is imposed.
 
+## Rendered reports and incomplete drafts
+
+The final `report` field is now a short checks/limitations overview. Full Markdown
+is generated from the validated snapshot, finding evidence, disposition reasons
+and model ledger. Inspect those structured fields as well as report when debugging
+content; a short raw report field is intentional. No extra model formats it.
+
+INCOMPLETE runs can retain valid initial observations as a clearly marked draft,
+including missing IDs and failure details. Failed final claims are not adopted.
+An inactive/abort-uncertain run never resumes a session to display its draft;
+diagnostic storage remains available when enabled. Receipt mode does not embed
+draft source; full mode returns it with its unconfirmed label. Drafts cannot feed
+comment preview/publication. The receipt itself is never a review report.
+
 ## Language and attribution
 
 Use `outputLanguage: "zh-TW"` for Traditional Chinese (or `zh-CN` for Simplified
-Chinese). It controls both final-verifier roles and comment roles in either
+Chinese). It controls final human-readable structured fields, the overview, and comment roles in either
 return mode. Source checks, initial reviews, structured status values, code,
 and JSON keys are not translated. The parent agent is told to preserve the
 entire report rather than summarizing or translating it to English. If the UI

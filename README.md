@@ -210,11 +210,20 @@ Set the top-level `outputLanguage` in your installed `plugins/azpr/settings.json
 
 The default is `en` (English), including when the field is omitted. Other examples are `zh-CN` (Simplified Chinese), `ja` (Japanese), and `zh-Hant-TW` (Traditional Chinese with an explicit script). Use a language tag, not a language name or free-form instruction. Change it before starting a review, then restart OpenCode. To use another language after a preview, restart and run a new review/preview; the publisher is instructed not to translate an already saved preview.
 
-Only final-report Markdown, comment prose, and comment skip explanations are localized. Intermediate reviews, structured fields, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to the final-verifier and comment roles in each profile; actual language quality depends on the model. No translation model or extra review stage is added.
+Final human-readable finding fields, disposition reasons, the brief report, comment prose, and comment skip explanations are localized. Intermediate reviews, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to the final-verifier and comment roles in each profile; actual language quality depends on the model. No translation model or extra review stage is added.
 
 With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
 
 Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; the child-session report and optional debug `report.md` preserve the runtime's version.
+
+Final findings and disposition reasons are written once in structured fields.
+The runtime renders their details and tables; the verifier's `report` contains
+only its independent checks, important exclusions, corrections and limitations.
+No model is invoked for formatting. If final adjudication fails, a clearly marked
+incomplete draft preserves valid initial observations in their original language,
+with missing IDs and the failure reason. It is not a completed review and cannot
+be used for comments. With debug enabled it is saved as `draft.md`, separate from
+`report.md`. Receipt mode never embeds the draft's source content.
 
 Every final review report includes its mode, a runtime-generated stage/model ledger, initial finding counts, and original finding dispositions/merge targets. It explains the method: independent initial reviews followed by source verification and duplicate merging, not majority voting. Only invoked review stages are listed; the other profile's models are absent. These are the selected OpenCode provider/model IDs, not independent proof of a provider's backend model. Host auxiliary models and the original chat model are not included.
 
@@ -266,12 +275,19 @@ Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
   Existing field values stay unchanged; no tool/source work is repeated. If the
   location cannot be established from that context, the stage remains incomplete.
 
-The two cases share one allowance, not one each. Default `0` disables both.
+- Missing original disposition rows in an otherwise valid COMPLETE verifier
+  submission: one request in the same stopped session may add only MERGED rows
+  pointing to already confirmed original findings. All missing IDs must be
+  accounted for from that verifier's existing source context. If any merge is
+  unproven or needs changes to an existing finding, the amendment must decline.
+  No merge is inferred from prose or supplied by the runtime.
+
+The three cases share one allowance, not one each. Default `0` disables all.
 Every other contract must pass before a request is allowed, and the original
 session must have a completed tool call and a confirmed abort. Repair grants
 deny ordinary tools and a second model request. The complete amended envelope
-is validated again. Original failures, `retry-kind`, attempt/session IDs and a
-location-amendment notice remain visible in receipts and diagnostics. The plugin
+is validated again. Original failures, `retry-kind`, attempt/session IDs and
+location/disposition-amendment notices remain visible in receipts and diagnostics. The plugin
 never extracts guessed locations from report text; amended locations are model
 claims, not independently verified source facts.
 

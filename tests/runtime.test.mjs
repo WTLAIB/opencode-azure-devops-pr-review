@@ -62,7 +62,7 @@ async function fixture(t, opts={}) {
       if(opts.afterSystem)await opts.afterSystem({hooks,role,id,model,packet,system,cfg});
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
-      if(!opts.skipAzure && !spec.comment && !['output-status-repair','output-location-repair'].includes(packet.operation)) {
+      if(!opts.skipAzure && !spec.comment && !['output-status-repair','output-location-repair','output-disposition-repair'].includes(packet.operation)) {
         const tool=opts.readTool ?? 'ado_repo_pull_request'; const callID=`read-${id}`;
         const args = opts.readTool ? {repositoryId:'repo',project:'proj',pullRequestId:123} : {action:'get'};
         await hooks['tool.execute.before']({sessionID:id,tool,callID},{args});
@@ -71,6 +71,7 @@ async function fixture(t, opts={}) {
       let result;
       if(packet.operation === 'output-status-repair') result={status:spec.stage==='check'?'READY':'COMPLETE'};
       else if(packet.operation === 'output-location-repair') result={locations:packet.missingLocations.map(({id})=>({id,location:candidate(id).location}))};
+      else if(packet.operation === 'output-disposition-repair') result={dispositions:packet.missingDispositionIds.map(id=>({id,status:'MERGED',mergedInto:packet.mergeTargets[0],reason:'Same previously checked root cause and correction.'}))};
       else if(spec.comment) {
         let seq=0;
         const invoke=async(tool,args,result,response={})=>{
@@ -953,7 +954,7 @@ test('empty initial finding lists still require the independent final verifier',
   assert.match(await f.command(),/] COMPLETE/);
   assert.equal(f.prompts().length,3);
   assert.equal(ROLES[f.prompts().at(-1).body.agent].stage,'verifier');
-  assert.match(f.cfg.agent['azpr-review-verifier'].prompt,/Even when both finding lists are empty/);
+  assert.match(f.cfg.agent['azpr-review-verifier'].prompt,/even if both finding lists are empty/);
 });
 test('review prompts preserve full coverage and conditional defects instead of confidence filtering',async t=>{
   const f=await fixture(t);
@@ -1522,7 +1523,7 @@ test('language tags are canonicalized and invalid language instructions fail clo
   await assert.rejects(invalid.command(),/outputLanguage/); assert.equal(invalid.calls.length,0);
 });
 
-for (const [command,language] of [['pr-review','zh-TW'],['pr-deep','zh-CN']]) test(`${command} localizes only the final report using ${language}`, async t => {
+for (const [command,language] of [['pr-review','zh-TW'],['pr-deep','zh-CN']]) test(`${command} localizes final structured prose and report using ${language}`, async t => {
   const f=await fixture(t,{settings:s=>{s.outputLanguage=language;}});
   assert.match(await f.command(command),/] COMPLETE/);
   for (const p of f.prompts()) {
@@ -1530,12 +1531,12 @@ for (const [command,language] of [['pr-review','zh-TW'],['pr-deep','zh-CN']]) te
     assert.equal(packet.outputLanguage,localized?language:undefined);
     if (localized) {
       assert.ok(f.cfg.agent[p.body.agent].prompt.includes(`outputLanguage: ${language}`));
-      assert.match(f.cfg.agent[p.body.agent].prompt,/Other JSON fields and intermediate findings remain in English/);
+      assert.match(f.cfg.agent[p.body.agent].prompt,/human-readable structured finding fields/);
     } else {
       assert.doesNotMatch(f.cfg.agent[p.body.agent].prompt,/# Configured output language/);
       assert.match(f.cfg.agent[p.body.agent].prompt,p.body.agent.endsWith('-check')
         ? /Write this readiness envelope in English/
-        : /intermediate reports and structured finding explanations in English/);
+        : /intermediate reviews in English/);
     }
   }
 });
@@ -1647,4 +1648,158 @@ for(const currentBase of ['c'.repeat(40),'']) for(const status of ['COMPLETE','C
   assert.match(out,currentBase&&status==='COMPLETE'?/] STALE/:/] INCOMPLETE/);
   assert.doesNotMatch(out,/output-retry=/);assert.equal(f.prompts().length,3);
   await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+
+
+for(const mode of ['review','deep']) for(const native of [true,false]) test(`missing merge rows: one same-context amendment (${mode}, native=${native})`,async t=>{
+  let original,originalID;
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.structuredOutput=native;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({role,result,packet,id})=>{
+      if(role.endsWith('-verifier')&&!packet.operation){
+        assert.deepEqual(packet.expectedFindingIds,['F-1','R-1']);
+        result.dispositions.pop();original=jclone(result);originalID=id;
+      }
+      return result;
+    },afterSystem:({packet,system})=>{
+      if(packet.operation!=='output-disposition-repair')return;
+      assert.match(system.system.join('\n'),/# Bounded disposition resubmission/);
+      assert.doesNotMatch(system.system.join('\n'),/# Role: evidence verifier/);
+      assert.match(system.system.join('\n'),/HOST_SYSTEM_SENTINEL/);
+    },duringPrompt:async({packet,hooks,id,role,model,o})=>{
+      if(packet.operation!=='output-disposition-repair')return;
+      assert.equal(id,originalID);
+      assert.deepEqual(packet.missingDispositionIds,['R-1']);
+      assert.deepEqual(packet.mergeTargets,['F-1']);
+      if(native)assert.deepEqual(o.body.format.schema.required,['dispositions']);
+      await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'arbitrary_mcp',callID:'blocked'},{args:{}}),/disposition repair.*tools/i);
+      await assert.rejects(hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{}),/one model request/);
+    },answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
+  const out=await f.command(mode==='deep'?'pr-deep':'pr-review');
+  assert.match(out,/] COMPLETE/);assert.match(out,/retry-kind=disposition/);
+  assert.equal(f.prompts().length,4);assert.equal(f.sessions.size,3);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const saved=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  const records=saved.stages.filter(s=>s.stage==='verifier');
+  assert.deepEqual(records[0].missingDispositionIds,['R-1']);
+  assert.equal(records[1].completedTools,0);assert.equal(records[1].modelRequests,1);
+  assert.deepEqual(records[1].amendedDispositions,['R-1']);
+  assert.deepEqual({...records[1].result,dispositions:records[1].result.dispositions.slice(0,1)},original);
+  assert.match(await readFile(join(dir,'report.md'),'utf8'),/fixture branch evidence/);
+  await assert.rejects(f.hooks['tool.execute.before']({sessionID:originalID,tool:'late',callID:'late'},{args:{}}),/expired/);
+});
+
+for(const defect of ['disabled','status','evidence','location','staleHead','unknownBase','wrongPR','duplicate','noTools','noTarget','abortUnconfirmed'])
+test(`missing merge rows: ineligible ${defect} remains incomplete`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=defect==='disabled'?0:1,skipAzure:defect==='noTools',
+    client:client=>{if(defect==='abortUnconfirmed')client.session.abort=async()=>({data:false});},
+    result:({role,result,packet})=>{
+      if(!role.endsWith('-verifier')||packet.operation)return result;
+      result.dispositions.pop();
+      if(defect==='status')result.status='CURRENT';
+      if(defect==='evidence')delete result.dispositions[0].verifiedFinding.evidence;
+      if(defect==='location')delete result.dispositions[0].verifiedFinding.location;
+      if(defect==='staleHead')result.currentHead='c'.repeat(40);
+      if(defect==='unknownBase')result.currentBase='';
+      if(defect==='wrongPR')result.snapshot.prId=999;
+      if(defect==='duplicate')result.dispositions.push(jclone(result.dispositions[0]));
+      if(defect==='noTarget')result.dispositions=[];
+      return result;
+    }});
+  assert.match(await f.command(),/] INCOMPLETE/);
+  assert.equal(f.prompts().length,3);
+});
+
+for(const defect of ['missing','extraID','duplicate','wrongTarget','cycle','rejected','confirmed','changedReport','changedStatus','emptyReason','extraField'])
+test(`missing merge rows: invalid amendment ${defect} never gets another attempt`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result,packet})=>{
+    if(!role.endsWith('-verifier'))return result;
+    if(!packet.operation){result.dispositions.pop();return result;}
+    const d=result.dispositions[0];
+    if(defect==='missing')result.dispositions=[];
+    if(defect==='extraID')d.id='R-99';
+    if(defect==='duplicate')result.dispositions.push(jclone(d));
+    if(defect==='wrongTarget')d.mergedInto='V-1';
+    if(defect==='cycle')d.mergedInto=d.id;
+    if(defect==='rejected')d.status='REJECTED';
+    if(defect==='confirmed'){d.status='CONFIRMED';d.verifiedFinding=candidate(d.id);}
+    if(defect==='changedReport')result.report='replacement';
+    if(defect==='changedStatus')result.status='CREATE';
+    if(defect==='emptyReason')d.reason='';
+    if(defect==='extraField')d.evidence='replacement';
+    return result;
+  }});
+  assert.match(await f.command(),/] INCOMPLETE/);assert.equal(f.prompts().length,4);
+  assert.equal(f.sessions.size,3);
+});
+
+test('incomplete draft preserves observations without accepting final claims or permitting comments',async t=>{
+  const f=await fixture(t,{settings:s=>{s.returnReport='full';s.outputLanguage='zh-TW';s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({role,result})=>{if(role.endsWith('-verifier')){result.dispositions.pop();result.report='UNVALIDATED_FINAL_CLAIM';}return result;}});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);
+  assert.match(out,/未完成審查草稿/);assert.match(out,/R-1/);
+  assert.match(out,/fixture branch evidence/);assert.doesNotMatch(out,/UNVALIDATED_FINAL_CLAIM/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  assert.match(await readFile(join(dir,'draft.md'),'utf8'),/未完成審查草稿/);
+  await assert.rejects(readFile(join(dir,'report.md'),'utf8'),/ENOENT/);
+  assert.equal(JSON.parse(await readFile(join(dir,'result.json'),'utf8')).reportKind,'incomplete-draft');
+  assert.equal(f.calls.filter(c=>c.kind==='prompt'&&c.body.noReply).length,1);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+
+test('deterministic final rendering includes localized structured details without repeating them in report input',async t=>{
+  const f=await fixture(t,{settings:s=>{s.outputLanguage='zh-TW';s.returnReport='full';},result:({role,result})=>{
+    if(role.endsWith('-verifier')){
+      result.report='獨立讀取變更與契約；未執行測試。';
+      result.dispositions[0].verifiedFinding.evidence='已核對的觸發條件與來源證據。';
+      result.dispositions[0].reason='來源支持此問題。';
+    }
+    return result;
+  }});
+  const out=await f.command();assert.match(out,/] COMPLETE/);
+  assert.match(out,/已核對的觸發條件與來源證據/);assert.match(out,/來源支持此問題/);
+  assert.match(out,/獨立讀取變更與契約/);
+  assert.match(f.cfg.agent['azpr-review-verifier'].prompt,/human-readable.*structured/s);
+  assert.doesNotMatch(f.cfg.agent['azpr-review-verifier'].prompt,/Other JSON fields.*remain in English/);
+});
+
+
+for(const fault of ['missingHook','wrongMessage','cancel','nativeInvalid']) test(`missing merge rows: lifecycle guard ${fault} prevents completion`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,skipSystemHook:fault==='missingHook',
+    result:({role,result,packet})=>{if(role.endsWith('-verifier')&&!packet.operation)result.dispositions.pop();return result;},
+    duringPrompt:async({packet,hooks,id,model,role})=>{
+      if(packet.operation!=='output-disposition-repair')return;
+      if(fault==='cancel')await f.command('pr-stop','');
+      if(fault==='nativeInvalid')await invalidSubmission(hooks,id,'invalid-amendment');
+    },
+    beforePrompt:async({packet,hooks,id,model,role})=>{
+      if(fault==='wrongMessage'&&packet.operation==='output-disposition-repair'){
+        await hooks['chat.message']({sessionID:id,agent:role,model},{message:{agent:role,model},parts:[{type:'text',text:'changed'}]});
+      }
+    }});
+  const out=await f.command();
+  assert.match(out,fault==='cancel'?/] CANCELLED/:/] INCOMPLETE/);
+  assert.equal(f.prompts().length,4);assert.equal(f.sessions.size,3);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+
+test('receipt-only failed draft keeps source private and display cancellation cannot cache it',async t=>{
+  const f=await fixture(t,{result:({role,result})=>{if(role.endsWith('-verifier'))result.dispositions.pop();return result;},
+    duringDisplay:async()=>{await f.command('pr-stop','');}});
+  const out=await f.command();
+  assert.match(out,/] CANCELLED/);assert.doesNotMatch(out,/fixture branch evidence/);
+  assert.match(out,/No report body is enclosed/);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+
+test('directory lookup guidance separates branch hints from exact-commit evidence',async t=>{
+  const f=await fixture(t);
+  for(const stage of ['functional','risk','verifier']){
+    const prompt=f.cfg.agent['azpr-review-'+stage].prompt;
+    assert.match(prompt,/directory listing interprets Commit as Branch/);
+    assert.match(prompt,/never send a\s+SHA to list a directory/);
+    assert.match(prompt,/not proof of a commit tree or absent guidance/);
+    assert.match(prompt,/exact-commit content selector/);
+  }
+  assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
 });

@@ -24,3 +24,38 @@ export function commentAttribution(provenance, language, commentModel) {
   const stages = provenance.stages.map(s => `${w.roles[ROLES[s.role]?.order]}: \`${s.model}\``).join('; ');
   return `${w.ai} (${provenance.mode}) — ${stages}; ${w.comments}: \`${commentModel}\`.\n${w.method}\n${w.posted}`;
 }
+
+
+// Presentation uses validated fields; it neither translates nor invents claims.
+const reportVocabulary = {
+  en: { scope:'Scope and versions', overview:'Checks and limitations', findings:'Confirmed findings', decisions:'Finding decisions', evidence:'Evidence and impact', counter:'Counterevidence', suggestion:'Correction and verification', location:'Location', none:'None reported.', draft:'Incomplete review draft', warning:'AI-generated, unconfirmed initial observations. Final adjudication did not complete. This is not an approved review or input for PR comments. Source text is retained in its original language; no model was called to format this draft.', failure:'Failure', missing:'Missing disposition IDs', candidates:'Unconfirmed initial observations', gaps:'Coverage gaps', stage:'Stage', model:'Selected model', partial:'Verification is incomplete. These claims are provisional and cannot be used for PR comments.' },
+  tw: { scope:'範圍與版本', overview:'查證與限制', findings:'已確認問題', decisions:'問題裁決理由', evidence:'證據與影響', counter:'反證檢查', suggestion:'修正與驗證建議', location:'位置', none:'未列出。', draft:'未完成審查草稿', warning:'AI 產生的初審觀察，尚未完成最終裁決，不能視為已確認結論或用於 PR 留言。原始內容保留原語言；草稿排版未呼叫模型。', failure:'失敗原因', missing:'缺少裁決的 ID', candidates:'尚未確認的初審觀察', gaps:'覆蓋缺口', stage:'階段', model:'實際選用模型', partial:'驗證尚未完成，下列結論僅供檢視，不能用於 PR 留言。' },
+  cn: { scope:'范围与版本', overview:'查证与限制', findings:'已确认问题', decisions:'问题裁决理由', evidence:'证据与影响', counter:'反证检查', suggestion:'修正与验证建议', location:'位置', none:'未列出。', draft:'未完成审查草稿', warning:'AI 产生的初审观察，尚未完成最终裁决，不能视为已确认结论或用于 PR 留言。原始内容保留原语言；草稿排版未调用模型。', failure:'失败原因', missing:'缺少裁决的 ID', candidates:'尚未确认的初审观察', gaps:'覆盖缺口', stage:'阶段', model:'实际选用模型', partial:'验证尚未完成，下列结论仅供查看，不能用于 PR 留言。' },
+};
+function reportWords(language) {
+  return reportVocabulary[words(language) === vocabulary.tw ? 'tw' : words(language) === vocabulary.cn ? 'cn' : 'en'];
+}
+function renderFinding(finding, w) {
+  return `### ${finding.id} — ${finding.summary} (${finding.severity})\n\n**${w.location}:** ${finding.location ?? '—'}\n\n**${w.evidence}**\n\n${finding.evidence}\n\n**${w.counter}**\n\n${finding.counterevidence}\n\n**${w.suggestion}**\n\n${finding.suggestion}`;
+}
+function renderSnapshot(snapshot) {
+  return `${snapshot.repository} · PR #${snapshot.prId} · ${snapshot.scope}\n\n- base: \`${snapshot.base}\`\n- head: \`${snapshot.head}\`\n- files: ${snapshot.files.join(', ')}`;
+}
+export function renderFinalReport(final, language) {
+  const w = reportWords(language);
+  const findings = [...final.dispositions.filter(d => d.status === 'CONFIRMED').map(d => d.verifiedFinding), ...(final.newFindings ?? [])];
+  const decisions = final.dispositions.map(d => `- **${d.id} — ${d.status}${d.mergedInto ? ' → ' + d.mergedInto : ''}:** ${d.reason}`).join('\n');
+  return `${final.status !== 'COMPLETE' ? '**' + final.status + ': ' + w.partial + '**\n\n' : ''}## ${w.scope}\n\n${renderSnapshot(final.snapshot)}\n\n- currentHead: \`${final.currentHead ?? ''}\`\n- currentBase: \`${final.currentBase ?? ''}\`\n\n## ${w.overview}\n\n${final.report}\n\n## ${w.findings}\n\n${findings.map(f => renderFinding(f, w)).join('\n\n') || w.none}\n\n## ${w.decisions}\n\n${decisions || w.none}`;
+}
+
+/** Only already validated initial results are shown. Failed final claims never
+ * become accepted findings, and no draft enters the completed-review cache. */
+export function renderIncompleteDraft(stages, failure, language) {
+  const initials = stages.filter(s => ROLES[s.role]?.format === 'initial' && s.result);
+  if (!initials.length) return '';
+  const w = reportWords(language);
+  const missing = [...new Set(stages.flatMap(s => s.missingDispositionIds ?? []))];
+  const ledger = stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}`).join('\n');
+  const observations = initials.map(s => `### ${s.role}\n\n${s.result.snapshot ? renderSnapshot(s.result.snapshot) + '\n\n' : ''}${s.result.report}\n\n**${w.gaps}:** ${s.result.coverage.gaps.join('; ') || w.none}\n\n${s.result.findings.map(f => renderFinding(f, w)).join('\n\n') || w.none}`).join('\n\n');
+  return `## ${w.draft}\n\n**${w.warning}**\n\n**${w.failure}:** ${failure}\n\n${missing.length ? '**' + w.missing + ':** ' + missing.join(', ') + '\n\n' : ''}${ledger}\n\n## ${w.candidates}\n\n${observations}`;
+}
