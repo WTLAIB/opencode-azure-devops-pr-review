@@ -102,8 +102,14 @@ echoing potentially private names. Compare the raw `.response.json` with the
 validated `.result.json`. The receipt includes a notice even with debug disabled;
 the original native/text response also remains in its OpenCode session.
 
+Unknown finding fields whose value is null are also removable, with a distinct
+remove-null-unknown-field action. A single redundant CONFIRMED V disposition may
+be removed only when its complete finding exactly matches the sole same-ID
+newFindings entry; deduplicate-new-finding records both array paths. Original F/R
+accounting remains strict, and the redundant reason stays in the original response.
+
 Conflicting keys, misspellings/case differences, missing/empty evidence and
-nonempty or nonstring extra fields still fail. Diagnostics distinguish, for
+content-bearing extra fields still fail. Diagnostics distinguish, for
 example, `findings[0].evidence is missing` from `findings[1].id duplicates an
 earlier finding`, without printing source values. The same rules apply to
 `dispositions[i].verifiedFinding` and `newFindings[i]`. Other envelope fields are
@@ -116,7 +122,7 @@ result; native capture success must not bypass local evidence checks.
 
 ## Bounded output amendments
 
-`outputRetries: 1` enables one status OR absent-location amendment per stage,
+`outputRetries: 1` enables one status OR absent final-location amendment per stage,
 with a shared limit of one extra request. Default `0` disables both. This is
 post-response validation and bounded feedback, not a patch to OpenCode's native
 StructuredOutput implementation; native capture can succeed with missing fields.
@@ -144,7 +150,7 @@ Both transports support this; host `format.retryCount` stays zero. This field
 does not prevent the host from continuing after an invalid tool call within the
 same session; the separate guard below bounds native structured rejections.
 
-This is not recovery for `StructuredOutputError`, missing/malformed JSON,
+This is not general recovery for `StructuredOutputError`, missing/malformed JSON,
 authentication or transport errors, incomplete coverage, missing evidence,
 changed heads, cancellation, or comments. Those still stop. No whole workflow is
 rerun, and the existing timeout is not reset. Each of the four review stages can
@@ -159,7 +165,15 @@ Inspect all attempts when evaluating reliability, not just the final status.
 
 ### Missing locations
 
-An initial/verifier envelope with COMPLETE and absent finding `location` fields
+An initial envelope may omit only the separate location field. These candidates
+retain all other evidence and complete coverage, appear as pendingLocations in
+stage diagnostics and the verifier request, and produce a pending-locations=N
+receipt notice. No value is supplied and no initial location amendment is started,
+regardless of outputRetries. The verifier must establish locations for confirmation
+or classify unresolved candidates NEEDS_INFO. Inspect final dispositions to see
+the outcome; an initial pending-locations count does not claim resolution.
+
+A verifier envelope with COMPLETE and absent finding `location` fields
 may qualify only when every other contract passes. The same stopped session is
 regranted for one plugin-authored message to keep its original source context.
 The model returns only `{"locations":[{"id":"F-1","location":"head:/src/example.ts:12"}]}`
@@ -170,7 +184,8 @@ locations list fails closed. No locations are extracted automatically from prose
 
 Missing evidence/counterevidence, coverage gaps, invalid IDs, empty existing
 locations, changed/unknown heads, comments and uncertain cancellation never
-qualify. Native/text parse errors also remain terminal. Both the eligibility
+qualify. Native/text parse errors remain terminal except for the narrow complete-text
+amendment compatibility below. Both the eligibility
 probe and final amended result use the full validator; placeholders never enter
 accepted results or diagnostics as evidence.
 
@@ -185,6 +200,26 @@ only if the amended full result passes. A second failure ends the stage.
 Completed sessions still refuse ordinary reuse. Only the plugin's exact amendment
 message, same run/role/model, confirmed abort and isolated system prompt can grant
 this exception. The existing whole-command deadline is never restarted.
+
+### Complete JSON text amendments
+
+Only a scoped native amendment can accept a complete JSON text object when the
+host reports StructuredOutputError/data.message="Model did not produce structured
+output", retries=0 and finish=stop. It must come from that session's assistant,
+with no native structured result, one request, no attempted ordinary tools or
+native rejections, valid isolated instructions, an active grant and confirmed
+abort. Normal review and comment responses cannot use this path.
+
+The parser accepts only a whole JSON object, without preamble, fences or duplicate
+keys. No truncated JSON, tool output, reasoning or earlier response is used.
+The exact amendment contract and full original stage validation must both pass.
+No second request, value inference or JSON repair is added. General provider/SDK
+errors, cancellation, content filters and non-stop finish reasons still fail.
+
+An accepted stage records outputTransportFallback (native to json-text) and the
+receipt shows output-transport=json-text plus a notice. The raw host error stays
+in response diagnostics and the session. A failed candidate gets no acceptance
+notice. Count this separately from local formatting and first-pass native success.
 
 ## Repeated native submission failures and timeouts
 
@@ -280,7 +315,8 @@ For quality-contract failures, compare the saved response to its request schema:
 - Each initial review needs `coverage.files` and `coverage.gaps`. COMPLETE cannot
   omit a snapshot file or carry review gaps; PARTIAL must explain its gaps.
 - Every finding needs `counterevidence`, severity and a correction/verification
-  suggestion as well as its ID, summary, location and source evidence. No extra
+  suggestion as well as its ID, summary and source evidence. Initial location
+  alone may be absent; final confirmed findings/discoveries require it. No extra
   fields are accepted after the disclosed formatting step above.
 - Each CONFIRMED disposition needs the verifier's complete `verifiedFinding`
   under the same original ID; other dispositions must not carry one.
@@ -289,8 +325,9 @@ For quality-contract failures, compare the saved response to its request schema:
 
 Both native and text output use these checks. Install matching runtime/prompts
 and restart after an update; old custom prompts must satisfy the new contract.
-Apart from the explicit absent-location amendment above, no missing fields are
-supplied; no fallback to the original candidate is performed. Debug data
+Apart from the explicit final-location amendment above, no missing fields are
+supplied; initial omissions remain absent until verification. No fallback to the
+original candidate is performed. Debug data
 lets you inspect coverage claims, counterevidence and corrected findings, not
 independently prove that source reads or reasoning were correct.
 

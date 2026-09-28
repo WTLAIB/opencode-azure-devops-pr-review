@@ -174,14 +174,14 @@
     "structuredOutput": {
       "type": "boolean",
       "default": true,
-      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false only for a provider that cannot use it; no automatic transport or model fallback."
+      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false for explicit text compatibility. An authorized output amendment may accept complete JSON text after the pinned missing-native error, with full validation and an explicit notice. No model fallback."
     },
     "outputRetries": {
       "type": "integer",
       "minimum": 0,
       "maximum": 1,
       "default": 0,
-      "description": "Opt in to at most one status OR absent-location amendment per review stage when every other contract passes. Status uses a fresh session; locations use the same stopped reviewer session and its existing source context. Same model, one request, ordinary tools denied, immutable original values and full revalidation. No missing/malformed JSON, other missing evidence, empty existing locations, coverage gaps, stale/unknown heads, cancellation, transport failures or comments. The shared run deadline still applies; extra usage may be billed."
+      "description": "Opt in to at most one status OR absent final-location amendment per stage when every other contract passes. Initial location omissions go to the verifier without repair. Status uses a fresh session; final locations retain the same stopped session. Same model, one request, no ordinary tools or original-value changes. A complete JSON text amendment may be accepted after the pinned missing-native error, with full validation and disclosure. Other errors, malformed JSON, missing evidence, coverage gaps, stale/unknown heads, cancellation and comments never qualify. The shared deadline still applies; extra usage may be billed."
     },
     "debug": {
       "type": "object",

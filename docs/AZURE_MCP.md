@@ -100,8 +100,8 @@ Prompt policy forbids identical retries for deterministic/permission errors and
 speculative query loops. It allows at most one identical retry per logical read
 only for an explicit transient error, within the existing session budget and host
 guidance. This is not an enforced MCP retry counter, new session, wrapper, argument
-rewriter or permission filter. `outputRetries` continues to mean status-only
-output amendment, not MCP recovery. Host/provider retries remain separate.
+rewriter or permission filter. `outputRetries` permits bounded status or final-
+location amendments, not MCP recovery. Host/provider retries remain separate.
 
 These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history

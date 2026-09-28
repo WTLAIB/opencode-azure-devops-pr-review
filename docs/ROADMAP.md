@@ -17,12 +17,18 @@ Implemented and covered by offline tests:
   only its selected submission policy. The verifier's head uses a scalar string
   schema while unknown/stale-head validation remains strict. Receipt/full
   presentation, opt-in diagnostics, final/comment language, model attribution.
-- Audited local finding-key whitespace/empty-extension normalization, exact
+- Audited local finding-key whitespace/empty-string-or-null extension normalization, exact
   finding-key validation and field-path errors, without extra model requests or
   altered evidence values. Collisions, missing evidence and meaningful extras
   remain failures. Native/text regressions cover both profiles and retain the
   raw responses; improved live repeatability still needs user-run evaluation.
-- Opt-in, one status OR absent-location amendment per review stage, sharing one
+- Exact duplicate V-disposition normalization with raw reasons retained and
+  original F/R accounting unchanged. Initial candidates may omit location with
+  an explicit pending-ID handoff; final confirmations still require all fields.
+  Scoped native amendments can accept complete, unambiguous JSON text after the
+  pinned missing-submission error, with notices and no additional request.
+  Live improvement remains unverified; offline recovery is not a completed run.
+- Opt-in, one status OR absent final-location amendment per stage, sharing one
   allowance, with immutable original values,
   bounded model requests, ordinary-tool denial and retained failure diagnostics.
   Amendment instructions are isolated to granted repair sessions; normal

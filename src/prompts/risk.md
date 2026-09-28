@@ -10,7 +10,10 @@ Return:
 Copy the input snapshot exactly. Use R-1, R-2, and so on. An empty findings array is valid. Return PARTIAL if data or review coverage is incomplete; do not hide unfinished work behind zero findings.
 
 Fill coverage using the common rules, not the example path. Every finding field
-is required; severity is high, medium, or low. For failure/concurrency concerns,
+except location is required; severity is high, medium, or low. Provide a source-
+verified location when possible; otherwise omit that field and explain the
+limitation in report for the verifier to resolve. Never omit source evidence or
+hide coverage gaps under this exception. For failure/concurrency concerns,
 identify a concrete reachable sequence and inspect safeguards across callers,
 not just the changed line. Do not discard a defect because it requires a timeout,
 retry, unusual input, or interleaving. Preserve evidence and unresolved limits.

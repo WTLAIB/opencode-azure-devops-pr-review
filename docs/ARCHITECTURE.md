@@ -38,7 +38,7 @@ Revisit them with an explicit decision and evidence, not as incidental cleanup.
 | Two full-scope initial reviews with different emphasis, then one verifier | Independent candidates plus evidence checking; costs more than one pass and does not prove better recall. | Representative, independently labeled PR evaluations support a change. |
 | Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
 | Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
-| Strict contracts with opt-in, single status OR missing-location amendment | One additional request, immutable original values, no repeated tools; location repair retains only that reviewer's context. Does not prove source truth or cover arbitrary missing fields. | A reproduced failure justifies a separately evaluated recovery class. |
+| Strict evidence with audited format tolerance, deferred initial locations and one opt-in status OR final-location amendment | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
 | Explicit saved comment preview and one publication attempt | Keeps human inspection before account-owned comments and limits duplicate attempts; publication is still model-reported. | Verified provider evidence or resumability is explicitly requested and designed. |
 | Seven runtime modules, editable policies, source-only installation | Small auditable boundaries and manual-copy support; file catalogs need synchronized tests. | Measured complexity or distribution needs justify more structure. |
 | In-place settings migration, no retained install backup | Preserves preferences with missing-default merging; malformed settings require correction before install. | The owner explicitly changes the backup/retention requirement. |
@@ -140,12 +140,20 @@ PARTIAL requires a concrete gap explanation and never reaches final verification
 The snapshot itself still preserves the original file order. This ledger records
 the model's claimed coverage, not an independent source-access audit.
 
-All findings require `id`, `summary`, `location`, `evidence`, `counterevidence`,
+All final confirmed findings and discoveries require `id`, `summary`, `location`, `evidence`, `counterevidence`,
 `severity` (high/medium/low), and `suggestion`. Prompts require a reachable trigger,
 observable impact, exact-commit source/call-path evidence, checks for safeguards
 or alternative explanations, and a focused correction and verification case.
 These are checkable summaries, not private reasoning traces or confidence scores.
 Runtime checks establish field presence and types, not the truth of their text.
+
+Initial candidates may omit only location; other fields and full coverage remain
+mandatory. This does not infer a location or create a repair request. Stage records
+and receipts identify pendingLocations, and the verifier input lists these IDs
+alongside unchanged candidate reports. The verifier must establish locations
+independently to confirm them, or explicitly use NEEDS_INFO. An omitted location
+does not refute a candidate or permit missing source evidence. Existing empty or
+invalid location values remain invalid. Publication uses only final verified claims.
 
 Location guidance requires one-based lines recounted from the exact source,
 including blank lines/comments and excluding transport wrappers. The verifier
@@ -179,19 +187,25 @@ Every stage must observe message and parameter hooks. Source access, coverage, a
 ### Audited finding-format normalization
 
 A native StructuredOutput capture does not certify the plugin's evidence contract.
-Both transports therefore use local finding validation: exactly the seven schema
-keys, nonempty values, role-prefixed unique IDs and the allowed severity values.
+Both transports therefore use local finding validation: only the seven schema
+keys, nonempty supplied values, role-prefixed unique IDs and allowed severities.
+All seven are required for final findings; initial location alone may be absent.
 Errors identify array indices and field paths, including verifiedFinding and
 newFindings; they never echo source values, arbitrary IDs or unknown key names.
 
 After parsing, before validation, an initial/verifier envelope with a valid
-top-level status may undergo two deterministic changes to finding objects:
+top-level status may undergo these deterministic formatting changes:
 
 - Trim only ASCII JSON whitespace (space, tab, CR, LF) around an otherwise exact
   known key. Any collision, even between equal values, fails.
-- Remove an unknown field only when its value is exactly the empty string.
-  Whitespace strings, nulls, arrays, objects, numbers and booleans are not empty
+- Remove an unknown field only when its value is exactly the empty string or null.
+  Whitespace strings, arrays, objects, numbers and booleans are not empty
   for this rule and remain invalid extras. No content-bearing field is dropped.
+- Remove a single extra CONFIRMED V disposition only when its complete finding
+  is field-for-field identical to the sole same-ID newFindings entry. No original
+  F/R row is removed. Missing or conflicting discoveries, duplicate rows and
+  unexpected disposition fields remain invalid. The original row and reason stay
+  in raw output; corrections identify both array paths without copying their text.
 
 No spelling/case correction, evidence synthesis, value trimming, JSON repair,
 status inference or snapshot/coverage/report/head change occurs. The original
@@ -237,7 +251,7 @@ runs the entire original validator again. It never uses the probe's status.
 
 #### Absent finding locations
 
-An otherwise valid COMPLETE initial/verifier result may request only its absent
+An otherwise valid COMPLETE verifier result may request only its absent
 location fields. A cloned eligibility probe temporarily marks those fields and
 runs the full validator; neither placeholder nor probe result is ever accepted.
 Any other invalid field, duplicate ID, missing evidence, coverage gap, unknown or
@@ -251,8 +265,8 @@ only `locations: [{id, location}]`: exact requested IDs, no duplicates, no other
 fields, explicit base/head path and positive ordered line numbers. The plugin
 adds those absent fields to a clone and fully validates it. Every original value
 stays unchanged. The prompt refuses guessing from summaries or unavailable source.
-This does not independently verify the lines; the final reviewer still checks
-initial findings against source. Raw responses and failure records are retained.
+This does not independently verify the lines. Initial omissions are passed to
+the verifier instead of using this amendment. Raw responses and failures are retained.
 Any eligible local key-format corrections are disclosed only on final acceptance.
 
 #### Shared limits and isolation
@@ -280,7 +294,7 @@ No recursive retry, provider/model switch or general reviewer resumption is
 allowed. Only the explicit location grant can reuse its stopped original session.
 Host/provider-internal retries and auxiliary requests are outside this bound.
 
-Malformed/missing output, provider/SDK errors, incomplete evidence, changed heads,
+Malformed/missing output, general provider/SDK errors, incomplete evidence, changed heads,
 unconfirmed aborts and cancellations do not qualify. Comment preview/publication
 never qualify. A second format failure ends the stage. Each attempt has its own
 diagnostic files; the amendment records `attempt: 2`, `retryOf` and `retryKind`.
@@ -292,6 +306,25 @@ internal retries, total token usage, tool error categories or source authenticit
 Receipts retain the first error even after recovery. Final provenance uses only
 validated results, with at most one accepted result per role. Live model
 compatibility and reliability improvement still require acceptance testing.
+
+#### Amendment text compatibility
+
+The existing one-request amendment grant may accept complete JSON text after the
+pinned host reports `StructuredOutputError` with data.message exactly `Model did
+not produce structured output` and retries=0. It requires an assistant response
+for that session, finish=stop, no native structured value, one observed request,
+isolated repair instructions, zero ordinary tool attempts or native rejections,
+an active grant and confirmed abort. Configuration and cancellation are checked
+again before parsing. A denied second request also disqualifies this path.
+
+Only the whole visible, non-synthetic JSON object is read. No fences, preamble,
+substring extraction, private reasoning or prior tool output is used. JSON grammar
+and duplicate keys (including escaped equivalents) are checked before the scoped
+amendment and full original validator. No extra request or JSON repair occurs.
+Only a fully accepted result records outputTransportFallback and the receipt
+notice; the raw response retains the host error. Normal reviews and all comment
+sessions still reject host errors. API errors, truncation, content filtering,
+uncertain aborts and cancellations cannot become a successful fallback.
 
 ### Rejected native submissions
 

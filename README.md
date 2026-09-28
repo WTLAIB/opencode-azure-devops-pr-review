@@ -206,14 +206,24 @@ The verifier's current-head field uses a simple string schema for tool-parser
 compatibility. An unknown head remains INCOMPLETE; this never relaxes the full
 SHA comparison required for a completed review.
 
-Finding output tolerates two formatting defects locally: surrounding ASCII
-whitespace on an otherwise exact field name, and an unknown field whose value
-is exactly `""`. Required values stay unchanged. The complete envelope must then
+Finding output tolerates surrounding ASCII whitespace on an otherwise exact
+field name and unknown fields whose value is exactly `""` or `null`. A redundant
+CONFIRMED V disposition may also be removed when its complete finding exactly
+matches the sole same-ID newFindings entry. Original F/R dispositions remain
+complete and unique; the removed row and reason stay in the raw response.
+Required values stay unchanged. The complete envelope must then
 pass validation; missing evidence, conflicting keys and content-bearing extras
 still fail with field-specific diagnostics. Accepted changes appear as
 `output-format-corrections=N` in receipts and `outputFormatCorrections` in stage
 results; raw responses remain available for inspection. This adds no model call
 and does not consume the amendment allowance or change source checks/comments.
+
+Initial candidates may omit only their separate `location` field. The runtime
+records `pendingLocations`, shows `pending-locations=N` in receipts, and passes
+those IDs to the verifier without guessing locations or requesting an initial
+location amendment. Evidence and full coverage remain required. Final CONFIRMED
+findings and new discoveries still need locations; unresolved candidates must
+be NEEDS_INFO and cannot become PR comments.
 
 With native output, two rejected `StructuredOutput` submissions in one review
 session stop the run as `INCOMPLETE`. The host may continue after the first
@@ -227,7 +237,7 @@ Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
 
 - An invalid top-level status such as `CCOMPLETE`: the same model returns only
   a status in a fresh session; all other fields remain immutable.
-- Absent `location` fields in otherwise valid COMPLETE initial/verifier findings:
+- Absent `location` fields in otherwise valid COMPLETE verifier findings:
   the same reviewer gets one request in its original, stopped session to retain
   its own source context. It returns only the requested IDs and source locations.
   Existing field values stay unchanged; no tool/source work is repeated. If the
@@ -242,13 +252,22 @@ location-amendment notice remain visible in receipts and diagnostics. The plugin
 never extracts guessed locations from report text; amended locations are model
 claims, not independently verified source facts.
 
+An authorized amendment can accept one complete JSON text object when the only
+host error is `StructuredOutputError` for a missing native submission and the
+response ends with `stop`. This requires the same active grant, one model request,
+no tool attempts or rejected submissions, and full amendment/envelope validation.
+No extra request is made. `output-transport=json-text` and a receipt notice disclose
+the change; the original error remains in diagnostics. Truncated or ambiguous
+JSON, duplicate keys, general host/provider errors and cancellations still fail.
+Normal review submissions and comment sessions do not use this fallback.
+
 Normal reviewers receive only their full-review instructions. The bounded
 amendment instructions replace the reviewer prompt only in an authorized repair
 session; enabling retries does not expose an alternative output format to normal
 reviews. If the host cannot apply that isolated prompt, repair stops before a
 model request. Provider/host system context and ordinary agents are preserved.
 
-This does not retry malformed/missing JSON, host/provider errors, incomplete
+This does not retry malformed/missing JSON, general host/provider errors, incomplete
 evidence/coverage, empty existing locations, changed PR heads, cancellations, or
 comment preview/publication. A
 second failure ends that stage. The existing run timeout is not reset. A full

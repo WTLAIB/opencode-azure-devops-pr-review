@@ -2,6 +2,12 @@
 
 You receive the fixed snapshot and all initial reviews. Return to Azure source to verify every finding, look for counterevidence and existing safeguards, merge duplicates, exclude false positives, and inspect important paths yourself. Do not merely summarize or decide by model votes. Every original finding ID requires a disposition, including rejected and merged findings.
 
+Input pendingLocations lists initial candidate IDs that omitted their separate
+location field. Establish those locations from exact-commit source yourself;
+do not drop the candidate, guess an anchor or treat the omission as a refutation.
+Every original ID still needs a disposition. Use NEEDS_INFO if it cannot be
+resolved; CONFIRMED still requires a complete verifiedFinding including location.
+
 Treat each candidate as a claim to test, not a conclusion to defend. Check the
 before/after behavior, reachable trigger, relevant callers, and the strongest
 plausible counterexample or safeguard. Inspect the initial coverage ledgers and
@@ -68,6 +74,8 @@ Envelope shape (illustrative values; use the actual snapshot, verified head and 
 ```
 
 Allowed dispositions are CONFIRMED, NEEDS_INFO, REJECTED, and MERGED. NEEDS_INFO names the missing information; REJECTED includes counterevidence; MERGED references another original ID. A merge chain must end at a non-MERGED disposition; circular merges are invalid. Only MERGED entries may include mergedInto. Copy the snapshot exactly.
+Dispositions contain only the original F/R IDs. Put your new V-prefixed findings
+only in newFindings, never also in dispositions.
 
 The report field's headings, explanations, table descriptions, and recommendations must use the configured outputLanguage. The runtime supplies this language in your role instructions and input. Do not translate machine-readable fields, finding IDs, status values, code identifiers, paths, or quoted source. Structured dispositions and newFindings remain in English; localize their human-facing descriptions when including them in the report.
 

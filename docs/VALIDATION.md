@@ -80,13 +80,15 @@ output, last-message recovery, deterministic model attribution and merge tables,
 and identical preview/publication disclosures. Tests do not prove a provider
 will support native structured output or obey language/attribution instructions.
 
-Finding-format regressions reproduce a padded evidence key and an empty unknown
+Finding-format regressions reproduce a padded evidence key and empty-string/null unknown
 field in native/text output for both profiles. They verify unchanged evidence,
 raw-response retention, an explicit receipt/diagnostic audit and exactly four
-ordinary review requests. Conflicting aliases, nonempty/nonstring extras,
+ordinary review requests. Conflicting aliases, content-bearing extras,
 misspellings, missing evidence, bad severity, duplicate IDs and snapshot/coverage
 failures cannot pass or start a retry. Verifier paths and stale/unknown-head gates
-remain covered. These are sanitized fixtures, not uploaded session exports.
+remain covered. Exact duplicate V-disposition tests retain raw reasons and reject
+conflicting values, missing original IDs, duplicate discoveries and extra rows.
+These are sanitized fixtures, not uploaded session exports.
 
 Status-retry regressions cover the invalid top-level enum token seen in a live
 review, immutable evidence, one-field amendments, the opt-in limit of one,
@@ -98,13 +100,24 @@ preview/publication never retry. Installer checks retain explicit opt-in while
 adding missing `outputRetries` as zero. These tests use synthetic fixtures,
 not private session exports, and do not establish improved live success rates.
 
-Absent-location regressions reproduce a native capture missing all three finding
-locations. Both profiles/transports retain the same reviewer session, raw failed
+Initial-location regressions pass unchanged candidates to the verifier in both
+profiles/transports with explicit pendingLocations and no extra request. Missing
+evidence, coverage gaps and malformed existing locations still fail. Unresolved
+candidates use NEEDS_INFO and are excluded from comment planning.
+
+Absent final-location regressions retain the same verifier session, raw failed
 response and immutable original fields while accepting exactly one locations
-amendment. Tests cover verifier findings, mixed local normalization, altered IDs
+amendment. Tests cover final findings, mixed local normalization, altered IDs
 or evidence, duplicate/extra IDs, invalid line ranges, shared retry limits, denied
 tools, isolated prompts, cancellation and abort uncertainty. Missing other evidence,
 coverage gaps, empty existing locations and stale/unknown heads remain failures.
+
+Amendment text tests recognize only the pinned missing-native error, then require
+one complete JSON object and the original validators. Duplicate/escaped keys,
+ambiguous or truncated text, pending tools, ordinary tool attempts, denied extra
+requests, wrong sessions, general errors, cancellation and invalid native calls
+cannot use the compatibility path. Accepted transport changes are disclosed;
+no new request or model is started. This is not provider reliability evidence.
 
 Prompt-isolation regressions check that ordinary review sessions never receive
 one-field amendment instructions, while granted repairs replace only the known
@@ -157,7 +170,8 @@ agent. Do not mistake mock hook tests for a live permission or security audit.
 
 If a run reports output-format-corrections, compare the original response with
 the accepted stage result and outputFormatCorrections. Verify only allowed key
-formatting or exactly empty unknown fields changed, all required values stayed
+formatting, empty-string/null unknown fields or exact duplicate V rows changed;
+all required values stayed
 identical and no extra session was started. A recovered formatting defect still
 counts as a model output defect; report it separately from unmodified successes.
 
@@ -169,6 +183,17 @@ and a second model request is refused. Confirm cancellation still wins and
 the overall deadline does not restart. Count original contract failures and
 recovered outcomes separately; repeated synthetic successes are a smoke test,
 not a guarantee for other models or repositories.
+
+When output-transport=json-text appears, retain the original missing-native error
+and verify the complete text amendment and final envelope. Do not count it as an
+unmodified native success. When pending-locations appears, inspect every affected
+ID's final disposition and independently check confirmed source anchors.
+
+For CLI automation, set the process cwd and PWD consistently and pass an absolute
+`opencode run --dir /path/to/review-workspace`. Verify the host-reported directory
+and resolved configuration before comparing runs. The pinned CLI prefers PWD
+when --dir is omitted; subprocess cwd alone can leave a different host workspace.
+Do not load development guidance or private answer keys into the review context.
 
 Compare the optimized prompts against fixed-source defect, guarded/equivalent,
 clean and repair-control cases with an external answer key. Check base/head

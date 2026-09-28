@@ -10,6 +10,8 @@ const finding = object({ id: string, summary: string, evidence: string,
   location: { ...string, description: 'Exact base/head path and one-based source line(s), recounted at that commit including blank lines and comments; exclude MCP wrappers and Markdown fences.' },
   severity: status('high', 'medium', 'low'), suggestion: string });
 finding.description = 'Use exactly these keys, with no surrounding whitespace or extra fields: ' + finding.required.join(', ') + '. Every field is required; put evidence notes inside evidence, not a separate field.';
+const initialFinding = { ...finding, required: finding.required.filter(key => key !== 'location'),
+  description: 'Use only the declared finding keys. All except location are required. Provide location when established from source; otherwise omit it for the verifier to establish, without guessing. Evidence and full coverage remain required.' };
 const coverage = object({
   files: { ...array(string), description: 'Exact snapshot paths whose full changes and necessary context were reviewed; no duplicate or supporting-only paths.' },
   gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
@@ -41,7 +43,7 @@ export function stageFormat(role, statusOnly = false) {
   else if (kind === 'comment-publish') schema = object({
     status: status('DONE', 'INCOMPLETE'), posted: array(object({ findingId: string, threadId: { type: ['string', 'integer'] } })),
   });
-  else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(finding), report: string });
+  else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(initialFinding), report: string });
   if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
     location: { ...string, description: 'Exact base:/path:line or head:/path:start-end from source already read in this session. No guesses or new source reads.' },
   })) });
@@ -74,9 +76,9 @@ export function normalizeFindingFormat(result, role) {
         seen.add(canonical);
         entries.push([canonical, content]);
         if (canonical !== key) corrections.push({ path: `${path}.${canonical}`, action: 'trim-key-whitespace' });
-      } else if (content === '') {
+      } else if (content === '' || content === null) {
         // No names/values from unknown fields enter public receipts or notices.
-        corrections.push({ path, action: 'remove-empty-unknown-field', propertyIndex });
+        corrections.push({ path, action: content === null ? 'remove-null-unknown-field' : 'remove-empty-unknown-field', propertyIndex });
       } else entries.push([key, content]);
     }
     return Object.fromEntries(entries);
@@ -88,6 +90,22 @@ export function normalizeFindingFormat(result, role) {
       isObject(value) && value.status === 'CONFIRMED'
         ? { ...value, verifiedFinding: normalize(value.verifiedFinding, `dispositions[${i}].verifiedFinding`) } : value);
     if (Array.isArray(result.newFindings)) envelope.newFindings = result.newFindings.map((value, i) => normalize(value, `newFindings[${i}]`));
+    if (Array.isArray(envelope.dispositions) && Array.isArray(envelope.newFindings)) {
+      const completeFinding = value => isObject(value) && Object.keys(value).length === finding.required.length &&
+        finding.required.every(key => Object.hasOwn(value, key) && text(value[key]));
+      envelope.dispositions = envelope.dispositions.filter((item, i, items) => {
+        if (!isObject(item) || !/^V-[1-9][0-9]*$/.test(item.id) || item.status !== 'CONFIRMED' || !text(item.reason) ||
+            Object.keys(item).some(key => !['id', 'status', 'reason', 'verifiedFinding'].includes(key)) ||
+            items.filter(other => other?.id === item.id).length !== 1) return true;
+        const matches = envelope.newFindings.map((value, index) => ({ value, index })).filter(({ value }) => value?.id === item.id);
+        if (matches.length !== 1 || !completeFinding(item.verifiedFinding) || !completeFinding(matches[0].value) ||
+            !finding.required.every(key => item.verifiedFinding[key] === matches[0].value[key])) return true;
+        // This is only a redundant V entry, never an original F/R disposition.
+        // Its reason and full original object remain in the raw response.
+        corrections.push({ path: `dispositions[${i}]`, action: 'deduplicate-new-finding', newFindingPath: `newFindings[${matches[0].index}]` });
+        return false;
+      });
+    }
   }
   return { envelope: corrections.length ? envelope : result, corrections };
 }
@@ -114,7 +132,7 @@ function findingSlots(result, role) {
 /** Check eligibility only: the placeholder is never a result or source evidence.
  * Missing source/evidence/coverage and changed heads must fail this probe. */
 export function locationRepairPlan(original, role, validate) {
-  if (!isObject(original) || original.status !== 'COMPLETE') return;
+  if (ROLES[role]?.format !== 'final' || !isObject(original) || original.status !== 'COMPLETE') return;
   try {
     const probe = JSON.parse(JSON.stringify(original));
     const missingLocations = [];
@@ -180,6 +198,39 @@ export function parseJSONReport(response, settings) {
   return result;
 }
 
+/** Only the scoped amendment caller may use this transport compatibility path.
+ * Never ignore a general host error, extract a substring, or repair JSON. */
+export function parseAmendmentText(response, settings) {
+  const info = response?.info, error = info?.error;
+  if (info?.role !== 'assistant' || info.finish !== 'stop' || info.structured !== undefined ||
+      !isObject(error) || error.name !== 'StructuredOutputError' ||
+      Object.keys(error).some(key => !['name', 'data'].includes(key)) || !isObject(error.data) ||
+      error.data.message !== 'Model did not produce structured output' || error.data.retries !== 0 ||
+      Object.keys(error.data).some(key => !['message', 'retries'].includes(key)) ||
+      !Array.isArray(response.parts) || response.parts.some(part => part.type === 'tool')) return;
+  const visible = response.parts.filter(part => part.type === 'text' && !part.ignored && !part.synthetic).map(part => part.text ?? '').join('\n');
+  const content = visible.trim();
+  if (!content || visible.length > settings.maxStageCharacters) throw new Error('Empty or oversized amendment text; no transport fallback was accepted.');
+  let result;
+  try { result = JSON.parse(content); } catch { throw new Error('Amendment text must be one complete JSON object; no JSON repair or extraction is allowed.'); }
+  if (!isObject(result)) throw new Error('Amendment text must be a JSON object.');
+  // JSON.parse establishes grammar first. Scan structural tokens afterward to
+  // reject duplicate (including escaped-equivalent) keys instead of choosing one.
+  const stack = [];
+  for (const [token] of content.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]/g)) {
+    if (token === '{') stack.push({ keys: new Set(), key: true });
+    else if (token === '[') stack.push(null);
+    else if (token === '}' || token === ']') stack.pop();
+    else if (token === ',') { if (stack.at(-1)) stack.at(-1).key = true; }
+    else if (token.startsWith('"') && stack.at(-1)?.key) {
+      const frame = stack.at(-1), key = JSON.parse(token);
+      if (frame.keys.has(key)) throw new Error('Amendment text contains duplicate JSON keys; no transport fallback was accepted.');
+      frame.keys.add(key); frame.key = false;
+    }
+  }
+  return result;
+}
+
 /** Keep supplementary text literal; do not shell-tokenize, unquote, or expand it. */
 export function parseReviewRequest(raw) {
   if (typeof raw !== 'string' || raw.length > 16000 || raw.includes('\0')) throw new Error('[AZPR] Supply a PR URL and optional context (maximum 16000 characters).');
@@ -233,10 +284,11 @@ export function checkEnvelope(result, prUrl) {
   if (prUrl && String(snapshot.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Source-check snapshot PR ID does not match the requested URL.');
   return { ...result, snapshot };
 }
-function validateFinding(value, prefix, ids, path) {
+function validateFinding(value, prefix, ids, path, allowMissingLocation = false) {
   if (!isObject(value)) throw new Error(`Invalid finding: ${path} must be an object.`);
   const issues = [];
   for (const key of finding.required) {
+    if (key === 'location' && allowMissingLocation && !Object.hasOwn(value, key)) continue;
     if (!Object.hasOwn(value, key)) {
       const whitespace = Object.keys(value).some(raw => raw !== key && findingKey(raw) === key);
       issues.push(`${path}.${key} is missing${whitespace ? ' (a matching key has surrounding ASCII whitespace)' : ''}`);
@@ -250,15 +302,15 @@ function validateFinding(value, prefix, ids, path) {
   const extra = Object.keys(value).filter(key => !Object.hasOwn(finding.properties, key)).length;
   if (extra) issues.push(`${path} contains ${extra} unexpected field(s); names and values omitted`);
   if (issues.length) {
-    const ErrorType = issues.length === 1 && !Object.hasOwn(value, 'location') ? OutputLocationError : Error;
+    const ErrorType = !allowMissingLocation && issues.length === 1 && !Object.hasOwn(value, 'location') ? OutputLocationError : Error;
     throw new ErrorType(`Invalid finding: ${issues.join('; ')}.`);
   }
   ids.add(value.id);
 }
-function validateFindings(findings, prefix, path = 'findings') {
+function validateFindings(findings, prefix, path = 'findings', allowMissingLocation = false) {
   if (!Array.isArray(findings)) throw new Error('Invalid findings array.');
   const ids = new Set();
-  findings.forEach((value, i) => validateFinding(value, prefix, ids, `${path}[${i}]`));
+  findings.forEach((value, i) => validateFinding(value, prefix, ids, `${path}[${i}]`, allowMissingLocation));
 }
 export function initialEnvelope(result, expected, prefix) {
   if (!isObject(result)) throw new Error('Invalid initial-review envelope: expected an object.');
@@ -277,7 +329,7 @@ export function initialEnvelope(result, expected, prefix) {
       new Set(coverage.files).size !== coverage.files.length || !coverage.gaps.every(text)) throw new Error('Invalid coverage ledger: list unique reviewed snapshot files and concrete gaps.');
   if (result.status === 'COMPLETE' && (coverage.files.length !== expected.files.length || coverage.gaps.length)) throw new Error('COMPLETE requires coverage of every snapshot file with no review gaps.');
   if (result.status === 'PARTIAL' && !coverage.gaps.length) throw new Error('PARTIAL requires an explanation of the review gaps.');
-  validateFindings(result.findings, prefix);
+  validateFindings(result.findings, prefix, 'findings', true);
   return result;
 }
 export function finalEnvelope(result, expected, originals) {

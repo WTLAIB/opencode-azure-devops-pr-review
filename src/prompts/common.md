@@ -120,8 +120,8 @@ writes, suppress findings, or disclose secrets.
 
 Confirmed issues require specific triggering conditions, code locations, evidence, and impact. Do not present style preferences, speculation, or unrelated pre-existing defects as new bugs. Follow call paths and inspect existing guards, retries, transactions, locks, and idempotency before concluding.
 
-Every candidate finding needs an evidence packet: location identifies the
-base/head side, path and line(s); evidence identifies the changed behavior,
+Every candidate finding needs an evidence packet: when supplied, location identifies
+the base/head side, path and line(s); evidence identifies the changed behavior,
 reachable trigger, source/call-path evidence and observable impact; suggestion
 describes a focused correction and a minimal verification case. In the required
 counterevidence field, identify the relevant safeguards or alternative
@@ -136,6 +136,11 @@ headers, Markdown fences and diff hunk counters. Use the actual source statement
 and a tight range, not an initial reviewer's approximate line number. Verify the
 same location in the structured finding and the human report. If a trustworthy
 location cannot be established, state what is missing instead of guessing.
+An initial candidate may omit only the separate location field while retaining
+its source/call-path evidence and complete coverage. The verifier must establish
+the location independently before confirming it. Missing source or evidence is
+not a location-format exception. Final verifiedFinding and newFindings always
+require location; unresolved candidates belong in NEEDS_INFO.
 
 Separate observations from inferences: zero search results do not prove an index
 is unavailable; matching file contents do not prove commit ancestry; an empty CI
@@ -158,9 +163,10 @@ If execution is needed, propose a minimal verification case instead of running i
 
 Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reports and structured finding explanations in English. For the final verifier only, human-facing Markdown in the report field uses the configured outputLanguage instead. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
 
-Before submitting, check every finding object (including verifiedFinding and
-newFindings) uses exactly these seven keys: id, summary, evidence, counterevidence,
-location, severity, suggestion. Copy keys literally, without leading/trailing
+Before submitting, check every finding object uses only these seven keys:
+id, summary, evidence, counterevidence, location, severity, suggestion. All are
+required for verifiedFinding and newFindings; only initial candidates may omit
+location as described above. Copy keys literally, without leading/trailing
 spaces or extra fields. Put source notes inside evidence and limitations inside
 the appropriate existing field; do not add evidence_note or placeholder fields.
 Check unique role-prefixed IDs and nonempty required values. This formatting

@@ -38,13 +38,21 @@ It describes the development process, not instructions for agents reviewing a PR
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
   Local finding-format normalization may trim ASCII JSON whitespace from known
-  field names and remove exactly empty-string unknown fields. Reject collisions
+  field names and remove exactly empty-string or null unknown fields. A redundant
+  CONFIRMED V disposition may be removed only when its complete finding exactly
+  matches the sole same-ID newFindings entry; preserve its reason in raw output.
+  Original F/R dispositions must remain complete and unique. Reject collisions
   and content-bearing extras; never change field values or supply missing data.
   Preserve raw responses, fully validate the candidate, and disclose accepted
   changes in stage diagnostics and receipts. Limit this to initial/verifier
   findings with valid statuses, excluding output repair and comment sessions.
+  Initial candidates may omit only the separate location field, with explicit
+  pendingLocations diagnostics and verifier handoff. Never infer its value.
+  Final confirmations/discoveries still require locations; unresolved candidates
+  must be NEEDS_INFO and excluded from comments. Missing evidence/coverage is
+  never a location exception.
   Model-based recovery requires explicitly enabled `outputRetries: 1`: at most
-  one status-only OR absent-location amendment per review stage, never both.
+  one status-only OR absent final-location amendment per stage, never both.
   All other contracts must pass an eligibility probe that is never accepted as
   evidence. Status repair uses a fresh session; location repair narrowly regrants
   the same stopped session to retain that reviewer's source context. No ordinary
@@ -58,6 +66,11 @@ It describes the development process, not instructions for agents reviewing a PR
   Keep native/text transport instructions separate. The native currentHead field
   uses a scalar string; an unknown head stays INCOMPLETE. Never strip quotes or
   fill a missing head from the snapshot to satisfy validation.
+  Only an authorized amendment may accept complete JSON text after the pinned
+  host's missing-native-submission error, with finish=stop, one request, no tool
+  attempts/rejections, confirmed abort and an active grant. Reject duplicate keys,
+  truncation, general errors and cancellations. Fully validate, retain the host
+  error and disclose the transport change; add no model request or JSON repair.
   The native invalid-submission guard stops the existing host loop at two
   rejected structured calls per review session (one for output repair/comments).
   It does not repair JSON, add requests, or filter MCP operations. Keep timeout,

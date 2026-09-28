@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseJSONReport, normalizeFindingFormat, stageFormat, checkEnvelope, initialEnvelope, finalEnvelope } from '../src/output.mjs';
+import { parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, checkEnvelope, initialEnvelope, finalEnvelope } from '../src/output.mjs';
 import { readFile } from 'node:fs/promises';
 import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
@@ -10,6 +10,80 @@ const snapshot = { repository:'org/project/repo',prId:1,base:'a'.repeat(40),head
 const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.head,dispositions,report:'Evidence report'});
 const finding = (id='F-1') => ({id,summary:'Unprotected null input',location:'head:/main.js:2',evidence:'The caller can pass null to the new dereference, causing a request failure.',counterevidence:'The caller checks undefined, not null; its guard does not prevent this failure.',severity:'medium',suggestion:'Guard null and add a regression case for this caller.'});
 const initial = () => ({status:'COMPLETE',snapshot,coverage:{files:[...snapshot.files],gaps:[]},findings:[finding()],report:'Reviewed full changes and the relevant caller; no tests executed.'});
+
+test('amendment text parsing only recognizes the pinned missing-native error and rejects ambiguous JSON',()=>{
+  const reply=text=>({info:{role:'assistant',finish:'stop',error:{name:'StructuredOutputError',data:{message:'Model did not produce structured output',retries:0}}},parts:[{type:'text',text}]});
+  for(const value of [{status:'COMPLETE'},{locations:[{id:'V-1',location:'head:/main.js:2'}]},
+    {locations:[{id:'F-1',location:'head:/main.js:2'},{id:'R-1',location:'head:/main.js:3'}]}]) {
+    assert.deepEqual(parseAmendmentText(reply(JSON.stringify(value)),settings),value);
+  }
+  for(const raw of ['{"status":','{}{}','prefix {}','```json\n{}\n```','[]',
+    '{"status":"COMPLETE","status":"PARTIAL"}',
+    '{"status":"COMPLETE","st\\u0061tus":"PARTIAL"}',
+    '{"locations":[{"id":"F-1","id":"R-1","location":"head:/main.js:2"}]}']) {
+    assert.throws(()=>parseAmendmentText(reply(raw),settings));
+  }
+  for(const mutate of [x=>x.info.role='user',x=>x.info.finish='length',x=>x.info.finish='content-filter',
+    x=>x.info.error.name='APIError',x=>x.info.error.data.message='Provider failed',
+    x=>x.info.error.data.retries=1,x=>x.info.error.data.extra='Unknown error context',
+    x=>x.info.structured={},x=>x.parts.push({type:'tool',state:{status:'running'}})]) {
+    const value=reply('{"status":"COMPLETE"}');mutate(value);
+    assert.equal(parseAmendmentText(value,settings),undefined);
+  }
+  assert.throws(()=>parseAmendmentText(reply('x'.repeat(1001)),settings),/oversized/);
+  for(const part of [{type:'reasoning',text:'{"status":"COMPLETE"}'},{type:'text',synthetic:true,text:'{}'},
+    {type:'text',ignored:true,text:'{}'}])assert.throws(()=>parseAmendmentText({...reply(''),parts:[part]},settings),/Empty/);
+});
+
+test('tolerance: null extensions are audited without changing required finding values',()=>{
+  const raw=initial();raw.findings[0].PRIVATE_EMPTY_EXTENSION=null;
+  const before=JSON.stringify(raw),prepared=normalizeFindingFormat(raw,'azpr-review-functional');
+  assert.deepEqual(prepared.envelope,initial());
+  assert.deepEqual(prepared.corrections,[{path:'findings[0]',action:'remove-null-unknown-field',propertyIndex:7}]);
+  assert.equal(initialEnvelope(prepared.envelope,snapshot,'F').status,'COMPLETE');
+  assert.equal(JSON.stringify(raw),before);
+});
+test('tolerance: initial candidates can omit location but final confirmations and discoveries cannot',()=>{
+  const raw=initial();delete raw.findings[0].location;
+  const before=JSON.stringify(raw);
+  assert.equal(initialEnvelope(raw,snapshot,'F').status,'COMPLETE');
+  assert.equal(JSON.stringify(raw),before);
+  for(const role of ['azpr-review-functional','azpr-deep-risk']) {
+    const schema=stageFormat(role).schema.properties.findings.items;
+    assert.ok(!schema.required.includes('location'));
+    assert.ok(schema.properties.location);
+  }
+  assert.throws(()=>finalEnvelope(final([{id:'F-1',status:'CONFIRMED',reason:'Checked',verifiedFinding:raw.findings[0]}]),snapshot,raw.findings),/location/);
+  assert.throws(()=>finalEnvelope({...final([]),newFindings:[{...raw.findings[0],id:'V-1'}]},snapshot,[]),/location/);
+  for(const key of ['evidence','counterevidence','suggestion','summary','severity','id']) {
+    const bad=structuredClone(raw);delete bad.findings[0][key];
+    assert.throws(()=>initialEnvelope(bad,snapshot,'F'));
+  }
+});
+test('tolerance: an exactly identical V disposition is redundant, with the original reason retained in raw output',()=>{
+  const discovery=finding('V-1');
+  const raw={...final([{id:'F-1',status:'CONFIRMED',reason:'Checked',verifiedFinding:finding()},
+    {id:'V-1',status:'CONFIRMED',reason:'PRIVATE_DISCOVERY_REASON',verifiedFinding:structuredClone(discovery)}]),newFindings:[discovery]};
+  const before=JSON.stringify(raw),prepared=normalizeFindingFormat(raw,'azpr-review-verifier');
+  assert.equal(prepared.envelope.dispositions.length,1);
+  assert.deepEqual(prepared.envelope.newFindings,raw.newFindings);
+  assert.deepEqual(prepared.corrections,[{path:'dispositions[1]',action:'deduplicate-new-finding',newFindingPath:'newFindings[0]'}]);
+  assert.equal(finalEnvelope(prepared.envelope,snapshot,[finding()]).status,'COMPLETE');
+  assert.equal(JSON.stringify(raw),before);
+  assert.doesNotMatch(JSON.stringify(prepared.corrections),/PRIVATE_/);
+  for(const mutate of [
+    x=>x.dispositions[1].verifiedFinding.evidence+=' changed',
+    x=>x.dispositions[1].status='REJECTED',
+    x=>x.dispositions[1].mergedInto='F-1',
+    x=>x.dispositions[1].extra='nonempty',
+    x=>x.newFindings=[],x=>x.newFindings.push(structuredClone(discovery)),
+    x=>x.dispositions.push(structuredClone(x.dispositions[1])),
+    x=>x.dispositions.shift(),x=>delete x.newFindings[0].evidence,
+  ]) {
+    const bad=structuredClone(raw);mutate(bad);
+    assert.throws(()=>finalEnvelope(normalizeFindingFormat(bad,'azpr-review-verifier').envelope,snapshot,[finding()]));
+  }
+});
 
 test('verifier transport uses a scalar string head while preserving incomplete and stale gates',()=>{
   for(const role of ['azpr-review-verifier','azpr-deep-verifier']) {
@@ -158,7 +232,7 @@ test('format normalization never chooses between conflicting field names, even i
   }
 });
 test('nonempty or nonstring extras, misspellings and absent evidence still fail full validation',()=>{
-  for(const extra of ['source note',' ',null,false,0,[],{}]) {
+  for(const extra of ['source note',' ',false,0,[],{}]) {
     const raw=initial();raw.findings[0].evidence_note=extra;
     const prepared=normalizeFindingFormat(raw,'azpr-review-functional');
     assert.deepEqual(prepared.corrections,[]);
@@ -235,7 +309,7 @@ test('native schemas and role prompt examples describe the same quality contract
       const schema=stageFormat(`azpr-${mode}-${role}`).schema;
       assert.ok(schema.required.includes('coverage'));
       assert.deepEqual(schema.properties.coverage.required,['files','gaps']);
-      assert.deepEqual(schema.properties.findings.items.required,required);
+      assert.deepEqual(schema.properties.findings.items.required,required.filter(key=>key!=='location'));
     }
   }
   for(const [name,prefix] of [['functional','F'],['risk','R'],['final','V']]) {

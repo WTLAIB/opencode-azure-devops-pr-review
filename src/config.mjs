@@ -71,7 +71,7 @@ export function validateSettings(raw) {
   const structuredOutput = raw.structuredOutput === undefined ? true : raw.structuredOutput;
   if (typeof structuredOutput !== 'boolean') throw new Error('structuredOutput must be boolean.');
   const outputRetries = raw.outputRetries === undefined ? 0 : raw.outputRetries;
-  if (!Number.isInteger(outputRetries) || outputRetries < 0 || outputRetries > 1) throw new Error('outputRetries must be 0 or 1 (one status or missing-location amendment per review stage).');
+  if (!Number.isInteger(outputRetries) || outputRetries < 0 || outputRetries > 1) throw new Error('outputRetries must be 0 or 1 (one status or missing final-location amendment per review stage).');
   const debug = raw.debug === undefined ? { enabled: false, directory: '' } : raw.debug;
   keys(debug, ['enabled', 'directory'], 'debug');
   if (typeof debug.enabled !== 'boolean' || (debug.directory !== undefined &&
