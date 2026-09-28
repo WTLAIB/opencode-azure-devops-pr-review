@@ -276,9 +276,9 @@ printed in its receipt:
 | File | Contents |
 | --- | --- |
 | `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time and whole-run timeout; no provider configuration. |
-| `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, selected model/session, and schema. |
+| `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, inputCharacters/instructionCharacters, remainingRunMsAtStart, selected model/session, and schema. |
 | `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, outputCharacters, firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
+| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, inputCharacters/instructionCharacters/outputCharacters, remainingRunMsAtStart/remainingRunMsAtEnd, firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
@@ -303,6 +303,22 @@ ordinary before-hook and `lastToolAt` the last observed after-hook, not a sum of
 network durations. Compare attempt timing and raw sessions when measuring latency;
 neither a long post-tool interval nor a completed tool alone proves a model or MCP
 failure. Failed calls that never reach the after-hook may lack an end timestamp.
+
+`inputCharacters` is the serialized plugin payload length; `instructionCharacters`
+is the selected plugin policy length (the isolated amendment policy for a repair).
+These omit host/provider instructions, MCP schemas and retained history, and are
+not token or billing measurements. `remainingRunMsAtStart` and `remainingRunMsAtEnd`
+are nonnegative observations of the existing whole-run deadline, including cleanup
+time before the attempt record is written. They do not reserve time, shorten a
+stage or reset the deadline. Compare them to see how much budget reaches the
+verifier; a smaller prompt alone does not prove less model waiting or generation.
+
+For readiness regressions compare its sourceAccess claims with actual tool history,
+especially the cumulative base, continuation fields and both branch-tip reads of
+a claimed fallback. The compact checker does not inherit finding-analysis rules;
+it must still report NOT_READY if required evidence is missing. Count successful
+but empty discovery queries separately from errors. Neither deleting optional
+queries nor reclassifying missing optional data can make required evidence exist.
 
 Initial-review diagnostics identify absent or mistyped snapshot, coverage,
 findings and report fields without copying their values. A normal initial

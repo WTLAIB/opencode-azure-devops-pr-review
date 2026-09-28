@@ -49,6 +49,13 @@ Implemented and covered by offline tests:
   direction checks including excluded changes, and failed-capability handoff
   by cause/version semantics. No official MCP or OpenCode host patch is included.
   Diagnostics add per-attempt timing, model-request and output-size observations.
+- A self-contained readiness policy avoids loading full finding-review rules in
+  check. Its short decision path and factual handoff preserve cumulative versions,
+  full changes/source and failure statuses. Content/directory selector guidance,
+  batched independent reads and concise final prose target unnecessary work;
+  the runtime still supplies the complete attribution/disposition tables.
+  Diagnostics add input/instruction sizes and remaining whole-run time per attempt.
+  Live latency, model compliance and error-rate improvement remain unverified.
 
 Repeated normal-profile smoke runs on one fixed synthetic PR are recorded
 privately. They completed with the expected defects but exposed variable latency,
@@ -140,6 +147,13 @@ Status: planned after P0; methodology proposed, not executed.
   cost of discovering access failures late against the current shared check.
   This is a future design/evaluation candidate, not an implemented mode or
   authorization to remove the existing source-check stage.
+- First compare the compact shared-check policy with the previous policy at fixed
+  models, source, directory and time budget. Record optional empty exploration,
+  repeated failed capabilities, real source gaps, prompt/request counts and time
+  left for verification; retain failed samples. Also consider a later shared
+  source-preparation design with three AI reviewers, if a separately approved
+  host-compatible adapter can preserve the snapshot and permission boundaries.
+  Existing MCP capability gaps must remain explicit in either design.
 - Match claims by root cause/trigger/impact. Report missed defects, false positives,
   duplicate rate, evidence/coverage gaps, contract failures, and comment usefulness.
   Record latency and actual usage/cost where available as secondary measurements.

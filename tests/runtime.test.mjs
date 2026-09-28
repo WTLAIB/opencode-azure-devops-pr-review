@@ -122,6 +122,44 @@ async function fixture(t, opts={}) {
   return {hooks,cfg,baseline,settings,dir,client,calls,logs,toasts,sessions,command,prompts};
 }
 
+for(const mode of MODES) for(const native of [true,false]) test(`lightweight checker: isolated readiness policy (${mode}, native=${native})`,async t=>{
+  const f=await fixture(t,{settings:s=>s.structuredOutput=native});
+  const checker=f.cfg.agent[roleFor(mode,'check')];
+  assert.ok(checker.prompt.length<9000,'Readiness must not inherit the full finding-review policy.');
+  assert.doesNotMatch(checker.prompt,/## Finding quality|## Output\n|verifiedFinding|pendingLocations|numeric self-confidence/);
+  assert.match(checker.prompt,/Readiness decision path/);
+  assert.match(checker.prompt,/Treat.*untrusted/s);
+  assert.match(checker.prompt,/userContext.*literal/s);
+  assert.match(checker.prompt,/Task, Skill, other models, shell, public web, local files/);
+  assert.match(checker.prompt,/Do not comment, vote, approve, merge/);
+  assert.match(checker.prompt,/complete changed-file list/);
+  assert.match(checker.prompt,/before and after/);
+  assert.match(checker.prompt,/NOT_READY/);
+  assert.equal((checker.prompt.match(/# Output transport/g)||[]).length,1);
+  assert.equal(checker.model,f.cfg.agent[roleFor(mode,'risk')].model);
+  assert.equal(checker.steps,f.settings.steps.check);
+  for(const stage of ['functional','risk','verifier']) assert.match(f.cfg.agent[roleFor(mode,stage)].prompt,/## Finding quality/);
+  assert.deepEqual(checker.permission,{task:'deny'});
+  assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
+});
+
+for(const failing of [false,true]) test(`lightweight checker: input and remaining-budget diagnostics survive failure=${failing}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},
+    result:({role,result})=>failing&&role.endsWith('-check')?{...result,snapshot:{}}:result});
+  const out=await f.command('pr-check');
+  assert.match(out,failing?/] INCOMPLETE/:/] READY/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages[0];
+  const request=JSON.parse(await readFile(join(dir,'01-azpr-review-check.request.json'),'utf8'));
+  assert.equal(stage.inputCharacters,JSON.stringify(request.payload).length);
+  assert.equal(stage.instructionCharacters,request.instructions.length);
+  assert.ok(stage.remainingRunMsAtStart>0&&stage.remainingRunMsAtStart<=f.settings.runTimeoutSeconds*1000);
+  assert.ok(stage.remainingRunMsAtEnd>=0&&stage.remainingRunMsAtEnd<=stage.remainingRunMsAtStart);
+  assert.equal(stage.modelRequests,1);assert.equal(f.prompts().length,1);
+  assert.equal(stage.status,failing?'FAILED':'READY');
+});
+
 test('receipt and full use identical stage requests, schemas, and role instructions', async t => {
   const receipt=await fixture(t), full=await fixture(t,{settings:s=>s.returnReport='full'});
   await receipt.command('pr-deep'); await full.command('pr-deep');
@@ -370,7 +408,7 @@ for(const native of [true,false]) test(`normal and status-repair instructions ar
         await hooks['experimental.chat.system.transform']({sessionID:id,model:{providerID:'original',id:'title'}},auxiliary);
         assert.deepEqual(auxiliary,{system:['TITLE_SYSTEM_SENTINEL']});
       }else{
-        assert.match(text,/# Private Azure PR review rules/);
+        assert.match(text,role.endsWith('-check')?/# Role: source readiness checker/:/# Private Azure PR review rules/);
         assert.doesNotMatch(text,/Bounded status resubmission|originalEnvelope|output-status-repair/);
       }
     }});
@@ -1497,7 +1535,9 @@ for (const [command,language] of [['pr-review','zh-TW'],['pr-deep','zh-CN']]) te
       assert.match(f.cfg.agent[p.body.agent].prompt,/Other JSON fields and intermediate findings remain in English/);
     } else {
       assert.doesNotMatch(f.cfg.agent[p.body.agent].prompt,/# Configured output language/);
-      assert.match(f.cfg.agent[p.body.agent].prompt,/intermediate reports and structured finding explanations in English/);
+      assert.match(f.cfg.agent[p.body.agent].prompt,p.body.agent.endsWith('-check')
+        ? /Write this readiness envelope in English/
+        : /intermediate reports and structured finding explanations in English/);
     }
   }
 });

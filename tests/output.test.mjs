@@ -334,11 +334,27 @@ test('source guidance records observed access recipes, preserves cumulative proo
   assert.match(common,/array.*string/s);
   assert.match(common,/short branch name.*refs\/heads\//s);
   assert.match(common,/at\s+most one identical retry/s);
-  assert.match(check,/search is not a commit-ancestry API/);
+  assert.match(check,/Keyword search, PR membership queries\s+and file-content equality do not establish ancestry/);
   assert.match(check,/before and after.*listing/s);
-  assert.match(check,/Do not enumerate unrelated/);
+  assert.match(check,/Do not explore unrelated/);
+  assert.match(check,/A latest target tip,\s+successful merge status, matching branch tips or synthesized iteration labels\s+do not by themselves prove a merge base/);
+  assert.match(check,/A page's entry count is not a total/);
+  assert.match(check,/source access at the exact commits for all changed\s+files/);
+  assert.match(check,/post-listing tip check unless that second read actually occurred/);
+  assert.match(check,/Do not perform a code review or diagnose defects/);
+  assert.match(check,/missing required evidence prevents\s+READY/);
+  assert.match(common,/commit support for directory\s+listing/);
+  assert.match(common,/Recount lines from complete content already\s+read in this session/);
   result.snapshot=snapshot;
   assert.equal(checkEnvelope(result).status,'READY');
+});
+test('compact verifier prose keeps evidence and delegates only the duplicate status table to runtime',async()=>{
+  const prompt=await readFile(new URL('../src/prompts/final.md',import.meta.url),'utf8');
+  assert.match(prompt,/trigger, impact, source, counterevidence, location/);
+  assert.match(prompt,/Explain every original ID's disposition once/);
+  assert.match(prompt,/runtime supplies the complete disposition table from your validated entries/);
+  assert.match(prompt,/independent checks performed even when no findings survive/);
+  assert.match(prompt,/read the current PR head again/);
 });
 test('finding locations must be recounted from exact source without transport wrappers',async()=>{
   const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');

@@ -203,6 +203,22 @@ versus first-pass success separately. Record per-attempt timing/output size befo
 claiming less latency; concise reports must not discard findings or evidence.
 Official MCP defects and model compliance remain outside deterministic guarantees.
 
+Readiness-policy regressions check that both normal/deep check agents retain
+read-only, literal-context, untrusted-data and complete-source requirements while
+excluding finding-review instructions. Native/text transport, model bindings,
+steps, permissions, standalone check and both initial reviewers remain intact.
+Policy assertions about paging, ancestry and before/after branch reads verify
+instructions, not actual model compliance. The runtime does not interpret MCP
+results to prove those claims. Live evaluation must compare notes to raw calls.
+Input/instruction sizes and remaining-budget diagnostics are checked for both
+successful and invalid check results; they must not change requests or deadlines.
+
+Keep the four-session baseline and budgets fixed for the first comparison. Count
+real defects, equivalent/guarded changes, clean controls, full source coverage,
+snapshot disagreement and final head changes along with completion and elapsed
+time. A newly exposed NOT_READY capability gap is not evidence of worse transport
+reliability, and a faster unsupported READY is not an optimization success.
+
 Before wider adoption, evaluate known historical PRs for missed issues, false positives, coverage, time, and cost. This integration is not a merge gate.
 
 For the quality-first policy, inspect at least a real conditional failure, a

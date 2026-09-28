@@ -63,6 +63,12 @@ to independently prove source access. When tools are missing or access is denied
 the checker should report NOT_READY with the missing capability, not demand an
 inventory of all MCP tools. Partial initial reviews prevent final verification.
 
+The checker uses a self-contained retrieval policy, without the common finding
+review rules. Its decision path is identity, cumulative versions, all changes,
+exact-commit source, then READY or a precise NOT_READY gap. It does not diagnose
+defects or analyze unchanged tests. A short report and factual access recipes
+avoid a second retrieval narrative; the schema descriptions do not verify facts.
+
 ### Avoiding repeated lookup failures
 
 Recognized Azure cloud PR URLs supply a `urlIdentity` hint with separate
@@ -106,6 +112,27 @@ location amendments, not MCP recovery. Host/provider retries remain separate.
 These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history
 and source coverage across controlled runs before making that claim.
+
+### Version-specific capability limits
+
+In the official Azure MCP
+[v2.10.0 repository handlers](https://github.com/microsoft/azure-devops-mcp/blob/v2.10.0/src/tools/repositories.ts),
+directory listing changes a Commit selector to Branch, while content reads keep
+Commit. Its PR change summary retrieves one changes page, synthesizes the first
+iteration label and does not expose the iteration's commonRefCommit. The summary's
+top/skip inputs do not advance changes pages. These observations are specific to
+that implementation, not assumptions about every connected MCP server.
+
+Avoid unnecessary tree probes when verified cumulative changes plus exact-commit
+content suffice. If a tree fallback is needed, validate its branch versions before
+and after use; do not silently rewrite Commit into Branch. Missing pagination or
+cumulative-base evidence remains a real gap. Azure documents the common-commit
+comparison and next-page fields in
+[iteration changes](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-iteration-changes/get?view=azure-devops-rest-7.1),
+and the commonRefCommit in
+[iterations](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-iterations/list?view=azure-devops-rest-7.1).
+Availability in REST does not mean the current MCP exposes that capability.
+This plugin adds no direct REST fallback, official-server patch or argument adapter.
 
 ## Data handling
 

@@ -58,6 +58,14 @@ Follow the configured Output transport when submitting these field values.
 
 The runtime appends an authoritative stage/model ledger and finding disposition summary to your report. Do not invent model identities or claim a human has reviewed or approved this work. Your report must still explain the evidence and reasons for each disposition in the configured outputLanguage; the appended ledger is not a substitute for that explanation.
 
+Keep the report concise without losing evidence: describe each confirmed defect
+once, retaining its trigger, impact, source, counterevidence, location and focused
+fix/test. Explain every original ID's disposition once; a merged ID may refer to
+the representative explanation and state why the root cause/correction match.
+Do not repeat the runtime's stage/model or ID/status tables, full retrieval
+chronology, unchanged source bodies, or the same defect in several summary
+sections. Preserve material corrections, limitations and independent checks.
+
 Envelope shape (illustrative values; use the actual snapshot, verified head and findings):
 ```json
 {
@@ -79,4 +87,4 @@ only in newFindings, never also in dispositions.
 
 The report field's headings, explanations, table descriptions, and recommendations must use the configured outputLanguage. The runtime supplies this language in your role instructions and input. Do not translate machine-readable fields, finding IDs, status values, code identifiers, paths, or quoted source. Structured dispositions and newFindings remain in English; localize their human-facing descriptions when including them in the report.
 
-Include scope, versions, completeness, confirmed issue severity/location/conditions/evidence/counterevidence/correction/test suggestions, open questions, a complete finding disposition table, and CI or testing limitations. Put newly discovered confirmed issues in the report using V-1, V-2, and so on, not initial-review IDs. Also include them in newFindings with all the same required fields as verifiedFinding: id, summary, location, evidence, counterevidence, severity, and suggestion. Apply the same source-based verification and counterevidence checks to these discoveries; use an empty array when there are none. Only verified discoveries belong in newFindings; unresolved questions remain in the report. This structured list allows a separate explicit comment command to consider them later; this review never publishes comments. Return INCOMPLETE when verification cannot be completed. The report must describe the independent checks performed even when no findings survive.
+Include scope, versions, completeness, confirmed issue severity/location/conditions/evidence/counterevidence/correction/test suggestions, open questions, explanations for every finding disposition, and CI or testing limitations. The runtime supplies the complete disposition table from your validated entries. Put newly discovered confirmed issues in the report using V-1, V-2, and so on, not initial-review IDs. Also include them in newFindings with all the same required fields as verifiedFinding: id, summary, location, evidence, counterevidence, severity, and suggestion. Apply the same source-based verification and counterevidence checks to these discoveries; use an empty array when there are none. Only verified discoveries belong in newFindings; unresolved questions remain in the report. This structured list allows a separate explicit comment command to consider them later; this review never publishes comments. Return INCOMPLETE when verification cannot be completed. The report must describe the independent checks performed even when no findings survive.

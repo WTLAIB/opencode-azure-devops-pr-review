@@ -56,6 +56,21 @@ The source entry is `src/plugin.js`, which imports the runtime beside it. Instal
 
 A source check runs first. Both normal and deep profiles then run two initial reviewers (functional and risk) concurrently in separate child sessions, each receiving the same request and snapshot but no other initial review. Their configured verifier starts only after both initial reviews complete successfully. Deep adds depth instructions and its own initial iteration budget, not a third initial reviewer or an automatic fallback.
 
+The check role compiles from its self-contained readiness policy plus the selected
+transport instruction. It does not inherit `common.md` finding-review rules or
+deep analysis instructions. Its own policy retains explicit read-only, untrusted
+data, literal-context and host-permission boundaries. Both initial reviewers and
+the verifier still use the complete common review policy. No file or setting was
+added to the 24-file installation contract.
+
+Readiness follows a short identity/comparison/complete-changes/source/decision
+path. The checker stops optional discovery on either supported readiness or a
+required capability gap, retaining all necessary source and pagination checks.
+It emits concise retrieval facts and a short report, without sharing suspected
+defects. The runtime passes only its snapshot, sourceAccess and requirements
+alongside the original request, not its report. These are model claims, not an
+audited source cache; no tool-result sharing, adapter or no-check mode is added.
+
 Each mode owns `functional`, `risk`, and `verifier` model settings. Its risk model also handles source checks and comments; standalone `/pr-check` uses the normal profile's risk model. The selected profile is bound to the run and cached with completed reviews, so later comment commands use the original profile even after a different mode runs.
 
 Command input is parsed into `prUrl` and literal `userContext`, while retaining
@@ -116,6 +131,12 @@ publishable completed review. Cancelling or failing a refreshed comment preview
 invalidates both the previous and newly prepared plan. Publication attempts remain
 uncertain/reported records and are never automatically retried or rolled back.
 
+Stage diagnostics record serialized input and plugin instruction character counts
+plus remaining whole-run milliseconds at attempt start/end. These observations
+do not alter a deadline, reserve stage time, impose a new iteration limit or add
+instructions to model inputs. Host prompts, tools, history and billable tokens
+are outside those character counts.
+
 ## Evidence contract
 
 Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
@@ -171,6 +192,12 @@ MERGED means the same root cause and correction; distinct triggers/impacts must
 be retained in the confirmed representative rather than silently discarded.
 
 The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
+
+The verifier explains each defect and every original disposition once in its
+localized prose, retaining evidence, counterevidence, corrections and limitations.
+The runtime appends the complete model and ID/status/merge tables from validated
+records; the model need not reproduce those tables. Structured finding fields
+and disposition requirements are unchanged.
 
 The native `currentHead` schema has scalar `type: "string"`, avoiding tool
 converters that mishandle array-valued nullable types. Its value is the full SHA,

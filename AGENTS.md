@@ -27,6 +27,9 @@ It describes the development process, not instructions for agents reviewing a PR
   source-verifying final stage. Focus differs, required source coverage does not.
   Quality takes precedence over latency. No extra reviewer, fallback, or model
   selection change without an agreed reason and evaluation.
+- Check uses its own complete readiness policy; it must not inherit finding-review
+  rules. Keep read-only, untrusted-data, literal-context and host-permission
+  boundaries consistent across check, common review and comment policies.
 - OpenCode owns providers, MCP discovery, and permissions. Do not add hardcoded
   MCP tool catalogs, name/action allowlists, direct Azure/model clients, or
   wildcard permission grants. Read-only review is a prompt policy, not a

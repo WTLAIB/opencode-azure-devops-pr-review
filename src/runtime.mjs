@@ -167,11 +167,13 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     run.stages.push(record);
     const stem = `${String(run.stages.length).padStart(2, '0')}-${role}`;
     const format = state.settings.structuredOutput ? stageFormat(role, retryOf ? retryKind : false) : undefined;
+    const instructions = retryOf ? (reuseContext ? locationRepairPrompt : statusRepairPrompt)(state.settings.structuredOutput) : state.config.agent[role].prompt;
+    Object.assign(record, { inputCharacters: input.length, instructionCharacters: instructions.length,
+      remainingRunMsAtStart: Math.max(0, run.deadlineAt - Date.now()) });
     let receivedAnswer = false;
     let envelope, prepared;
     try {
-      await run.debug.write(`${stem}.request.json`, { ...record, payload, format,
-        instructions: retryOf ? (reuseContext ? locationRepairPrompt : statusRepairPrompt)(state.settings.structuredOutput) : state.config.agent[role].prompt });
+      await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions });
       if (!run.active) throw new Error('Review stopped before model invocation.');
       const response = await bounded(() => context.client.session.prompt({
         path: { id: made.id }, body: { agent: role, model: modelRef(idModel), ...(format ? { format } : {}), parts: [{ type: 'text', text: input }] }, signal: run.controller.signal,
@@ -236,6 +238,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (g.lastToolAt) record.lastToolAt = g.lastToolAt;
       record.endedAt = new Date().toISOString();
       record.durationMs = Date.parse(record.endedAt) - Date.parse(record.startedAt);
+      record.remainingRunMsAtEnd = Math.max(0, run.deadlineAt - Date.now());
       await run.debug.write(`${stem}.result.json`, record);
     }
   }
@@ -287,7 +290,8 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (sourceRuns.has(details.origin) || (details.lockKey && commentLocks.has(details.lockKey))) throw new Error('[AZPR] A review/comment command is already running for this session or PR.');
     for (const fn of ['create', 'prompt', 'abort']) if (typeof context.client?.session?.[fn] !== 'function') throw new Error(`[AZPR] OpenCode Session SDK ${fn} is unavailable; no workflow was started.`);
     let id; do { id = randomUUID().slice(0, 8); } while (runs.has(id) || completed.has(id));
-    const run = { ...details, id, active: true, controller: new AbortController(), stages: [] };
+    const run = { ...details, id, active: true, controller: new AbortController(), stages: [],
+      deadlineAt: Date.now() + state.settings.runTimeoutSeconds * 1000 };
     runs.set(id, run); sourceRuns.set(run.origin, id);
     if (run.lockKey) commentLocks.add(run.lockKey);
     const timer = setTimeout(() => { void abortRun(run, `Review exceeded the ${state.settings.runTimeoutSeconds}-second whole-run time limit.`, 'TIMED_OUT'); }, state.settings.runTimeoutSeconds * 1000);

@@ -114,6 +114,14 @@ routing and configured `outputLanguage` remain controlled by the workflow. Do no
 requests retain it like other review input. The installed command templates
 prevent native argument expansion before the plugin handles this text.
 
+Source readiness uses a dedicated, compact policy instead of the full finding
+review rules. It establishes the common cumulative snapshot, complete change set
+and exact-commit source access, then stops optional discovery. It still precedes
+both independent initial reviews; missing required evidence remains NOT_READY.
+This reduces unrelated instructions, not evidence requirements. Models, iteration
+limits and the whole-run deadline are unchanged; reduced live latency or MCP error
+rates require evaluation. See [source access](docs/AZURE_MCP.md) for known limits.
+
 ### Optional PR comments
 
 The workflow never starts a publishing stage automatically; reviewer prompts prohibit modifications. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a complete review, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use the originating review's `risk` model: `models.review.risk` or `models.deep.risk`. They do not rerun the review, even if another mode has since completed.

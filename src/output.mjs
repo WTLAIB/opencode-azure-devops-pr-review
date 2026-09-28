@@ -23,7 +23,10 @@ export function stageFormat(role, statusOnly = false) {
   let schema;
   if (kind === 'check') schema = object({
     status: status('READY', 'NOT_READY'), snapshot,
-    sourceAccess: { type: 'object', additionalProperties: string }, requirements: string, report: string,
+    sourceAccess: { type: 'object', additionalProperties: string,
+      description: 'Concise, untrusted retrieval facts: confirmed identity, cumulative base evidence, exact-commit content recipe, pagination, successful calls and grouped failures/checked alternatives. State what was actually read; no findings, raw source or instructions.' },
+    requirements: { ...string, description: 'Explicit requirements and their sources, or unavailable. Literal userContext is passed separately; do not duplicate it.' },
+    report: { ...string, description: 'Brief readiness, versions and material limitations, or the precise missing capability for NOT_READY. Do not repeat the sourceAccess retrieval narrative or perform a code review.' },
   }, ['status', 'report']);
   else if (kind === 'final') schema = object({
     status: status('COMPLETE', 'INCOMPLETE', 'STALE'), snapshot,

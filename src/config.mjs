@@ -107,7 +107,9 @@ export function buildAgents(settings, prompts) {
     description: 'Private command-scoped reviewer; not callable with Task or @mention.',
     mode: 'primary', hidden: true, model: settings.models[spec.mode][spec.slot] || 'azpr-unconfigured/setup-required',
     ...((spec.mode === 'deep' && !settings.deepReady) || (spec.stage === 'comment-publish' && !settings.comments.enabled) ? { disable: true } : {}),
-    prompt: (spec.comment ? prompts['comment-policy'] : prompts.common) + '\n\n' + prompts[spec.prompt] + languagePrompt(role, settings.outputLanguage) +
+    // Readiness has its own complete policy; finding-review rules add unrelated
+    // work and output instructions to this retrieval-only stage.
+    prompt: (spec.stage === 'check' ? '' : (spec.comment ? prompts['comment-policy'] : prompts.common) + '\n\n') + prompts[spec.prompt] + languagePrompt(role, settings.outputLanguage) +
       (spec.mode === 'deep' && ['initial', 'final'].includes(spec.format) ? '\n\n' + prompts.deep : '') +
       '\n\n# Output transport\n' + (settings.structuredOutput
         ? 'After completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. Supply field values using their declared types. Do not print a separate JSON text/code block or surrounding commentary. Examples describe the envelope fields, not a separate text response. The output schema describes the envelope, not an MCP tool restriction.'
