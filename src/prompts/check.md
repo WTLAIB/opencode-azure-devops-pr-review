@@ -47,6 +47,15 @@ successful operations with the argument shapes and version semantics used; known
 failed attempts and their observed alternatives; completeness and remaining limits.
 Include no credentials, raw tool responses, findings or instructions to later
 reviewers. Do not claim an alternative succeeded until its response was checked.
+Keep failedCalls compact: one entry per failed capability with operation, relevant
+argument/version selector, observed error category, and a checked alternative (or
+unresolved gap). Group path-spelling variants under the same cause. SuccessfulCalls
+records only reusable recipes actually observed to work. Include the exact-commit
+content recipe and any branch-listing tip checks, so later reviewers can choose
+an independent read without rediscovering a failed directory capability. Do not
+copy the same retrieval narrative into report; report summarizes readiness and
+material limitations. Never call a partial page's count the total change count or
+infer cumulative semantics only from a synthesized iteration label.
 
 On success return:
 ```json

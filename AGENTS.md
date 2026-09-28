@@ -42,11 +42,16 @@ It describes the development process, not instructions for agents reviewing a PR
   and content-bearing extras; never change field values or supply missing data.
   Preserve raw responses, fully validate the candidate, and disclose accepted
   changes in stage diagnostics and receipts. Limit this to initial/verifier
-  findings with valid statuses, excluding status repair and comment sessions.
-  The sole model-based recovery exception is explicitly enabled `outputRetries: 1`:
-  one status-only submission per review stage, with immutable evidence, no
-  ordinary tools, and complete revalidation. Never extend it to comments,
-  missing output/evidence, stale heads, or uncertain cancellation implicitly.
+  findings with valid statuses, excluding output repair and comment sessions.
+  Model-based recovery requires explicitly enabled `outputRetries: 1`: at most
+  one status-only OR absent-location amendment per review stage, never both.
+  All other contracts must pass an eligibility probe that is never accepted as
+  evidence. Status repair uses a fresh session; location repair narrowly regrants
+  the same stopped session to retain that reviewer's source context. No ordinary
+  tools, no existing field changes, one model request, full revalidation, raw
+  failure retention and explicit notices. Missing/empty evidence, empty existing
+  locations, incomplete coverage, changed heads, comments and uncertain aborts
+  never qualify. No generic envelope regeneration or inferred source locations.
   Keep amendment instructions out of normal reviewer prompts. Only an explicit
   repair grant may replace the reviewer system prompt; verify that replacement
   before allowing the repair model request and preserve unrelated host context.
@@ -54,7 +59,7 @@ It describes the development process, not instructions for agents reviewing a PR
   uses a scalar string; an unknown head stays INCOMPLETE. Never strip quotes or
   fill a missing head from the snapshot to satisfy validation.
   The native invalid-submission guard stops the existing host loop at two
-  rejected structured calls per review session (one for status repair/comments).
+  rejected structured calls per review session (one for output repair/comments).
   It does not repair JSON, add requests, or filter MCP operations. Keep timeout,
   manual cancellation and output-failure causes distinct.
 - Comment preview is distinct from publication. Publication needs explicit

@@ -62,7 +62,7 @@ async function fixture(t, opts={}) {
       if(opts.afterSystem)await opts.afterSystem({hooks,role,id,model,packet,system,cfg});
       if(!opts.skipParamsHook) await hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{});
       if(opts.duringPrompt) await opts.duringPrompt({hooks,role,id,model,packet,o,calls,cfg,dir});
-      if(!opts.skipAzure && !spec.comment && packet.operation !== 'output-status-repair') {
+      if(!opts.skipAzure && !spec.comment && !['output-status-repair','output-location-repair'].includes(packet.operation)) {
         const tool=opts.readTool ?? 'ado_repo_pull_request'; const callID=`read-${id}`;
         const args = opts.readTool ? {repositoryId:'repo',project:'proj',pullRequestId:123} : {action:'get'};
         await hooks['tool.execute.before']({sessionID:id,tool,callID},{args});
@@ -70,6 +70,7 @@ async function fixture(t, opts={}) {
       }
       let result;
       if(packet.operation === 'output-status-repair') result={status:spec.stage==='check'?'READY':'COMPLETE'};
+      else if(packet.operation === 'output-location-repair') result={locations:packet.missingLocations.map(({id})=>({id,location:candidate(id).location}))};
       else if(spec.comment) {
         let seq=0;
         const invoke=async(tool,args,result,response={})=>{
@@ -444,6 +445,151 @@ for(const mode of ['review','deep']) for(const native of [true,false]) test(`one
   const responseFiles=(await readdir(dir)).filter(n=>n.endsWith(`${role}.response.json`));
   assert.equal(responseFiles.length,2);
   for(const p of attempts) await assert.rejects(()=>f.hooks['tool.execute.before']({sessionID:p.path.id,tool:'any_tool',callID:'late'},{args:{}}),/expired/);
+});
+for(const mode of ['review','deep']) for(const native of [true,false]) test(`missing locations use one same-context amendment with immutable evidence (${mode}, native=${native})`,async t=>{
+  const originals=[];let originalID;
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.structuredOutput=native;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({result,role,packet,id})=>{
+      if(role.endsWith('-functional')&&packet.operation!=='output-location-repair'){
+        result.findings.push(candidate('F-2'),candidate('F-3'));
+        originals.push(jclone(result));originalID=id;
+        for(const finding of result.findings)delete finding.location;
+      }
+      return result;
+    },
+    afterSystem:({packet,system,cfg,role})=>{
+      const value=system.system.join('\n');
+      if(packet.operation==='output-location-repair'){
+        assert.match(value,/# Bounded location resubmission/);
+        assert.doesNotMatch(value,/# Role:|# Private Azure/);
+        assert.match(value,/HOST_SYSTEM_SENTINEL/);assert.match(value,/OTHER_PLUGIN_SYSTEM_SENTINEL/);
+      } else assert.equal(value.includes(cfg.agent[role].prompt),true);
+      assert.doesNotMatch(cfg.agent[role].prompt,/# Bounded location resubmission/);
+    },
+    duringPrompt:async({packet,hooks,id,role,model,o})=>{
+      if(packet.operation!=='output-location-repair')return;
+      assert.equal(id,originalID,'Only the same reviewer may amend from its existing source context.');
+      if(native)assert.deepEqual(Object.keys(o.body.format.schema.properties),['locations']);
+      for(const tool of ['mcp_arbitrary','bash','read','task'])await assert.rejects(()=>hooks['tool.execute.before']({sessionID:id,tool,callID:tool},{args:{}}),/location repair.*tools/i);
+      await assert.rejects(()=>hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{}),/only one model request/);
+    },answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
+  const out=await f.command(`pr-${mode}`);
+  assert.match(out,/] COMPLETE/);assert.match(out,/output-retry=1\/1.*retry-kind=location/);assert.match(out,/Location amendment notice:/);
+  assert.equal(f.prompts().length,5);assert.equal(f.sessions.size,4);
+  const packet=JSON.parse(f.prompts().find(p=>p.body.agent.endsWith('-verifier')).body.parts[0].text);
+  assert.deepEqual(packet.reviews[0],originals[0]);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const debug=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  const records=debug.stages.filter(s=>s.role.endsWith('-functional'));
+  assert.equal(records.length,2);assert.equal(records[0].status,'FAILED');
+  assert.match(records[0].error,/location is missing/);
+  assert.equal(records[1].retryOf,records[0].sessionID);assert.equal(records[1].sessionID,records[0].sessionID);
+  assert.equal(records[1].retryKind,'location');assert.equal(records[1].attempt,2);assert.equal(records[1].completedTools,0);
+  assert.deepEqual(records[1].result,originals[0]);
+  const raw=JSON.parse(await readFile(join(dir,(await readdir(dir)).find(n=>n.endsWith('-functional.response.json'))),'utf8'));
+  assert.equal(Object.hasOwn((native?raw.structured:JSON.parse(raw.text)).findings[0],'location'),false);
+  await assert.rejects(()=>f.hooks['tool.execute.before']({sessionID:originalID,tool:'any_tool',callID:'late'},{args:{}}),/expired/);
+});
+for(const slot of ['functional','verifier']) test(`location amendment adds only missing fields in ${slot}`,async t=>{
+  let original;
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},result:({result,role,packet})=>{
+    if(!role.endsWith(`-${slot}`)||packet.operation==='output-location-repair')return result;
+    if(slot==='functional'){
+      result.findings.push(candidate('F-2'));
+      original=jclone(result);
+      delete result.findings[0].location;
+      result.findings[0][' evidence']=result.findings[0].evidence;delete result.findings[0].evidence;
+    } else {
+      result.newFindings=[candidate('V-1')];original=jclone(result);
+      delete result.dispositions[0].verifiedFinding.location;delete result.newFindings[0].location;
+    }
+    return result;
+  }});
+  const out=await f.command();assert.match(out,/] COMPLETE/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const records=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.filter(s=>s.role.endsWith(`-${slot}`));
+  assert.deepEqual(records[1].result,original);
+  assert.equal(records[1].modelRequests,1);assert.equal(records[1].durationMs>=0,true);
+  assert.equal(records[0].outputCharacters>0,true);assert.ok(records[0].firstToolAt);assert.ok(records[0].lastToolAt);
+  if(slot==='functional')assert.deepEqual(records[1].outputFormatCorrections,[{path:'findings[0].evidence',action:'trim-key-whitespace'}]);
+});
+for(const defect of ['disabled','partial','coverage','snapshot','evidence','counterevidence','duplicateID','extra','status','emptyLocation','noTools','hostError','invalidJSON','staleHead','unknownHead']) test(`missing-location amendment refuses ${defect}`,async t=>{
+  const final=['staleHead','unknownHead'].includes(defect), suffix=final?'-verifier':'-risk';
+  const f=await fixture(t,{settings:s=>s.outputRetries=defect==='disabled'?0:1,skipAzure:defect==='noTools',result:({result,role})=>{
+    if(!role.endsWith(suffix))return result;
+    const finding=final?result.dispositions[0].verifiedFinding:result.findings[0];delete finding.location;
+    if(defect==='partial'){result.status='PARTIAL';result.coverage.gaps=['Missing full source'];}
+    if(defect==='coverage')result.coverage.files=[];
+    if(defect==='snapshot')result.snapshot.base='c'.repeat(40);
+    if(['evidence','counterevidence'].includes(defect))delete finding[defect];
+    if(defect==='duplicateID')result.findings.push(candidate('R-1'));
+    if(defect==='extra')finding.extra='Content must never be discarded';
+    if(defect==='status')result.status='CCOMPLETE';
+    if(defect==='emptyLocation')finding.location='';
+    if(defect==='staleHead')result.currentHead='c'.repeat(40);
+    if(defect==='unknownHead')result.currentHead='';
+    return result;
+  },answer:({answer,role})=>({data:!role.endsWith(suffix)?answer:defect==='hostError'?{...answer,info:{...answer.info,error:{name:'StructuredOutputError'}}}:defect==='invalidJSON'?{...answer,parts:[{type:'text',text:'{broken'}]}:answer})});
+  assert.match(await f.command(),/] INCOMPLETE/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith(suffix)).length,1);
+});
+for(const defect of ['noLocation','empty','unknown','zeroLine','backwardRange','extraFinding','duplicateID','changedID','changedEvidence','changedStatus','changedReport','fullEnvelope']) test(`location amendment rejects ${defect} and never retries again`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({result,role,packet})=>{
+    if(!role.endsWith('-risk'))return result;
+    if(packet.operation!=='output-location-repair'){delete result.findings[0].location;return result;}
+    if(defect==='noLocation')result.locations=[];
+    if(defect==='empty')result.locations[0].location='';
+    if(defect==='unknown')result.locations[0].location='unknown';
+    if(defect==='zeroLine')result.locations[0].location='head:/src/Main.java:0';
+    if(defect==='backwardRange')result.locations[0].location='head:/src/Main.java:12-2';
+    if(defect==='extraFinding')result.locations.push({id:'R-2',location:'head:/src/Main.java:13'});
+    if(defect==='duplicateID')result.locations.push(result.locations[0]);
+    if(defect==='changedID')result.locations[0].id='R-99';
+    if(defect==='changedEvidence')result.locations[0].evidence='replacement';
+    if(defect==='changedStatus')result.status='CCOMPLETE';
+    if(defect==='changedReport')result.report='replacement';
+    if(defect==='fullEnvelope')return {...packet.originalEnvelope,findings:[candidate('R-1')]};
+    return result;
+  }});
+  assert.match(await f.command(),/] INCOMPLETE/);
+  assert.equal(f.prompts().length,4);assert.equal(f.sessions.size,3);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+});
+for(const defect of ['missingHook','missingRolePrompt','duplicateRolePrompt','wrongMessage','nativeInvalid','cancel','abortUnconfirmed']) test(`location amendment fails closed on ${defect}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.outputRetries=1,skipSystemHook:defect==='missingHook',result:({result,role,packet})=>{
+    if(role.endsWith('-risk')&&packet.operation!=='output-location-repair')delete result.findings[0].location;
+    return result;
+  },client:client=>{if(defect==='abortUnconfirmed')client.session.abort=async()=>({data:false});},
+    beforePrompt:({packet,o})=>{if(packet.operation==='output-location-repair'&&defect==='wrongMessage')o.body.parts=[{type:'text',text:'Resume the review and change the evidence'}];},
+    beforeSystem:({packet,system})=>{
+      if(packet.operation!=='output-location-repair')return;
+      if(defect==='missingRolePrompt')system.system=['UNRELATED_SYSTEM'];
+      if(defect==='duplicateRolePrompt')system.system.push(system.system[0]);
+    },duringPrompt:async({packet,hooks,id})=>{
+      if(packet.operation!=='output-location-repair')return;
+      if(defect==='nativeInvalid')await invalidSubmission(hooks,id,'bad-location-repair');
+      if(defect==='cancel')await f.command('pr-stop','');
+    }});
+  const out=await f.command();assert.match(out,defect==='cancel'?/] CANCELLED/:/] INCOMPLETE/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-risk')).length,defect==='abortUnconfirmed'?1:2);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
+});
+test('location amendment keeps the original whole-run deadline',{timeout:3000},async t=>{
+  let signalReady;
+  const ready=new Promise(resolve=>signalReady=resolve);
+  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.runTimeoutSeconds=10;},result:({result,role,packet})=>{
+    if(role.endsWith('-functional')&&packet.operation!=='output-location-repair')delete result.findings[0].location;
+    return result;
+  },duringPrompt:({role,packet})=>{
+    if(!role.endsWith('-functional'))return;
+    if(packet.operation==='output-location-repair'){signalReady();return new Promise(()=>{});}
+    t.mock.timers.tick(6000);
+  }});
+  t.mock.timers.enable({apis:['setTimeout']});
+  const running=f.command();await ready;t.mock.timers.tick(4001);
+  const out=await running;assert.match(out,/] TIMED_OUT/);assert.match(out,/10-second whole-run/);
+  assert.equal(f.prompts().filter(p=>p.body.agent.endsWith('-functional')).length,2);
+  assert.ok(!f.prompts().some(p=>p.body.agent.endsWith('-verifier')));
 });
 test('repeated invalid status stops after one retry and never reaches final verification',async t=>{
   const f=await fixture(t,{settings:s=>s.outputRetries=1,result:({role,result})=>role.endsWith('-risk')?{...result,status:'CCOMPLETE'}:result});

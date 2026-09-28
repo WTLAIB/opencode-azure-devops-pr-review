@@ -14,3 +14,9 @@ is required; severity is high, medium, or low. For failure/concurrency concerns,
 identify a concrete reachable sequence and inspect safeguards across callers,
 not just the changed line. Do not discard a defect because it requires a timeout,
 retry, unusual input, or interleaving. Preserve evidence and unresolved limits.
+
+Keep report concise: coverage, important excluded changes with paired base/head
+evidence, unresolved questions and unexecuted tests. Findings already contain the
+full evidence packets; refer to their IDs instead of repeating each finding's
+summary, impact, evidence and suggestion in report. Never shorten required
+evidence/counterevidence, hide gaps or stop reviewing to meet a length target.

@@ -38,7 +38,7 @@ Revisit them with an explicit decision and evidence, not as incidental cleanup.
 | Two full-scope initial reviews with different emphasis, then one verifier | Independent candidates plus evidence checking; costs more than one pass and does not prove better recall. | Representative, independently labeled PR evaluations support a change. |
 | Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
 | Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
-| Strict contracts with opt-in, single status-only resubmission | Recovers an invalid status without changing evidence or rerunning source work; adds at most one model request per stage. All other failures remain terminal. | Reproduced failures support a separately evaluated recovery class. |
+| Strict contracts with opt-in, single status OR missing-location amendment | One additional request, immutable original values, no repeated tools; location repair retains only that reviewer's context. Does not prove source truth or cover arbitrary missing fields. | A reproduced failure justifies a separately evaluated recovery class. |
 | Explicit saved comment preview and one publication attempt | Keeps human inspection before account-owned comments and limits duplicate attempts; publication is still model-reported. | Verified provider evidence or resumability is explicitly requested and designed. |
 | Seven runtime modules, editable policies, source-only installation | Small auditable boundaries and manual-copy support; file catalogs need synchronized tests. | Measured complexity or distribution needs justify more structure. |
 | In-place settings migration, no retained install backup | Preserves preferences with missing-default merging; malformed settings require correction before install. | The owner explicitly changes the backup/retention requirement. |
@@ -102,7 +102,7 @@ Concurrent cancellation and cleanup await the same abort operation. Unconfirmed
 aborts are disclosed; local grant revocation does not prove that remote work or
 billing stopped.
 
-The deadline covers the whole workflow, including stage transitions, status
+The deadline covers the whole workflow, including stage transitions, output
 amendments and report display. It returns TIMED_OUT with the configured limit;
 explicit `/pr-stop` and disposal return CANCELLED with their respective causes.
 The controller carries the original reason so an SDK abort error cannot replace
@@ -118,7 +118,7 @@ uncertain/reported records and are never automatically retried or rolled back.
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in status-only resubmission below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
@@ -203,14 +203,23 @@ the count and meaning, including when debug logging is off. Saved response files
 retain the raw output and result files contain the validated candidate.
 
 This path adds no model/session/tool request and is independent of outputRetries.
-It excludes source checks, comments, invalid statuses and status-repair grants.
+It excludes source checks, comments, invalid statuses and output-repair grants.
 A submission needing both a status amendment and finding-format corrections
 cannot qualify for the status-only retry. Normal prompts still request exact
 keys; normalization is not an alternative output format for reviewers.
 
-### Bounded status resubmission
+### Bounded output amendments
 
-`outputRetries` accepts only `0` (default) or `1`. Recovery applies only to the
+`outputRetries` accepts only `0` (default) or `1`. The two cases below share one
+allowance per stage; a failed amendment cannot start another kind of repair.
+Native capture is not submission-time validation: the host can return parsed
+objects missing schema-required fields. AZPR validates after prompt completion
+and before accepting a result, then optionally gives bounded feedback. It does
+not patch the host, intercept its native tool or regenerate full envelopes.
+
+#### Status
+
+Status recovery applies only to the
 check/initial/final review roles and an invalid top-level uppercase status token
 of at most 24 characters. The original response must parse as one object, pass
 all other contracts when checked with its successful status, and have at least
@@ -226,7 +235,29 @@ containing only `status`; text transport requires the same one-field object.
 The plugin combines the model's explicit amendment with the original fields and
 runs the entire original validator again. It never uses the probe's status.
 
-Normal agent definitions contain no status-amendment instructions, even when
+#### Absent finding locations
+
+An otherwise valid COMPLETE initial/verifier result may request only its absent
+location fields. A cloned eligibility probe temporarily marks those fields and
+runs the full validator; neither placeholder nor probe result is ever accepted.
+Any other invalid field, duplicate ID, missing evidence, coverage gap, unknown or
+changed head disqualifies the result. Existing empty location values do not qualify.
+
+After confirmed abort, a scoped grant reuses only that stage's stopped session,
+role and model within the active run. This retains its own previous source reads
+without copying another initial review's material or calling tools again. Input
+contains the original envelope and an exact ID/field-path list. The amendment is
+only `locations: [{id, location}]`: exact requested IDs, no duplicates, no other
+fields, explicit base/head path and positive ordered line numbers. The plugin
+adds those absent fields to a clone and fully validates it. Every original value
+stays unchanged. The prompt refuses guessing from summaries or unavailable source.
+This does not independently verify the lines; the final reviewer still checks
+initial findings against source. Raw responses and failure records are retained.
+Any eligible local key-format corrections are disclosed only on final acceptance.
+
+#### Shared limits and isolation
+
+Normal agent definitions contain no amendment instructions, even when
 outputRetries is enabled. For a granted repair session only, the system-transform
 hook replaces exactly one occurrence of that role's known reviewer prompt with
 the standalone amendment instructions, mutating the host's retained system array
@@ -242,15 +273,22 @@ The repair request's private diagnostic instructions show the amendment prompt.
 
 Repair grants deny all ordinary tools and a second `chat.params` model request.
 The pinned host's native StructuredOutput tool executes outside ordinary tool
-hooks; it remains available solely for the one-field submission. The existing
+hooks; it remains available solely for the scoped amendment. The message hook
+also checks the exact plugin-generated amendment text. The existing
 run deadline, cancellation, configuration/model checks and cleanup still apply.
-No recursive retry, provider/model switch, or revoked-session reuse is allowed.
+No recursive retry, provider/model switch or general reviewer resumption is
+allowed. Only the explicit location grant can reuse its stopped original session.
 Host/provider-internal retries and auxiliary requests are outside this bound.
 
 Malformed/missing output, provider/SDK errors, incomplete evidence, changed heads,
 unconfirmed aborts and cancellations do not qualify. Comment preview/publication
 never qualify. A second format failure ends the stage. Each attempt has its own
-session and diagnostic files; the amendment records `attempt: 2` and `retryOf`.
+diagnostic files; the amendment records `attempt: 2`, `retryOf` and `retryKind`.
+Status repairs use a new session ID; location repairs retain the original ID.
+The location receipt notice distinguishes model amendments from local formatting.
+Stage diagnostics include modelRequests, durationMs, parsed outputCharacters and
+firstToolAt/lastToolAt when observed. These measure host-hook activity, not provider
+internal retries, total token usage, tool error categories or source authenticity.
 Receipts retain the first error even after recovery. Final provenance uses only
 validated results, with at most one accepted result per role. Live model
 compatibility and reliability improvement still require acceptance testing.
@@ -259,7 +297,7 @@ compatibility and reliability improvement still require acceptance testing.
 
 The pinned host routes rejected StructuredOutput arguments to its built-in
 `invalid` tool through `tool.execute.before`. Native review sessions stop on the
-second distinct invalid structured call; status-amendment and comment sessions
+second distinct invalid structured call; output-amendment and comment sessions
 stop on the first. Call IDs deduplicate hook delivery; counters belong to the
 individual session and do not combine independent reviewers. Built-in invalid
 results never count as completed source work for the status-amendment gate.
@@ -301,7 +339,7 @@ require evaluation on representative PRs with independent ground truth.
 
 ## Tools and reports
 
-Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Tool hooks retain lifecycle checks, completed-call bookkeeping and the native-submission guard above, never semantic MCP read/write classification. Display and status-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
+Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Tool hooks retain lifecycle checks, completed-call bookkeeping and the native-submission guard above, never semantic MCP read/write classification. Display and output-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
 
 The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original JSON report remains in the session. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 

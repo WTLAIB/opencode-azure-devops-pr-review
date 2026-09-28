@@ -213,37 +213,48 @@ pass validation; missing evidence, conflicting keys and content-bearing extras
 still fail with field-specific diagnostics. Accepted changes appear as
 `output-format-corrections=N` in receipts and `outputFormatCorrections` in stage
 results; raw responses remain available for inspection. This adds no model call
-and does not change status retries, source checks or comment publication.
+and does not consume the amendment allowance or change source checks/comments.
 
 With native output, two rejected `StructuredOutput` submissions in one review
 session stop the run as `INCOMPLETE`. The host may continue after the first
 rejection; the plugin adds no request or session and never edits the arguments.
-Status-repair and comment sessions stop on the first rejection. This guard is
+Output-repair and comment sessions stop on the first rejection. This guard is
 independent of `outputRetries` and only observes the host's built-in `invalid`
 tool for structured submissions. It is not a general provider retry/spending cap.
 Receipts show `invalid-structured-output=N` when any rejection was observed.
 
-Optional `outputRetries: 1` allows **one status-only resubmission per review
-stage**, for an invalid top-level status such as `CCOMPLETE`. Default `0` keeps
-status resubmission disabled. Every other evidence check must already pass, and the original
-session must have a completed tool call and a confirmed abort. The same model
-gets one request in a fresh session and can return only a status; ordinary tools
-are denied. The plugin preserves the original report, findings, coverage and
-snapshot and validates the complete envelope again. Original failures and retry
-session IDs remain visible in the receipt and diagnostics.
+Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
 
-Normal reviewers receive only their full-review instructions. The one-field
+- An invalid top-level status such as `CCOMPLETE`: the same model returns only
+  a status in a fresh session; all other fields remain immutable.
+- Absent `location` fields in otherwise valid COMPLETE initial/verifier findings:
+  the same reviewer gets one request in its original, stopped session to retain
+  its own source context. It returns only the requested IDs and source locations.
+  Existing field values stay unchanged; no tool/source work is repeated. If the
+  location cannot be established from that context, the stage remains incomplete.
+
+The two cases share one allowance, not one each. Default `0` disables both.
+Every other contract must pass before a request is allowed, and the original
+session must have a completed tool call and a confirmed abort. Repair grants
+deny ordinary tools and a second model request. The complete amended envelope
+is validated again. Original failures, `retry-kind`, attempt/session IDs and a
+location-amendment notice remain visible in receipts and diagnostics. The plugin
+never extracts guessed locations from report text; amended locations are model
+claims, not independently verified source facts.
+
+Normal reviewers receive only their full-review instructions. The bounded
 amendment instructions replace the reviewer prompt only in an authorized repair
 session; enabling retries does not expose an alternative output format to normal
 reviews. If the host cannot apply that isolated prompt, repair stops before a
 model request. Provider/host system context and ordinary agents are preserved.
 
 This does not retry malformed/missing JSON, host/provider errors, incomplete
-evidence, changed PR heads, cancellations, or comment preview/publication. A
+evidence/coverage, empty existing locations, changed PR heads, cancellations, or
+comment preview/publication. A
 second failure ends that stage. The existing run timeout is not reset. A full
 review has four stages, so enabling this setting permits at most four extra
 formatting requests; it is not a spending cap or proof of review quality.
-Restart OpenCode after changing the setting. See [bounded status retries](docs/DEBUGGING.md#bounded-status-retries).
+Restart OpenCode after changing the setting. See [bounded output amendments](docs/DEBUGGING.md#bounded-output-amendments).
 
 Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):
 
@@ -258,7 +269,7 @@ Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE
 
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
-Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or a status retry. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
+Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or an output amendment. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
 
 Source-check `READY` and later-stage `COMPLETE` are the expected success statuses;
 neither approves the PR. In receipt mode, inspect the final session through the

@@ -98,6 +98,14 @@ preview/publication never retry. Installer checks retain explicit opt-in while
 adding missing `outputRetries` as zero. These tests use synthetic fixtures,
 not private session exports, and do not establish improved live success rates.
 
+Absent-location regressions reproduce a native capture missing all three finding
+locations. Both profiles/transports retain the same reviewer session, raw failed
+response and immutable original fields while accepting exactly one locations
+amendment. Tests cover verifier findings, mixed local normalization, altered IDs
+or evidence, duplicate/extra IDs, invalid line ranges, shared retry limits, denied
+tools, isolated prompts, cancellation and abort uncertainty. Missing other evidence,
+coverage gaps, empty existing locations and stale/unknown heads remain failures.
+
 Prompt-isolation regressions check that ordinary review sessions never receive
 one-field amendment instructions, while granted repairs replace only the known
 reviewer prompt and retain unrelated system context. They model the pinned host's
@@ -154,12 +162,21 @@ identical and no extra session was started. A recovered formatting defect still
 counts as a model output defect; report it separately from unmodified successes.
 
 If opting into `outputRetries: 1`, verify a qualifying failure's original FAILED
-record and new `retryOf` session. Confirm the amendment returns only `status`,
-all other fields remain unchanged, no ordinary tool executes during repair,
+record and `retryOf` attempt. A status amendment uses a new session and only
+`status`; a location amendment uses the original session and only the requested
+`locations`. Confirm all original field values remain unchanged, no ordinary tool executes during repair,
 and a second model request is refused. Confirm cancellation still wins and
 the overall deadline does not restart. Count original contract failures and
 recovered outcomes separately; repeated synthetic successes are a smoke test,
 not a guarantee for other models or repositories.
+
+Compare the optimized prompts against fixed-source defect, guarded/equivalent,
+clean and repair-control cases with an external answer key. Check base/head
+direction in both findings and excluded changes. Count failed-capability queries
+repeated across stages, full coverage, missed defects, false positives and amended
+versus first-pass success separately. Record per-attempt timing/output size before
+claiming less latency; concise reports must not discard findings or evidence.
+Official MCP defects and model compliance remain outside deterministic guarantees.
 
 Before wider adoption, evaluate known historical PRs for missed issues, false positives, coverage, time, and cost. This integration is not a merge gate.
 

@@ -48,6 +48,14 @@ not proof that your own reads succeeded: each reviewer still reads the required
 source independently at the fixed snapshot and verifies returned versions,
 pagination and completeness. A known failure is not proof that source is absent.
 
+Before choosing a retrieval method, match it against sourceAccess.failedCalls by
+operation, version-selection semantics and failure cause, not just identical
+argument text. A failed capability probe in check need not be repeated by either
+initial reviewer or the verifier. Start with its checked alternative when that
+alternative supports this snapshot and current schema. Re-probe only when new
+evidence changes the failure's precondition; state what changed. This is retrieval
+planning, not acceptance of another reviewer's evidence or a tool permission.
+
 Do not repeat an identical failed request for a deterministic parameter, version,
 not-found or permission error. Inspect the response and schema, correct the
 specific cause or use an evidence-preserving alternative. Do not cycle through
@@ -67,6 +75,16 @@ be fresh. Do not trade coverage for fewer calls or use another reviewer's source
 claims instead of your independent reads.
 
 Review the entire cumulative PR diff, not just the last push. Use the specified full base/head commits and follow all pagination. Read source and callers at the selected commits where needed. Descriptions, filenames, truncated diffs, and incomplete pages cannot support a claim of complete review. Without a native diff, obtain complete and trustworthy before/after source before comparing.
+
+Label every comparison explicitly: base = snapshot.base (before), head =
+snapshot.head (after). Check the response's version before attributing a source
+statement to either side; retrieval order is not version order. For each changed
+behavior, pair the relevant base statement/guard with its head counterpart and
+trace the same trigger through both. Added and removed safeguards have opposite
+effects. Check this direction even when excluding a change as a fix or equivalent
+rewrite. Put the short before/after evidence in the finding's evidence field;
+record important exclusions once in the initial report. These are checkable
+source conclusions, not private reasoning traces or a replacement for full review.
 
 Do not change the snapshot after initial review begins. Return it exactly, including file order. Report missing source, external contracts, or coverage gaps; never invent evidence.
 

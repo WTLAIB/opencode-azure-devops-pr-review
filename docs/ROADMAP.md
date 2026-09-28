@@ -22,13 +22,15 @@ Implemented and covered by offline tests:
   altered evidence values. Collisions, missing evidence and meaningful extras
   remain failures. Native/text regressions cover both profiles and retain the
   raw responses; improved live repeatability still needs user-run evaluation.
-- Opt-in, one status-only resubmission per review stage with immutable evidence,
+- Opt-in, one status OR absent-location amendment per review stage, sharing one
+  allowance, with immutable original values,
   bounded model requests, ordinary-tool denial and retained failure diagnostics.
   Amendment instructions are isolated to granted repair sessions; normal
-  reviewers receive only the full-review contract.
+  reviewers receive only the full-review contract. Location amendments retain
+  that reviewer's existing session context; unavailable source cannot be guessed.
   Live reliability gains remain unverified.
 - A per-session stop at two native structured-submission rejections (one for
-  status repair/comments), with retained counts and explicit whole-run TIMED_OUT
+  output repair/comments), with retained counts and explicit whole-run TIMED_OUT
   versus manual CANCELLED diagnostics. Host/provider acceptance remains pending.
 - Saved inline-comment previews and explicit, uncertainty-aware publication.
 - Shared lifecycle/cancellation handling, private-role grants, literal context,
@@ -37,13 +39,21 @@ Implemented and covered by offline tests:
   deterministic lookup loops/unrelated discovery, exact-source line recounting,
   and receipt guidance that does not resume completed reviewers. Offline routing
   and policy checks are not proof of improved live MCP error rates or report quality.
+- Compact initial reports without duplicate finding prose, explicit base/head
+  direction checks including excluded changes, and failed-capability handoff
+  by cause/version semantics. No official MCP or OpenCode host patch is included.
+  Diagnostics add per-attempt timing, model-request and output-size observations.
 
 Repeated normal-profile smoke runs on one fixed synthetic PR are recorded
 privately. They completed with the expected defects but exposed variable latency,
 recoverable MCP errors and inaccurate final locations. The access/presentation
 changes above need further live evaluation. A subsequent initial-stage failure
 exposed malformed finding keys; the local normalization and diagnostics now have
-offline regression coverage. Clean controls, the broader acceptance
+offline regression coverage. A later native submission omitted finding locations
+despite successful host capture; bounded location amendments now have sanitized
+regressions. Direction errors also occurred despite correctly versioned source
+responses. Neither amendment success nor prompt compliance proves review quality.
+Clean controls, the broader acceptance
 matrix and general review-quality improvement remain unestablished.
 CI is configured for Ubuntu 22.04/24.04 with Node 22;
 the workflow file alone is not evidence that a particular CI run passed.

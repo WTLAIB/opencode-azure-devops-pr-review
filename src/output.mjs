@@ -42,7 +42,11 @@ export function stageFormat(role, statusOnly = false) {
     status: status('DONE', 'INCOMPLETE'), posted: array(object({ findingId: string, threadId: { type: ['string', 'integer'] } })),
   });
   else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(finding), report: string });
-  return { type: 'json_schema', schema: statusOnly ? object({ status: schema.properties.status }) : schema, retryCount: 0 };
+  if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
+    location: { ...string, description: 'Exact base:/path:line or head:/path:start-end from source already read in this session. No guesses or new source reads.' },
+  })) });
+  else if (statusOnly) schema = object({ status: schema.properties.status });
+  return { type: 'json_schema', schema, retryCount: 0 };
 }
 
 export function visibleText(response) {
@@ -95,6 +99,55 @@ export class OutputStatusError extends Error {
     super(`Invalid ${label} envelope: status received ${shown}; expected ${allowed.join(' or ')}.`);
     this.name = 'OutputStatusError';
   }
+}
+export class OutputLocationError extends Error {}
+
+function findingSlots(result, role) {
+  if (ROLES[role]?.format === 'initial') return (result.findings ?? []).map((value, i) => ({ value, path: `findings[${i}].location` }));
+  if (ROLES[role]?.format === 'final') return [
+    ...(result.dispositions ?? []).flatMap((d, i) => d.status === 'CONFIRMED' ? [{ value: d.verifiedFinding, path: `dispositions[${i}].verifiedFinding.location` }] : []),
+    ...(result.newFindings ?? []).map((value, i) => ({ value, path: `newFindings[${i}].location` })),
+  ];
+  return [];
+}
+
+/** Check eligibility only: the placeholder is never a result or source evidence.
+ * Missing source/evidence/coverage and changed heads must fail this probe. */
+export function locationRepairPlan(original, role, validate) {
+  if (!isObject(original) || original.status !== 'COMPLETE') return;
+  try {
+    const probe = JSON.parse(JSON.stringify(original));
+    const missingLocations = [];
+    for (const { value, path } of findingSlots(probe, role)) {
+      if (isObject(value) && !Object.hasOwn(value, 'location')) {
+        missingLocations.push({ id: value.id, path });
+        value.location = 'ELIGIBILITY PROBE ONLY';
+      }
+    }
+    if (!missingLocations.length || validate(probe).status !== 'COMPLETE') return;
+    return missingLocations;
+  } catch { return; }
+}
+
+/** Add only explicitly requested absent location fields. No original value may
+ * change; the caller must still validate the entire amended envelope. */
+export function applyLocationAmendment(original, role, missingLocations, amendment) {
+  if (!isObject(amendment) || Object.keys(amendment).length !== 1 || !Array.isArray(amendment.locations) ||
+      amendment.locations.length !== missingLocations.length) throw new Error('Location retry must return exactly the requested locations; no other fields may change.');
+  const expected = new Set(missingLocations.map(item => item.id)), received = new Map();
+  for (const item of amendment.locations) {
+    if (!isObject(item) || Object.keys(item).length !== 2 || !expected.has(item.id) || received.has(item.id) || typeof item.location !== 'string') {
+      throw new Error('Location retry has missing, duplicate, unexpected IDs or extra fields.');
+    }
+    const match = /^(base|head):\/[^\r\n:]+:([1-9][0-9]*)(?:-([1-9][0-9]*))?$/.exec(item.location);
+    if (!match || !Number.isSafeInteger(Number(match[2])) || (match[3] && (!Number.isSafeInteger(Number(match[3])) || Number(match[3]) < Number(match[2])))) {
+      throw new Error('Location retry requires an exact base/head path and positive, ordered source lines; unavailable locations cannot complete a review.');
+    }
+    received.set(item.id, item.location);
+  }
+  const amended = JSON.parse(JSON.stringify(original));
+  for (const { value } of findingSlots(amended, role)) if (!Object.hasOwn(value, 'location')) value.location = received.get(value.id);
+  return amended;
 }
 function requireStatus(result, allowed, label) {
   if (!allowed.includes(result.status)) throw new OutputStatusError(label, result.status, allowed);
@@ -196,7 +249,10 @@ function validateFinding(value, prefix, ids, path) {
   if (text(value.severity) && !finding.properties.severity.enum.includes(value.severity)) issues.push(`${path}.severity must be high, medium, or low`);
   const extra = Object.keys(value).filter(key => !Object.hasOwn(finding.properties, key)).length;
   if (extra) issues.push(`${path} contains ${extra} unexpected field(s); names and values omitted`);
-  if (issues.length) throw new Error(`Invalid finding: ${issues.join('; ')}.`);
+  if (issues.length) {
+    const ErrorType = issues.length === 1 && !Object.hasOwn(value, 'location') ? OutputLocationError : Error;
+    throw new ErrorType(`Invalid finding: ${issues.join('; ')}.`);
+  }
   ids.add(value.id);
 }
 function validateFindings(findings, prefix, path = 'findings') {

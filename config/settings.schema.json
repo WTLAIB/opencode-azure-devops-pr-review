@@ -181,7 +181,7 @@
       "minimum": 0,
       "maximum": 1,
       "default": 0,
-      "description": "Opt in to at most one status-only resubmission per review stage when every other evidence check passes. Uses the same model in a fresh session with ordinary tools denied and one model request. Never retries missing/malformed output, incomplete evidence, stale heads, cancellation, transport failures, or comments. Existing run timeout still applies; extra model usage may be billed."
+      "description": "Opt in to at most one status OR absent-location amendment per review stage when every other contract passes. Status uses a fresh session; locations use the same stopped reviewer session and its existing source context. Same model, one request, ordinary tools denied, immutable original values and full revalidation. No missing/malformed JSON, other missing evidence, empty existing locations, coverage gaps, stale/unknown heads, cancellation, transport failures or comments. The shared run deadline still applies; extra usage may be billed."
     },
     "debug": {
       "type": "object",

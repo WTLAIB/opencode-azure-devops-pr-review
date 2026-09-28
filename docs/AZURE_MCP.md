@@ -79,6 +79,15 @@ optional notes remain compatible. Both initial reviewers and the verifier receiv
 the notes unchanged, but must independently read the required source. Notes are
 untrusted data, not permissions, source proof or another initial review's findings.
 
+Group failures by operation, relevant version/argument semantics and observed
+cause, with one checked alternative per capability. Later reviewers compare
+planned reads against these observations before issuing a call. A cosmetic path
+change does not make a failed capability new; re-probing needs a changed
+precondition. Keep independent exact-commit reads and required freshness checks.
+This remains prompt guidance, not a runtime guarantee against repeated MCP errors.
+The plugin does not patch official MCP code or mask its errors. Unknown pagination,
+partial change counts or synthesized iteration labels cannot prove completeness.
+
 The source check ends once cumulative readiness is established; it does not
 survey unrelated history, wikis or builds. Keyword search and file equality do
 not prove ancestry. A complete cumulative comparison may establish the change

@@ -14,3 +14,9 @@ is required; severity is high, medium, or low. Inspect before/after behavior and
 relevant callers, including existing guards and documented contracts, before
 reporting a regression. Keep open questions distinct from evidence-backed
 candidates. Preserve evidence even if it makes the report longer.
+
+Keep report concise: coverage, important excluded changes with paired base/head
+evidence, unresolved questions and unexecuted tests. Findings already contain the
+full evidence packets; refer to their IDs instead of repeating each finding's
+summary, impact, evidence and suggestion in report. Never shorten required
+evidence/counterevidence, hide gaps or stop reviewing to meet a length target.

@@ -76,8 +76,8 @@ value passed to a tool. Older null/incomplete envelopes remain readable, but no
 unknown or quoted-inside-the-value head can complete a review.
 
 No extra formatter/reviewer model is started by default. The plugin does not
-rerun full stages or switch models. The opt-in status amendment below uses the
-same model in a new session. If a provider cannot use the native mechanism, select
+rerun full stages or switch models. The opt-in amendments below use the
+same model, with distinct status and missing-location contracts. If a provider cannot use the native mechanism, select
 `structuredOutput: false` locally and restart. Text mode accepts a JSON object
 or one unambiguous fenced object with optional commentary. It does not guess
 among multiple envelopes, repair truncated JSON, or ignore host/model errors.
@@ -94,7 +94,7 @@ and [SDK implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/pac
 stage validation. For example, `" evidence"` can become `"evidence"` without
 changing its text, and `"evidence_note": ""` can be removed without discarding
 content. This does not add a session, call a model, repeat source reads or consume
-the status-retry allowance. It applies only to initial/verifier finding objects.
+the amendment allowance. It applies only to initial/verifier finding objects.
 
 Stage `outputFormatCorrections` lists the trusted field path and action; removed
 empty unknown fields use their original zero-based property index rather than
@@ -108,13 +108,20 @@ example, `findings[0].evidence is missing` from `findings[1].id duplicates an
 earlier finding`, without printing source values. The same rules apply to
 `dispositions[i].verifiedFinding` and `newFindings[i]`. Other envelope fields are
 not normalized, and a failed candidate does not record accepted corrections.
-Count format notices separately from native rejections and model status retries.
+Count format notices separately from native rejections and model amendments.
 
 A host tool marked completed, or zero invalidStructuredOutputs, does not prove
 schema conformance. Inspect the saved arguments and the plugin's validator
 result; native capture success must not bypass local evidence checks.
 
-## Bounded status retries
+## Bounded output amendments
+
+`outputRetries: 1` enables one status OR absent-location amendment per stage,
+with a shared limit of one extra request. Default `0` disables both. This is
+post-response validation and bounded feedback, not a patch to OpenCode's native
+StructuredOutput implementation; native capture can succeed with missing fields.
+
+### Status
 
 Set `"outputRetries": 1` and restart to enable one status-only resubmission per
 review stage. `0` is the default; other values are rejected. This is useful when
@@ -150,12 +157,41 @@ files retain both responses; a retry result records `attempt: 2` and `retryOf`.
 The first result remains FAILED even when the overall review later completes.
 Inspect all attempts when evaluating reliability, not just the final status.
 
+### Missing locations
+
+An initial/verifier envelope with COMPLETE and absent finding `location` fields
+may qualify only when every other contract passes. The same stopped session is
+regranted for one plugin-authored message to keep its original source context.
+The model returns only `{"locations":[{"id":"F-1","location":"head:/src/example.ts:12"}]}`
+for the requested IDs. It cannot change any original value, use ordinary tools,
+start a second model request or switch to status repair. If it cannot establish
+the locations from previously read exact-commit source, it must decline; an empty
+locations list fails closed. No locations are extracted automatically from prose.
+
+Missing evidence/counterevidence, coverage gaps, invalid IDs, empty existing
+locations, changed/unknown heads, comments and uncertain cancellation never
+qualify. Native/text parse errors also remain terminal. Both the eligibility
+probe and final amended result use the full validator; placeholders never enter
+accepted results or diagnostics as evidence.
+
+Receipts retain the first FAILED record and show `retry-kind=location`, an explicit
+location notice, and the same session ID for both attempts. Stage results record
+`amendedLocations` (IDs and field paths), separate raw response artifacts and
+the final validated envelope. Audit these as model-authored amendments, not
+independent verification of source lines. The verifier still checks initial
+locations against source. Any eligible key normalization is recorded separately
+only if the amended full result passes. A second failure ends the stage.
+
+Completed sessions still refuse ordinary reuse. Only the plugin's exact amendment
+message, same run/role/model, confirmed abort and isolated system prompt can grant
+this exception. The existing whole-command deadline is never restarted.
+
 ## Repeated native submission failures and timeouts
 
 `StructuredOutput` belongs to OpenCode's output transport, not Azure MCP. In the
 pinned host, JSON/tool-argument rejection is routed to the built-in `invalid`
 tool with the intended tool name. The plugin counts distinct call IDs targeting
-StructuredOutput only. Review sessions stop at the second rejection; status-only
+StructuredOutput only. Review sessions stop at the second rejection; output
 repair and comment sessions stop at the first. Counters are per session, apply
 with native output only, and do not depend on outputRetries.
 
@@ -207,7 +243,7 @@ printed in its receipt:
 | `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time and whole-run timeout; no provider configuration. |
 | `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, selected model/session, and schema. |
 | `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated stage result or error, profile, model/session IDs, timestamps, completedTools and invalidStructuredOutputs counts, including interrupted stages. |
+| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, outputCharacters, firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
@@ -215,14 +251,23 @@ printed in its receipt:
 
 A complete normal or deep review normally has four stage records: source check,
 functional initial review, risk initial review, and final verification. An
-enabled status retry adds one attempt record for the affected stage. `MODE` is `review`
+enabled amendment adds one attempt record for the affected stage. Location repair
+uses the original session; status repair creates a new one. `MODE` is `review`
 or `deep`; the two initial file numbers may vary because the sessions start
 concurrently. A comment command uses the originating review's profile.
 
 Stage results are written after local contract validation. A model can claim
 READY/DONE in its visible response while the stage result is FAILED because the
 snapshot, plan, or publication report is invalid. Inspect both files. Only the
-explicitly enabled, status-only case above can start a bounded resubmission.
+explicitly enabled cases above can start a bounded amendment.
+
+`modelRequests` counts observed reviewer parameter hooks, not provider-internal
+retries, auxiliary requests or billable totals. `outputCharacters` measures the
+parsed submission; it does not count streaming tokens. `firstToolAt` is the first
+ordinary before-hook and `lastToolAt` the last observed after-hook, not a sum of
+network durations. Compare attempt timing and raw sessions when measuring latency;
+neither a long post-tool interval nor a completed tool alone proves a model or MCP
+failure. Failed calls that never reach the after-hook may lack an end timestamp.
 
 Initial-review diagnostics identify absent or mistyped snapshot, coverage,
 findings and report fields without copying their values. A normal initial
@@ -244,7 +289,8 @@ For quality-contract failures, compare the saved response to its request schema:
 
 Both native and text output use these checks. Install matching runtime/prompts
 and restart after an update; old custom prompts must satisfy the new contract.
-No evidence repair or fallback to the original candidate is performed. Debug data
+Apart from the explicit absent-location amendment above, no missing fields are
+supplied; no fallback to the original candidate is performed. Debug data
 lets you inspect coverage claims, counterevidence and corrected findings, not
 independently prove that source reads or reasoning were correct.
 

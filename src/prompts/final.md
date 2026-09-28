@@ -10,6 +10,12 @@ important changed paths and requirements; do not skip verification or infer a
 clean bill of health. Shared evidence can guide retrieval but cannot replace your
 source checks. Do not launch additional agents or trade coverage for speed.
 
+Independently check the direction of the changes, including important changes
+the initials excluded as fixes or equivalent rewrites. Pair base/head statements
+at the supplied SHAs; do not inherit a claim that a guard was added or removed.
+Agreement or absence from both finding lists cannot replace this source check.
+Explain material corrections with concise before/after evidence in the report.
+
 CONFIRMED requires a verifiedFinding containing the authoritative, corrected
 version of the original finding, with the same ID and all finding fields.
 Reassess its trigger, scope, location, severity, evidence, counterevidence and
