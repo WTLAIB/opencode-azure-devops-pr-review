@@ -9,6 +9,18 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Verifier submissions use fixed confirmed/merged/rejected/needs-info/new-finding
+  arrays, adapted to the unchanged final evidence/disposition contract. Unique
+  snapshot path sets compare independently of ordering. Both transports and
+  profiles retain strict evidence, ID accounting and stale-version checks.
+- Parsed COMPLETE final output failures with a matching known version frame may
+  receive one same-session content resubmission, sharing the existing amendment
+  budget. Frozen identity/versions, no ordinary tools, one model request, confirmed
+  abort, original deadline, full revalidation and retained failure diagnostics apply.
+  This is explicit model-authored recovery; initial status-only envelopes still
+  cannot regenerate a review. Live completion and semantic quality gains remain
+  unverified, including harmless-change false positives and source/test accuracy.
+
 - Opt-in normal/deep orchestration with two concurrent independent initial
   sessions and one final verifier; mode-specific three-role configuration.
 - PR-version snapshots, complete coverage ledgers, counterevidence, corrected
@@ -28,8 +40,8 @@ Implemented and covered by offline tests:
   Scoped native amendments can accept complete, unambiguous JSON text after the
   pinned missing-submission error, with notices and no additional request.
   Live improvement remains unverified; offline recovery is not a completed run.
-- Opt-in, one status, absent final-location OR missing merged-disposition amendment per stage, sharing one
-  allowance, with immutable original values,
+- Narrow status, absent final-location OR missing merged-disposition amendments share the same
+  allowance with final content resubmission. Narrow amendments keep immutable original values,
   bounded model requests, ordinary-tool denial and retained failure diagnostics.
   Amendment instructions are isolated to granted repair sessions; normal
   reviewers receive only the full-review contract. Location amendments retain

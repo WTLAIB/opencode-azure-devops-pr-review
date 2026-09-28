@@ -18,30 +18,33 @@ read after all source checks.
 ## Decisions
 
 expectedFindingIds is the complete checklist. Return exactly one structured
-disposition per original ID, including rejected and merged candidates. Explaining
+decision per original ID in confirmed, merged, rejected or needsInfo. Explaining
 a merge in prose never substitutes for its JSON row. Do not omit duplicate IDs
 from this ledger; merge their conclusions while retaining their identity.
 
-- CONFIRMED: provide the complete corrected verifiedFinding under the same ID.
+- confirmed: provide the complete corrected finding directly under the same ID,
+  plus reason. All seven finding fields are required, with no nested object.
   Reassess trigger, scope, severity, evidence, counterevidence and correction/test.
   This is the authoritative claim for the rendered report and optional comments.
   Keep the defect identity; reject a refuted original and use V IDs for unrelated
   discoveries instead of repurposing it.
-- REJECTED: reason gives a concrete source-based refutation, not a vote.
-- NEEDS_INFO: reason identifies unresolved evidence and what would settle it.
+- rejected: reason gives a concrete source-based refutation, not a vote.
+- needsInfo: reason identifies unresolved evidence and what would settle it.
   Missing confirmation is not proof of absence or a publishable defect.
-- MERGED: mergedInto names another original ID with the same root cause and
+- merged: mergedInto names another original ID with the same root cause and
   correction. Preserve distinct triggers/impacts in the representative. A merge
   chain must terminate at a non-MERGED decision; no self-reference or cycles.
 
-Only CONFIRMED carries verifiedFinding; only MERGED carries mergedInto.
+Only confirmed carries a full original finding; only merged carries mergedInto.
 New independently verified V-prefixed issues go only in newFindings, with all
-seven finding fields. Never repeat them in dispositions. Use [] for no discoveries.
+seven finding fields. Never repeat them in the original-ID categories. Equivalent
+or guarded changes are exclusions in report, not findings needing no correction.
+Use [] for every empty category. Never encode an array as a JSON string.
 
 Input pendingLocations identifies candidates whose location was omitted.
 Recount source lines yourself at the exact commit, including blank lines/comments
 and excluding transport wrappers; do not inherit the representative's offsets.
-Resolve discrepancies in verifiedFinding. Missing location is not a refutation:
+Resolve discrepancies in confirmed findings. Missing location is not a refutation:
 use NEEDS_INFO when you cannot establish it; use INCOMPLETE for unfinished work.
 Do not claim inferred test failures were observed execution.
 
@@ -59,9 +62,9 @@ limitation; it is not a proven common ancestor.
 
 Write human-readable structured descriptions and reasons in the configured outputLanguage.
 Keep keys, status values, IDs, severity labels, code and source quotes unchanged.
-Each finding's evidence packet is written once in verifiedFinding/newFindings.
+Each finding's evidence packet is written once in confirmed/newFindings.
 Use a short disposition reason: CONFIRMED points to the decisive check in its
-verifiedFinding; MERGED names the shared cause and representative without copying
+corrected finding; MERGED names the shared cause and representative without copying
 the full packet. REJECTED still needs a concrete refutation; NEEDS_INFO still
 states the missing evidence. Preserve distinct triggers/impacts when merging.
 
@@ -75,15 +78,21 @@ all evidence/counterevidence and unresolved gaps, and never truncate to be brief
 
 Return this envelope using the configured transport:
 - status: COMPLETE, INCOMPLETE or STALE; never an acknowledgement token.
-- snapshot: exact supplied union snapshot, unchanged.
+- snapshot: supplied union snapshot with the same unique file set and identity.
 - currentHead/currentBase: exact full SHA strings without extra quote characters;
   empty only for unavailable versions with INCOMPLETE.
-- dispositions: one row for EVERY expectedFindingIds entry. Each row has id,
-  status and reason; add verifiedFinding for CONFIRMED or mergedInto for MERGED.
+- confirmed: rows with id, summary, evidence, counterevidence, location, severity,
+  suggestion and reason. All eight fields are required.
+- merged: rows with id, mergedInto and reason.
+- rejected / needsInfo: rows with id and reason.
 - newFindings: complete V findings, or [].
 - report: the short overview described above.
 
-Before submitting, compare disposition IDs to expectedFindingIds for missing,
+Do not add dispositions, per-row status or nested verifiedFinding to this format.
+The runtime converts these explicit categories into its internal disposition
+ledger; no verdict or missing finding is inferred.
+
+Before submitting, compare all four original-ID categories to expectedFindingIds for missing,
 extra and duplicate rows. Retain source evidence and unresolved limits; never
 invent a decision to make the checklist complete. This review never publishes,
 votes, approves or merges.

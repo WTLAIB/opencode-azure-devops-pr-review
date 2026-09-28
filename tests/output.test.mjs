@@ -303,7 +303,7 @@ test('native schemas and role prompt examples describe the same quality contract
   const required=['id','summary','evidence','counterevidence','location','severity','suggestion'];
   for(const mode of ['review','deep']) {
     const finalSchema=stageFormat(`azpr-${mode}-verifier`).schema;
-    assert.deepEqual(finalSchema.properties.dispositions.items.properties.verifiedFinding.required,required);
+    assert.deepEqual(finalSchema.properties.confirmed.items.required,[...required,'reason']);
     assert.deepEqual(finalSchema.properties.newFindings.items.required,required);
     for(const role of ['functional','risk']) {
       const schema=stageFormat(`azpr-${mode}-${role}`).schema;
@@ -351,7 +351,7 @@ test('review guidance uses PR versions; standalone check retains cumulative proo
 test('single-source verifier report retains evidence and requires every structured disposition',async()=>{
   const prompt=await readFile(new URL('../src/prompts/final.md',import.meta.url),'utf8');
   assert.match(prompt,/trigger, scope, severity, evidence, counterevidence/);
-  assert.match(prompt,/exactly one structured\s+disposition per original ID/);
+  assert.match(prompt,/exactly one structured\s+decision per original ID/);
   assert.match(prompt,/runtime renders the validated snapshot, findings/);
   assert.match(prompt,/Explain material limits\s+and unexecuted tests even when no findings survive/);
   assert.match(prompt,/read the same PR metadata again/);
@@ -359,7 +359,7 @@ test('single-source verifier report retains evidence and requires every structur
 test('finding locations must be recounted from exact source without transport wrappers',async()=>{
   const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');
   const finalPrompt=await readFile(new URL('../src/prompts/final.md',import.meta.url),'utf8');
-  const location=stageFormat('azpr-review-verifier').schema.properties.dispositions.items.properties.verifiedFinding.properties.location;
+  const location=stageFormat('azpr-review-verifier').schema.properties.confirmed.items.properties.location;
   assert.match(location.description,/one-based/);
   assert.match(common,/blank lines.*comments/s);
   assert.match(common,/MCP.*wrapper/s);
@@ -394,7 +394,7 @@ test('every stage has an object schema and zero host-managed output retries', ()
     assert.equal(format.schema.additionalProperties, false);
   }
   assert.ok(stageFormat('azpr-review-functional').schema.properties.findings.items.properties.severity);
-  assert.ok(stageFormat('azpr-review-verifier').schema.properties.dispositions.items.properties.mergedInto);
+  assert.ok(stageFormat('azpr-review-verifier').schema.properties.merged.items.properties.mergedInto);
   assert.ok(stageFormat('azpr-review-check').schema.properties.status.enum.includes('NOT_READY'));
 });
 test('diagnostic projection excludes reasoning, tool payloads, headers, and unknown metadata', () => {

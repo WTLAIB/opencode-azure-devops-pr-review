@@ -181,7 +181,7 @@
       "minimum": 0,
       "maximum": 1,
       "default": 0,
-      "description": "Opt in to at most one status, absent final-location OR missing merge-disposition amendment per stage when every other contract passes. Initial location omissions go to the verifier without repair. Status uses a fresh session; final locations and missing merge rows retain the same stopped session. Merge rows may only target already confirmed originals; existing fields remain immutable. Same model, one request, no ordinary tools or original-value changes. A complete JSON text amendment may be accepted after the pinned missing-native error, with full validation and disclosure. Other errors, malformed JSON, missing evidence, coverage gaps, stale/unknown heads, cancellation and comments never qualify. The shared deadline still applies; extra usage may be billed."
+      "description": "Opt in to one shared status/location/merge amendment or complete final content resubmission per stage. Narrow amendments preserve existing fields; final resubmission may replace evidence and decisions only with a matching frozen snapshot and known unchanged current source/target versions. Same stopped verifier context, configured model, one request, no ordinary tools, unchanged deadline, full validation and retained original failures. Status-only initial responses cannot regenerate a review. Provider errors, invalid outer JSON, truncation, unknown/stale versions, cancellation, unconfirmed aborts and comments do not qualify. A scoped amendment may accept complete JSON text after the pinned missing-native error with disclosure. Extra model usage may be billed."
     },
     "debug": {
       "type": "object",

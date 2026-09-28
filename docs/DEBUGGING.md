@@ -272,6 +272,26 @@ disposal reason. INCOMPLETE identifies a workflow/output failure, including the
 submission limit. None of these statuses supplies an accepted final review.
 Abort acknowledgement warnings remain meaningful for every stopping cause.
 
+## Final submission recovery
+
+The verifier now submits required confirmed/merged/rejected/needsInfo/newFindings
+arrays. Confirmed rows contain all seven finding fields plus reason; the runtime
+converts explicit categories to its internal dispositions. Legacy dispositions
+alone remain compatible. Mixed formats or JSON-encoded arrays are invalid.
+
+With outputRetries=1, a parsed COMPLETE final output that fails validation may
+receive one complete same-session resubmission if no narrow amendment qualifies.
+Snapshot identity/file set and current source/target versions must already match
+and remain frozen. This does not recover missing source, unknown/stale versions,
+provider errors, invalid outer JSON or an entire missing initial review. All
+recovery kinds share one allowance; no ordinary tools, second request or deadline
+reset. Compare both response artifacts: evidence/decisions may change, never by
+local inference. Original failures remain FAILED. Diagnostics add bounded
+validationErrors paths/codes, retryKind=final and an accepted finalResubmission
+ledger. The receipt explicitly discloses content recovery, even if it fails.
+Shape validation still cannot establish source truth or exclude a well-shaped
+non-defect. Evaluate semantic quality separately from envelope completion.
+
 ## Enable local diagnostics
 
 Merge into installed `plugins/azpr/settings.json`, then restart:
@@ -405,8 +425,8 @@ For quality-contract failures, compare the saved response to its request schema:
 
 Both native and text output use these checks. Install matching runtime/prompts
 and restart after an update; old custom prompts must satisfy the new contract.
-Apart from the explicit final-location and missing-merge amendments above, no missing fields are
-supplied; initial omissions remain absent until verification. No fallback to the
+Only scoped model amendments or final content resubmission may supply missing final content;
+the runtime never invents it, and initial omissions remain absent until verification. No fallback to the
 original candidate is performed. Debug data
 lets you inspect coverage claims, counterevidence and corrected findings, not
 independently prove that source reads or reasoning were correct.

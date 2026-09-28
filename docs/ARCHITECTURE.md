@@ -39,7 +39,7 @@ Revisit them with an explicit decision and evidence, not as incidental cleanup.
 | Direct initial reviews with PR-reported versions | Removes preflight and ancestry investigation; discovery is duplicated and the target reference is not a proven merge base. | Live evaluation reveals unacceptable attribution gaps or instability. |
 | Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
 | Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
-| Strict evidence with audited format tolerance, deferred initial locations and one opt-in status, final-location OR missing-merge amendment | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
+| Strict evidence with audited format tolerance, deferred initial locations and one opt-in bounded amendment or final content resubmission | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
 | Explicit saved comment preview and one publication attempt | Keeps human inspection before account-owned comments and limits duplicate attempts; publication is still model-reported. | Verified provider evidence or resumability is explicitly requested and designed. |
 | Seven runtime modules, editable policies, source-only installation | Small auditable boundaries and manual-copy support; file catalogs need synchronized tests. | Measured complexity or distribution needs justify more structure. |
 | In-place settings migration, no retained install backup | Preserves preferences with missing-default merging; malformed settings require correction before install. | The owner explicitly changes the backup/retention requirement. |
@@ -163,7 +163,7 @@ are outside those character counts.
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot copies that union exactly. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot must contain the same unique file set; comparison ignores order and validated output uses sorted paths. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
@@ -175,6 +175,15 @@ the stage records a valid result. A malformed READY plan or DONE publication rep
 therefore appears as a failed stage with its original response/session preserved,
 not a successful stage followed by an unexplained workflow failure. A valid but
 incomplete publication report remains incomplete and model-reported.
+
+Verifiers submit required `confirmed`, `merged`, `rejected`, `needsInfo` and
+`newFindings` arrays. Confirmed rows directly contain all seven finding fields and
+reason; merge rows contain id/mergedInto/reason; rejected and needs-info rows
+contain id/reason. Empty categories are arrays, never JSON-encoded strings.
+A deterministic adapter maps these explicit categories to the existing internal
+dispositions and corrected verifiedFinding contract before normalization/validation.
+Legacy dispositions alone remain compatible; mixed formats and unexpected decision
+fields fail. No verdict, merge or evidence is inferred by this conversion.
 
 Initial finding IDs use `F-` and `R-` prefixes in both modes. Every original ID must have exactly one final disposition: `CONFIRMED`, `NEEDS_INFO`, `REJECTED`, or `MERGED`. Only merged items may name a merge target, which must be another original ID. Chains must terminate at a non-merged disposition; cycles are rejected rather than hiding every finding as a duplicate. Confirmed final-verifier discoveries use `V-` IDs in both the report and the structured `newFindings` array. Without that structured entry they cannot be automatically published.
 
@@ -277,12 +286,12 @@ keys; normalization is not an alternative output format for reviewers.
 
 ### Bounded output amendments
 
-`outputRetries` accepts only `0` (default) or `1`. The three cases below share one
+`outputRetries` accepts only `0` (default) or `1`. All cases below share one
 allowance per stage; a failed amendment cannot start another kind of repair.
 Native capture is not submission-time validation: the host can return parsed
 objects missing schema-required fields. AZPR validates after prompt completion
 and before accepting a result, then optionally gives bounded feedback. It does
-not patch the host, intercept its native tool or regenerate full envelopes.
+not patch the host or intercept its native tool. Only the scoped final recovery below may replace complete final content.
 
 #### Status
 
@@ -341,6 +350,34 @@ The original error, `missingDispositionIds`, `retryKind: disposition` and accept
 `amendedDispositions` remain auditable. This is model-authored bookkeeping, not
 independent source verification, and consumes the same single amendment allowance.
 
+#### Complete final content resubmission
+
+If no narrow amendment qualifies, a parsed COMPLETE verifier submission with
+output defects may receive one complete replacement from that same stopped
+verifier. The snapshot identity and unique file set must already match the expected
+PR, and currentHead/currentBase must both be known and unchanged. These values
+are frozen in the request and checked again before accepting replacement content.
+The initial source/coverage gates remain prerequisites to invoking this verifier.
+
+The isolated prompt supplies the failed object, expected IDs, configured language,
+frozen versions and bounded value-free validation paths. It permits corrected
+findings and decisions from retained source context, never runtime-filled evidence
+or a fallback to initial claims. A completed tool count establishes lifecycle
+eligibility, not sufficient source context. Unavailable evidence must remain
+unresolved; a well-shaped claim is still not independent proof.
+
+One additional model request, no ordinary tools, confirmed abort and the original
+whole-run deadline apply. A forbidden tool or extra model attempt prevents
+acceptance even if a response follows. Initial whole-review regeneration, invalid
+outer JSON, host/provider errors, truncation, incomplete/stale/unknown versions,
+comments and uncertain aborts cannot enter this recovery. The replacement passes
+the full contract; no further amendment is possible. The original FAILED record
+and response remain, with `validationErrors`, `retryKind: final`, a
+`finalResubmission` ledger on acceptance, both response artifacts, and a receipt
+notice explaining that evidence/decisions may change. The notice applies even
+when the replacement fails. This is model-authored recovery with extra usage,
+not local formatting. Normal/deep profiles share the same boundaries.
+
 #### Shared limits and isolation
 
 Normal agent definitions contain no amendment instructions, even when
@@ -363,15 +400,15 @@ hooks; it remains available solely for the scoped amendment. The message hook
 also checks the exact plugin-generated amendment text. The existing
 run deadline, cancellation, configuration/model checks and cleanup still apply.
 No recursive retry, provider/model switch or general reviewer resumption is
-allowed. Only an explicit location or disposition grant can reuse its stopped original session.
+allowed. Only an explicit location, disposition or final-content grant can reuse its stopped original session.
 Host/provider-internal retries and auxiliary requests are outside this bound.
 
-Malformed/missing output, general provider/SDK errors, incomplete evidence, changed heads,
+Invalid outer JSON, general provider/SDK errors, changed or unknown versions,
 unconfirmed aborts and cancellations do not qualify. Comment preview/publication
 never qualify. A second format failure ends the stage. Each attempt has its own
 diagnostic files; the amendment records `attempt: 2`, `retryOf` and `retryKind`.
-Status repairs use a new session ID; location/disposition repairs retain the original ID.
-Location/disposition receipt notices distinguish model amendments from local formatting.
+Status repairs use a new session ID; location/disposition/final-content repairs retain the original ID.
+Receipt notices distinguish narrow model amendments and content resubmission from local formatting.
 Stage diagnostics include modelRequests, durationMs, parsed outputCharacters and
 firstToolAt/lastToolAt when observed. These measure host-hook activity, not provider
 internal retries, total token usage, tool error categories or source authenticity.

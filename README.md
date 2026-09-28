@@ -150,7 +150,7 @@ To reduce avoidable lookup errors, reviewers receive URL identity hints and
 request the PR change list explicitly. They read changed files at exact commits,
 avoid directory/history probes used only to prove readiness, reuse source within
 their own session, and do not repeat deterministic parameter errors. No official
-MCP patch, wrapper, argument adapter, automatic stage retry or allowlist is added.
+MCP patch, wrapper, argument adapter, automatic source-workflow restart or allowlist is added.
 Actual error reduction needs live verification; see
 [source-access discipline](docs/AZURE_MCP.md#avoiding-repeated-lookup-failures).
 
@@ -176,9 +176,13 @@ Each finding includes source evidence, checks for counterevidence/safeguards,
 impact severity, and a correction/verification suggestion. Relevant repository
 rules must be scoped and cited; they cannot override the review's instructions.
 
-The verifier returns a corrected `verifiedFinding` for every confirmed original
-ID. Comment planning uses that version, not the initial claim, and cannot change
-its severity or promote low-severity findings. The runtime validates the ledger
+The verifier submits fixed `confirmed`, `merged`, `rejected`, `needsInfo` and
+`newFindings` arrays. Each confirmed row contains all seven corrected finding
+fields plus a reason. The runtime converts these explicit decisions to its
+internal dispositions and `verifiedFinding` contract; it never supplies missing
+evidence. Legacy dispositions are accepted alone for compatibility, not mixed
+with categories. Comment planning uses the corrected version, not the initial
+claim, and cannot change its severity or promote low-severity findings. The runtime validates the ledger
 and evidence fields in both output transports; it cannot prove that a model
 actually read the files or that its conclusions are true. See the
 [evidence contract](docs/ARCHITECTURE.md#evidence-contract).
@@ -284,12 +288,24 @@ Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
   unproven or needs changes to an existing finding, the amendment must decline.
   No merge is inferred from prose or supplied by the runtime.
 
-The three cases share one allowance, not one each. Default `0` disables all.
-Every other contract must pass before a request is allowed, and the original
+- Other output-validation failures in a parsed COMPLETE verifier submission:
+  one complete final content resubmission in the same stopped session. Snapshot
+  identity/file set and the already observed current source/target versions must
+  match the expected PR and remain frozen. The verifier may correct missing
+  evidence or decisions using retained source context. No initial finding is
+  copied as a fallback, and the complete replacement must pass validation.
+
+All cases share one allowance, not one each. Default `0` disables all.
+The first three narrow amendments require every other contract to pass; final
+content resubmission requires the known, unchanged version frame. The original
 session must have a completed tool call and a confirmed abort. Repair grants
 deny ordinary tools and a second model request. The complete amended envelope
 is validated again. Original failures, `retry-kind`, attempt/session IDs and
-location/disposition-amendment notices remain visible in receipts and diagnostics. The plugin
+amendment/resubmission notices remain visible in receipts and diagnostics. Final
+resubmission is model-authored content recovery, with extra usage, not local
+formatting or proof of source truth. Provider errors, invalid outer JSON, truncation,
+unknown/stale versions, cancellation and unconfirmed aborts do not qualify.
+A status-only initial response still cannot regenerate a review. The plugin
 never extracts guessed locations from report text; amended locations are model
 claims, not independently verified source facts.
 
@@ -308,12 +324,14 @@ session; enabling retries does not expose an alternative output format to normal
 reviews. If the host cannot apply that isolated prompt, repair stops before a
 model request. Provider/host system context and ordinary agents are preserved.
 
-This does not retry malformed/missing JSON, general host/provider errors, incomplete
-evidence/coverage, empty existing locations, changed PR versions, cancellations, or
-comment preview/publication. A
+This does not retry malformed/missing outer JSON, general host/provider errors,
+initial evidence/coverage gaps, changed or unknown PR versions, cancellations, or
+comment preview/publication. Missing final content can qualify only for the
+explicit content resubmission described above. A
 second failure ends that stage. The existing run timeout is not reset. A full
 review has three stages, so enabling this setting permits at most three extra
-formatting requests (one for standalone `/pr-check`); it is not a spending cap or proof of review quality.
+amendment requests (one for standalone `/pr-check`); final content recovery can
+replace evidence and decisions. This is not a spending cap or proof of review quality.
 Restart OpenCode after changing the setting. See [bounded output amendments](docs/DEBUGGING.md#bounded-output-amendments).
 
 Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):

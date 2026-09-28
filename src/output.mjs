@@ -39,11 +39,12 @@ export function stageFormat(role, statusOnly = false) {
     // Empty does not establish a verified head; finalEnvelope keeps that gate.
     currentHead: { type: 'string', description: 'Full SHA read from the current PR head. The string value contains only the SHA, with no extra quotation marks. Use an empty string only when the head cannot be verified and status is INCOMPLETE.' },
     currentBase: { ...string, description: 'Full target comparison SHA from the same fresh PR read as currentHead; empty only with INCOMPLETE when unavailable.' },
-    dispositions: array(object({ id: { ...string, description: 'One unique original ID from expectedFindingIds, including merged and rejected candidates.' }, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
-      verifiedFinding: { ...finding, description: 'Required for CONFIRMED: the complete corrected finding under this same ID. Omit for every other disposition.' },
-    }, ['id', 'status', 'reason'])),
+    confirmed: { ...array(object({ ...finding.properties, reason: string })), description: 'Corrected original findings, with all seven finding fields and a concise confirmation reason. Every field is required.' },
+    merged: array(object({ id: string, mergedInto: string, reason: string })),
+    rejected: array(object({ id: string, reason: string })),
+    needsInfo: array(object({ id: string, reason: string })),
     newFindings: array(finding), report: { ...string, description: 'Brief independent checks, important exclusions, open questions and testing/scope limitations in outputLanguage. Do not repeat findings or disposition reasons: the runtime renders those structured fields.' },
-  }, ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
+  });
   else if (kind === 'comment-plan') schema = object({
     status: status('READY', 'INCOMPLETE'),
     comments: array(object({ findingId: string, severity: status('high', 'medium'), path: string, startLine: { type: 'integer' }, endLine: { type: 'integer' }, anchor: string, body: string })),
@@ -64,7 +65,7 @@ export function stageFormat(role, statusOnly = false) {
   else if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
     location: { ...string, description: 'Exact base:/path:line or head:/path:start-end from source already read in this session. No guesses or new source reads.' },
   })) });
-  else if (statusOnly) schema = object({ status: schema.properties.status });
+  else if (statusOnly && statusOnly !== 'final') schema = object({ status: schema.properties.status });
   return { type: 'json_schema', schema, retryCount: 0 };
 }
 
@@ -73,6 +74,87 @@ export function visibleText(response) {
 }
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const findingKey = key => key.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+const finalCategories = ['confirmed', 'merged', 'rejected', 'needsInfo'];
+
+/** Convert explicit categories, never infer a verdict or copy initial evidence.
+ * Legacy dispositions remain accepted alone for transport compatibility. */
+export function finalSubmission(result) {
+  if (!isObject(result)) return result;
+  const categories = finalCategories.some(key => Object.hasOwn(result, key));
+  if (Object.hasOwn(result, 'dispositions')) {
+    if (categories) throw new Error('Final submission mixes categories and legacy dispositions.');
+    return result;
+  }
+  const allowed = stageFormat('azpr-review-verifier').schema.properties;
+  if (Object.keys(result).some(key => !Object.hasOwn(allowed, key))) throw new Error('Final submission contains unexpected top-level fields; names and values omitted.');
+  for (const key of [...finalCategories, 'newFindings']) {
+    if (!Array.isArray(result[key])) throw new Error(`Invalid final submission: ${key} must be an array.`);
+  }
+  const dispositions = [];
+  for (const key of finalCategories) for (const [i, item] of result[key].entries()) {
+    if (!isObject(item)) throw new Error(`Invalid final submission: ${key}[${i}] must be an object.`);
+    if (key === 'confirmed') {
+      // Retain all finding fields for strict validation and audited normalization.
+      const { reason, ...verifiedFinding } = item;
+      dispositions.push({ id: item.id, status: 'CONFIRMED', reason, verifiedFinding });
+    } else {
+      const keys = key === 'merged' ? ['id', 'mergedInto', 'reason'] : ['id', 'reason'];
+      if (Object.keys(item).some(field => !keys.includes(field))) throw new Error(`Invalid final submission: ${key}[${i}] contains unexpected fields; names and values omitted.`);
+      dispositions.push({ ...item, status: { merged: 'MERGED', rejected: 'REJECTED', needsInfo: 'NEEDS_INFO' }[key] });
+    }
+  }
+  const { confirmed, merged, rejected, needsInfo, ...rest } = result;
+  return { ...rest, dispositions };
+}
+
+/** Bounded, value-free diagnostics; never an evidence validator or repair. */
+export function finalSubmissionIssues(result) {
+  const issues = [];
+  const add = (path, code) => { if (issues.length < 32) issues.push({ path, code }); };
+  const scan = (value, schema, path) => {
+    if (issues.length >= 32) return;
+    const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    if (schema.type === 'integer' ? !Number.isInteger(value) : schema.type !== actual) { add(path, `expected-${schema.type}`); return; }
+    if (schema.enum && !schema.enum.includes(value)) add(path, 'invalid-enum');
+    if (schema.const !== undefined && value !== schema.const) add(path, 'invalid-constant');
+    if (actual === 'string' && !text(value)) add(path, 'empty-text');
+    if (actual === 'array') value.forEach((item, i) => scan(item, schema.items, `${path}[${i}]`));
+    if (actual === 'object') {
+      for (const key of schema.required ?? []) if (!Object.hasOwn(value, key)) add(path ? `${path}.${key}` : key, 'missing-field');
+      for (const [key, child] of Object.entries(schema.properties ?? {})) if (Object.hasOwn(value, key)) scan(value[key], child, path ? `${path}.${key}` : key);
+      if (schema.additionalProperties === false && Object.keys(value).some(key => !Object.hasOwn(schema.properties, key))) add(path || '$', 'unexpected-fields');
+    }
+  };
+  let schema = stageFormat('azpr-review-verifier').schema;
+  if (isObject(result) && Object.hasOwn(result, 'dispositions')) {
+    const { confirmed, merged, rejected, needsInfo, ...properties } = schema.properties;
+    schema = object({ ...properties, dispositions: array(object({ id: string, status: status('CONFIRMED', 'MERGED', 'REJECTED', 'NEEDS_INFO'), reason: string, mergedInto: string, verifiedFinding: finding }, ['id', 'status', 'reason'])) }, ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
+    if (Array.isArray(result.dispositions)) result.dispositions.forEach((item, i) => {
+      if (item?.status === 'CONFIRMED' && !isObject(item.verifiedFinding)) add(`dispositions[${i}].verifiedFinding`, 'missing-corrected-finding');
+    });
+  }
+  scan(result, schema, '');
+  return issues;
+}
+
+/** Output defects may be resubmitted only with an already known, fresh frame.
+ * This establishes eligibility, not truth or sufficiency of source evidence. */
+export function finalResubmissionPlan(original, expected) {
+  try {
+    if (!isObject(original) || original.status !== 'COMPLETE' || expected.scope !== 'pr' ||
+        snapshotKey(original.snapshot) !== snapshotKey(expected) || !sha(original.currentHead) || !sha(original.currentBase) ||
+        original.currentHead.toLowerCase() !== expected.head.toLowerCase() || original.currentBase.toLowerCase() !== expected.base.toLowerCase()) return;
+    return { snapshot: validateSnapshot(expected), currentHead: original.currentHead, currentBase: original.currentBase };
+  } catch { return; }
+}
+
+/** Preserve observations that cannot be refreshed in a tool-free resubmission. */
+export function checkFinalResubmission(result, plan) {
+  if (!isObject(result) || snapshotKey(result.snapshot) !== snapshotKey(plan.snapshot) ||
+      !sha(result.currentHead) || !sha(result.currentBase) || result.currentHead.toLowerCase() !== plan.currentHead.toLowerCase() ||
+      result.currentBase.toLowerCase() !== plan.currentBase.toLowerCase()) throw new Error('Final resubmission changed or omitted the frozen snapshot/current versions.');
+  return result;
+}
 
 /** Narrow, auditable formatting only. The caller must validate the entire result
  * before accepting these changes. Never mutate the raw response or add evidence. */
@@ -81,6 +163,8 @@ export function normalizeFindingFormat(result, role) {
   const kind = ROLES[role]?.format;
   if (!['initial', 'final'].includes(kind) || !isObject(result) ||
       !stageFormat(role).schema.properties.status.enum.includes(result.status)) return { envelope: result, corrections };
+  const categoryInput = kind === 'final' && !Object.hasOwn(result, 'dispositions');
+  if (kind === 'final') result = finalSubmission(result);
   function normalize(value, path) {
     if (!isObject(value)) return value;
     const entries = [], seen = new Set();
@@ -103,9 +187,11 @@ export function normalizeFindingFormat(result, role) {
   const envelope = { ...result };
   if (kind === 'initial' && Array.isArray(result.findings)) envelope.findings = result.findings.map((value, i) => normalize(value, `findings[${i}]`));
   if (kind === 'final') {
-    if (Array.isArray(result.dispositions)) envelope.dispositions = result.dispositions.map((value, i) =>
-      isObject(value) && value.status === 'CONFIRMED'
-        ? { ...value, verifiedFinding: normalize(value.verifiedFinding, `dispositions[${i}].verifiedFinding`) } : value);
+    if (Array.isArray(result.dispositions)) envelope.dispositions = result.dispositions.map((value, i) => {
+      if (!isObject(value) || value.status !== 'CONFIRMED') return value;
+      const verifiedFinding = normalize(value.verifiedFinding, `dispositions[${i}].verifiedFinding`);
+      return { ...value, ...(categoryInput ? { id: verifiedFinding?.id } : {}), verifiedFinding };
+    });
     if (Array.isArray(result.newFindings)) envelope.newFindings = result.newFindings.map((value, i) => normalize(value, `newFindings[${i}]`));
     if (Array.isArray(envelope.dispositions) && Array.isArray(envelope.newFindings)) {
       const completeFinding = value => isObject(value) && Object.keys(value).length === finding.required.length &&
@@ -333,7 +419,7 @@ export function validateSnapshot(s) {
   }
   return { repository: s.repository, prId: s.prId, base: s.base.toLowerCase(), head: s.head.toLowerCase(), scope: s.scope, files: [...s.files] };
 }
-function snapshotKey(s) { return JSON.stringify(validateSnapshot(s)); }
+function snapshotKey(s) { const value = validateSnapshot(s); value.files.sort(); return JSON.stringify(value); }
 export function checkEnvelope(result, prUrl) {
   if (!isObject(result) || !text(result.report)) throw new Error('Invalid source-check envelope: a status and report are required.');
   requireStatus(result, ['READY', 'NOT_READY'], 'source-check');
@@ -412,9 +498,12 @@ export function mergeInitialSnapshots(reviews) {
   return { ...first, files: [...new Set(snapshots.flatMap(s => s.files))].sort() };
 }
 export function finalEnvelope(result, expected, originals) {
+  result = finalSubmission(result);
   if (!isObject(result) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
   requireStatus(result, ['COMPLETE', 'INCOMPLETE', 'STALE'], 'final-review');
   if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Final reviewer used a different snapshot.');
+  result = { ...result, snapshot: validateSnapshot(result.snapshot) };
+  result.snapshot.files.sort(); // Stable rendering; the unmodified raw response remains diagnostic data.
   const ids = new Set(originals.map(f => f.id));
   const accounted = new Set();
   for (const [i, item] of result.dispositions.entries()) {

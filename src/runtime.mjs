@@ -10,11 +10,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
-import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, validateSettings } from './config.mjs';
-import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
+import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, finalResubmissionPrompt, validateSettings } from './config.mjs';
+import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, finalSubmissionIssues, finalResubmissionPlan, checkFinalResubmission, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse, createStageTiming } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution, renderFinalReport, renderIncompleteDraft } from './attribution.mjs';
-const REPAIR_PROMPTS = { status: statusRepairPrompt, location: locationRepairPrompt, disposition: dispositionRepairPrompt };
+const REPAIR_PROMPTS = { status: statusRepairPrompt, location: locationRepairPrompt, disposition: dispositionRepairPrompt, final: finalResubmissionPrompt };
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
 const OWN = 'azpr-optin';
 // 1.18.31 expands native command arguments before our hook. An unreachable
@@ -107,34 +107,54 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
           run.controller.signal.aborted || run.abortUnconfirmed) throw error;
       if (error instanceof OutputDispositionError && spec.format === 'final') {
         const original = clone(failed.envelope), plan = dispositionRepairPlan(original, error.missingIds, validate);
-        if (!plan) throw error;
-        await current();
-        if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
-        const repair = { operation: 'output-disposition-repair', originalEnvelope: original, ...plan,
-          outputLanguage: state.settings.outputLanguage, error: error.message };
-        toast(`${role}: missing merge dispositions amendment 1/1 in session=${failed.sessionID}. Existing source context only.`);
-        return stageAttempt(run, role, repair, (amendment, record) => {
-          const result = validate(applyDispositionAmendment(original, plan, amendment));
-          if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
-          record.amendedDispositions = plan.missingDispositionIds;
-          return result;
-        }, failed.sessionID, 'disposition');
+        if (plan) {
+          await current();
+          if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
+          const repair = { operation: 'output-disposition-repair', originalEnvelope: original, ...plan,
+            outputLanguage: state.settings.outputLanguage, error: error.message };
+          toast(`${role}: missing merge dispositions amendment 1/1 in session=${failed.sessionID}. Existing source context only.`);
+          return stageAttempt(run, role, repair, (amendment, record) => {
+            const result = validate(applyDispositionAmendment(original, plan, amendment));
+            if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
+            record.amendedDispositions = plan.missingDispositionIds;
+            return result;
+          }, failed.sessionID, 'disposition');
+        }
       }
       if (error instanceof OutputLocationError) {
         const original = clone(failed.envelope), missingLocations = locationRepairPlan(original, role, validate);
-        if (!missingLocations) throw error;
-        await current();
-        if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
-        const repair = { operation: 'output-location-repair', originalEnvelope: original, missingLocations, error: error.message };
-        toast(`${role}: location amendment 1/1 in session=${failed.sessionID}. Existing source context only; no new tools.`);
-        // A scoped regrant retains this reviewer's own source context. Status and
-        // location recovery share one budget: neither calls stage() recursively.
-        return stageAttempt(run, role, repair, (amendment, record) => {
-          const result = validate(applyLocationAmendment(original, role, missingLocations, amendment));
-          if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
-          record.amendedLocations = missingLocations;
-          return result;
-        }, failed.sessionID, 'location');
+        if (missingLocations) {
+          await current();
+          if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
+          const repair = { operation: 'output-location-repair', originalEnvelope: original, missingLocations, error: error.message };
+          toast(`${role}: location amendment 1/1 in session=${failed.sessionID}. Existing source context only; no new tools.`);
+          // A scoped regrant retains this reviewer's own source context. Status and
+          // location recovery share one budget: neither calls stage() recursively.
+          return stageAttempt(run, role, repair, (amendment, record) => {
+            const result = validate(applyLocationAmendment(original, role, missingLocations, amendment));
+            if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
+            record.amendedLocations = missingLocations;
+            return result;
+          }, failed.sessionID, 'location');
+        }
+      }
+      if (spec.format === 'final' && failed.finalResubmission) {
+        const plan = finalResubmissionPlan(failed.rawEnvelope, payload.snapshot);
+        if (plan) {
+          await current();
+          if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw error;
+          const repair = { operation: 'output-final-resubmission', originalEnvelope: failed.rawEnvelope,
+            frozen: plan, expectedFindingIds: payload.expectedFindingIds, validationErrors: failed.validationErrors,
+            outputLanguage: state.settings.outputLanguage };
+          toast(`${role}: final content resubmission 1/1 in session=${failed.sessionID}. Existing source context only.`);
+          // This replaces model-authored content, not missing values inferred by
+          // the runtime. All amendment kinds share this single stage allowance.
+          return stageAttempt(run, role, repair, (replacement, record) => {
+            const result = validate(checkFinalResubmission(replacement, plan));
+            record.finalResubmission = { scope: 'complete-final-content', originalSessionID: failed.sessionID };
+            return result;
+          }, failed.sessionID, 'final');
+        }
       }
       if (!(error instanceof OutputStatusError) || typeof failed.envelope.status !== 'string' || !/^[A-Z_]{1,24}$/.test(failed.envelope.status)) throw error;
       const original = clone(failed.envelope), completeStatus = spec.format === 'check' ? 'READY' : 'COMPLETE';
@@ -169,7 +189,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     const idModel = state.settings.models[spec.mode][spec.slot];
     if (!idModel) throw new Error('Required model is not configured.');
     const title = `[AZPR ${run.id}] ${spec.label}${retryOf ? ' (output retry 1/1)' : ''}`;
-    const reuseContext = Boolean(retryOf && ['location', 'disposition'].includes(retryKind));
+    const reuseContext = Boolean(retryOf && ['location', 'disposition', 'final'].includes(retryKind));
     const made = reuseContext ? { id: retryOf } : data(await bounded(() => context.client.session.create({ body: { parentID: run.origin, title }, signal: run.controller.signal }), run.controller.signal), 'session.create');
     if (!text(made.id) || made.id === run.origin || (!reuseContext && seenSessions.has(made.id))) throw new Error('SDK did not return a new independent session.');
     if (reuseContext && (!seenSessions.has(made.id) || grants.has(made.id) || !run.stages.some(s => s.sessionID === made.id && s.role === role && s.model === idModel && s.attempt === 1 && s.status === 'FAILED'))) throw new Error('Context amendment requires this stage\'s stopped original session.');
@@ -188,7 +208,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     Object.assign(record, { inputCharacters: input.length, instructionCharacters: instructions.length,
       remainingRunMsAtStart: Math.max(0, run.deadlineAt - Date.now()) });
     let receivedAnswer = false;
-    let envelope, prepared;
+    let envelope, prepared, validatingOutput = false, finalResubmission = false;
     try {
       await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions });
       if (!run.active) throw new Error('Review stopped before model invocation.');
@@ -225,6 +245,10 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         usedTextAmendment = true;
       }
       record.outputCharacters = JSON.stringify(envelope).length;
+      if (retryKind === 'final' && retryOf && (g.repairToolAttempts || g.repairRequestRejected)) throw new Error('Final resubmission attempted forbidden tools or an additional model request.');
+      validatingOutput = true;
+      finalResubmission = answer.info?.role === 'assistant' && answer.info?.sessionID === made.id &&
+        !['length', 'content-filter', 'error', 'cancelled'].includes(answer.info?.finish) && !g.invalidStructuredCalls.size;
       prepared = retryOf ? { envelope, corrections: [] } : normalizeFindingFormat(envelope, role);
       const result = validate(prepared.envelope, record);
       if (prepared.corrections.length) record.outputFormatCorrections = prepared.corrections;
@@ -239,8 +263,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     } catch (error) {
       if (run.controller.signal.aborted) error = abortError(run.controller.signal);
       record.status = 'FAILED'; record.error = errorText(error);
-      if (!retryOf && (error instanceof OutputStatusError || error instanceof OutputLocationError || error instanceof OutputDispositionError)) error.submission = {
+      if (spec.format === 'final' && validatingOutput) {
+        record.validationErrors = finalSubmissionIssues(envelope);
+        if (!record.validationErrors.length) record.validationErrors = [{ path: '$', code: 'contract', message: errorText(error) }];
+      }
+      if (!retryOf && (error instanceof OutputStatusError || error instanceof OutputLocationError || error instanceof OutputDispositionError ||
+          (spec.format === 'final' && validatingOutput && finalResubmission))) error.submission = {
         envelope: prepared?.envelope ?? envelope, corrections: prepared?.corrections, sessionID: made.id, completedTools: g.completedTools.size,
+        rawEnvelope: envelope, finalResubmission, validationErrors: record.validationErrors,
       };
       if (error instanceof OutputDispositionError) record.missingDispositionIds = error.missingIds;
       grants.delete(made.id); // Revoke even if a failed HTTP request left work on the server.
@@ -296,6 +326,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (run.stages.some(s => s.outputTransportFallback)) body += '\nAmendment transport notice: a complete JSON text amendment was accepted after the host reported no native StructuredOutput submission. The scoped amendment and full original envelope both passed validation; no additional model request or JSON repair occurred. The original host error remains in the session and any response diagnostics; stage results record outputTransportFallback. Present this notice with the result.\n';
     if (run.stages.some(s => s.retryKind === 'location')) body += '\nLocation amendment notice: a bounded amendment asked the same reviewer to supply only missing locations from its existing source context, with ordinary tools denied. Original fields stay immutable; acceptance requires full envelope validation. This is a model-authored amendment, not independent proof of source locations. Inspect both attempt statuses: original failures and available raw submissions remain in the session and any saved diagnostics. Present this notice with the result.\n';
     if (run.stages.some(s => s.retryKind === 'disposition')) body += '\nDisposition amendment notice: the same verifier was asked only for missing MERGED rows pointing to existing confirmed findings, with ordinary tools denied. One shared output-amendment budget, immutable existing fields and full revalidation apply. Original failures remain in diagnostics; this is model-authored bookkeeping, not independent source proof.\n';
+    if (run.stages.some(s => s.retryKind === 'final')) body += '\nFinal resubmission notice: the same verifier received at most one additional model request to replace invalid final content using its retained source context, with ordinary tools denied and the original deadline unchanged. Evidence and decisions may change; the snapshot and previously observed current versions are frozen. Full validation is required. Inspect both submissions in their session or saved diagnostics; the original failure remains recorded. This is model-authored content recovery, not local formatting or independent source proof. Present this notice with the result.\n';
     if (run.draft) body += '\nIncomplete draft notice: saved initial observations are unconfirmed and have not passed final adjudication. The draft is not a completed review or input for PR comments. Raw failed final submissions remain only in diagnostic/session data.\n';
     body += diagnosticLocation(run);
     body += run.mode === 'check'

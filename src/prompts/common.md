@@ -151,7 +151,7 @@ location cannot be established, state what is missing instead of guessing.
 An initial candidate may omit only the separate location field while retaining
 its source/call-path evidence and complete coverage. The verifier must establish
 the location independently before confirming it. Missing source or evidence is
-not a location-format exception. Final verifiedFinding and newFindings always
+not a location-format exception. Final confirmed findings and newFindings always
 require location; unresolved candidates belong in NEEDS_INFO.
 
 Separate observations from inferences: zero search results do not prove an index
@@ -177,7 +177,7 @@ Produce the complete envelope described by your role, using the configured Outpu
 
 Before submitting, check every finding object uses only these seven keys:
 id, summary, evidence, counterevidence, location, severity, suggestion. All are
-required for verifiedFinding and newFindings; only initial candidates may omit
+required for final confirmed findings and newFindings; only initial candidates may omit
 location as described above. Copy keys literally, without leading/trailing
 spaces or extra fields. Put source notes inside evidence and limitations inside
 the appropriate existing field; do not add evidence_note or placeholder fields.

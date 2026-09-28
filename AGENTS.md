@@ -45,6 +45,11 @@ It describes the development process, not instructions for agents reviewing a PR
 - Keep PR-version snapshots, coverage ledgers, counterevidence, final dispositions,
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
+  Verifiers submit required confirmed/merged/rejected/needsInfo/newFindings arrays;
+  confirmed rows contain the seven finding fields plus reason. Convert explicit
+  categories to the existing disposition contract without inferring content. Accept
+  legacy dispositions only alone, never mixed with category fields. Snapshot file
+  identity is a unique path set, not array order; reject duplicates/missing paths.
   Local finding-format normalization may trim ASCII JSON whitespace from known
   field names and remove exactly empty-string or null unknown fields. A redundant
   CONFIRMED V disposition may be removed only when its complete finding exactly
@@ -62,18 +67,27 @@ It describes the development process, not instructions for agents reviewing a PR
   must be NEEDS_INFO and excluded from comments. Missing evidence/coverage is
   never a location exception.
   Model-based recovery requires explicitly enabled `outputRetries: 1`: at most
-  one status-only, absent final-location OR missing merge-disposition amendment
-  per stage, never more than one kind.
-  All other contracts must pass an eligibility probe that is never accepted as
+  one status-only, absent final-location, missing merge-disposition amendment OR
+  complete final content resubmission per stage, never more than one kind.
+  Narrow amendments require all other contracts to pass an eligibility probe, never accepted as
   evidence. Status repair uses a fresh session; location repair narrowly regrants
   the same stopped session to retain that reviewer's source context. Missing-merge
   amendments use that same context and may only append requested original IDs as
   MERGED into already confirmed originals; never infer a merge from prose, add
   new evidence, change existing fields or fill gaps with arbitrary decisions. No ordinary
   tools, no existing field changes, one model request, full revalidation, raw
-  failure retention and explicit notices. Missing/empty evidence, empty existing
-  locations, incomplete coverage, changed PR versions, comments and uncertain aborts
-  never qualify. No generic envelope regeneration or inferred source locations.
+  failure retention and explicit notices apply to these narrow amendments.
+  A parsed COMPLETE final output that fails validation may instead receive one
+  same-session content resubmission when its snapshot and observed current source/
+  target versions already match the expected PR. Prefer an eligible narrow amendment;
+  never chain into another recovery. Freeze identity, file set and current versions.
+  The verifier may correct missing evidence/decisions from retained source context;
+  the runtime never copies initials or supplies missing findings. Collect bounded
+  value-free error paths, retain both submissions and disclose content replacement.
+  No initial whole-review regeneration, ordinary tools, second request, deadline
+  reset, incomplete/stale/unknown versions, provider errors, truncation, comments,
+  cancellation or unconfirmed abort. Full revalidation is mandatory; field presence
+  is not proof of source truth or quality. Initial coverage requirements remain strict.
   Keep amendment instructions out of normal reviewer prompts. Only an explicit
   repair grant may replace the reviewer system prompt; verify that replacement
   before allowing the repair model request and preserve unrelated host context.

@@ -89,7 +89,9 @@ field in native/text output for both profiles. They verify unchanged evidence,
 raw-response retention, an explicit receipt/diagnostic audit and exactly three
 ordinary review requests. Conflicting aliases, content-bearing extras,
 misspellings, missing evidence, bad severity, duplicate IDs and snapshot/coverage
-failures cannot pass or start a retry. Verifier paths and stale/unknown-head gates
+failures cannot pass through local normalization. A verifier with a known unchanged
+version frame may qualify for the separately tested final content resubmission;
+initial evidence/coverage gaps remain terminal. Verifier paths and stale/unknown-head gates
 remain covered. Exact duplicate V-disposition tests retain raw reasons and reject
 conflicting values, missing original IDs, duplicate discoveries and extra rows.
 These are sanitized fixtures, not uploaded session exports.
@@ -103,6 +105,19 @@ bookkeeping, cancellation and unconfirmed aborts remain terminal. Comment
 preview/publication never retry. Installer checks retain explicit opt-in while
 adding missing `outputRetries` as zero. These tests use synthetic fixtures,
 not private session exports, and do not establish improved live success rates.
+
+Final submission regressions cover required category arrays, unchanged conversion
+to complete corrected findings/dispositions, legacy-only compatibility and mixed-
+format rejection. Snapshot file permutations pass while duplicate/missing paths
+and changed identity do not. Bounded final resubmission tests cover malformed
+array containers and missing corrected findings, same session/model/context,
+frozen source/target versions, one request, no ordinary tools, complete validation,
+retained failures, safe diagnostics, cancellation, unchanged deadlines and no
+second repair. Both transports/profiles and corrected comment-preview inputs are
+covered. A well-shaped false positive still requires semantic evaluation: repeat
+seeded-defect and clean-control live cases with separate first-pass/recovered
+completion, false positives, location/test accuracy, latency and request counts.
+Passing fixtures does not certify improved real-model reliability.
 
 Initial-location regressions pass unchanged candidates to the verifier in both
 profiles/transports with explicit pendingLocations and no extra request. Missing
