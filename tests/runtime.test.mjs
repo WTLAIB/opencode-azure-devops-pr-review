@@ -935,16 +935,46 @@ test('deep runs two independent initial sessions and its configured verifier',as
   assert.deepEqual(f.prompts().map(p=>[ROLES[p.body.agent].stage,p.body.model.modelID]).sort(),[['functional','deep-functional'],['risk','deep-risk'],['verifier','deep-verifier']]);
   const initial=f.prompts().slice(0,-1);assert.equal(initial.length,2);assert.equal(new Set(initial.map(p=>p.path.id)).size,2);assert.equal(new Set(initial.map(p=>p.body.parts[0].text)).size,1);assert.ok(initial.every(p=>!p.body.parts[0].text.includes('PRIVATE_INITIAL_REPORT')));
 });
-test('both initial sessions start before either completes and carry separate coverage to verification',{timeout:3000},async t=>{
-  let started=0,release;const gate=new Promise(resolve=>release=resolve);
-  t.after(()=>release());
-  const f=await fixture(t,{beforePrompt:async({role})=>{
-    if(ROLES[role].format!=='initial') return;
-    if(++started===2) release();
-    await gate;
+for(const mode of ['review','deep']) for(const first of ['functional','risk']) test(`parallel initials start ${first} first, finish it last, then verify (${mode})`,{timeout:3000},async t=>{
+  const second=first==='functional'?'risk':'functional',started=[],completed=[];
+  let releaseFirst,releaseBoth,releaseSecond;
+  const firstStarted=new Promise(resolve=>releaseFirst=resolve);
+  const bothStarted=new Promise(resolve=>releaseBoth=resolve);
+  const secondCompleted=new Promise(resolve=>releaseSecond=resolve);
+  t.after(()=>{releaseFirst();releaseBoth();releaseSecond();});
+  const f=await fixture(t,{client:client=>{
+    // Control scheduling with promises, not sleeps or filesystem timing.
+    const create=client.session.create,prompt=client.session.prompt;
+    client.session.create=async o=>{
+      if(o.body.title.endsWith(ROLES[roleFor(mode,second)].label)) await firstStarted;
+      return create(o);
+    };
+    client.session.prompt=async o=>{
+      const response=await prompt(o),spec=ROLES[o.body.agent];
+      if(!o.body.noReply&&spec.format==='initial') {
+        completed.push(spec.stage);
+        if(spec.stage===second) releaseSecond();
+      }
+      return response;
+    };
+  },beforePrompt:async({role})=>{
+    const spec=ROLES[role];
+    if(spec.format==='initial') {
+      started.push(spec.stage);
+      if(spec.stage===first) releaseFirst();
+      if(started.length===2) releaseBoth();
+      await bothStarted;
+    } else if(spec.stage==='verifier') {
+      assert.deepEqual(completed,[second,first],'Verifier must wait for both initial responses.');
+    }
+  },result:async({role,result})=>{
+    if(ROLES[role].stage===first) await secondCompleted;
+    return result;
   }});
-  assert.match(await f.command(),/] COMPLETE/);
-  assert.equal(started,2);
+  assert.match(await f.command(`pr-${mode}`),/] COMPLETE/);
+  assert.deepEqual(started,[first,second]);
+  assert.deepEqual(completed,[second,first]);
+  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage),[first,second,'verifier']);
   const packet=JSON.parse(f.prompts().at(-1).body.parts[0].text);
   assert.equal(packet.reviews.length,2);
   assert.ok(packet.reviews.every(r=>JSON.stringify(r.coverage)===JSON.stringify({files:SNAP.files,gaps:[]})));
@@ -1586,7 +1616,10 @@ for(const mode of ['review','deep']) for(const native of [true,false]) test(`dir
     answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
   const out=await f.command(`pr-${mode}`);
   assert.match(out,/] COMPLETE/);
-  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage),['functional','risk','verifier']);
+  const stages=f.prompts().map(p=>ROLES[p.body.agent].stage);
+  // Initial reviewers are concurrent; only the verifier has a fixed position.
+  assert.deepEqual(stages.slice(0,-1).sort(),['functional','risk']);
+  assert.equal(stages.at(-1),'verifier');
   for(const prompt of f.prompts().slice(0,2)) {
     const packet=JSON.parse(prompt.body.parts[0].text);
     assert.equal(packet.snapshot,undefined);assert.equal(packet.sourceAccess,undefined);assert.equal(packet.reviews,undefined);
@@ -1621,14 +1654,14 @@ for(const field of ['repository','prId','base','head']) test(`direct review: rej
     return result;
   }});
   assert.match(await f.command(),/] INCOMPLETE/);
-  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage),['functional','risk']);
+  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),['functional','risk']);
 });
 
 test('direct review: unavailable PR metadata can be reported honestly without placeholder hashes',async t=>{
   const f=await fixture(t,{result:({result,role})=>ROLES[role].format==='initial'
     ?{status:'PARTIAL',coverage:{files:[],gaps:['PR metadata could not be read.']},findings:[],report:'Cannot establish the requested PR version.'}:result});
   const out=await f.command();assert.match(out,/reported PARTIAL/);
-  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage),['functional','risk']);
+  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),['functional','risk']);
 });
 
 test('direct review: status-only native initial output never becomes a completed review',async t=>{
@@ -1637,7 +1670,7 @@ test('direct review: status-only native initial output never becomes a completed
     answer:({answer,result})=>({data:{...answer,info:{...answer.info,structured:result},parts:[]}})});
   const out=await f.command();assert.match(out,/snapshot must be an object.*coverage.*findings.*report/s);
   assert.doesNotMatch(out,/output-retry=/);
-  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage),['functional','risk']);
+  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),['functional','risk']);
 });
 
 
