@@ -333,7 +333,7 @@ test('review guidance uses PR versions; standalone check retains cumulative proo
   assert.match(common,/blob.*commit/s);
   assert.match(common,/array.*string/s);
   assert.match(common,/short branch name.*refs\/heads\//s);
-  assert.match(common,/At\s+most\s+one identical retry/s);
+  assert.match(common,/at\s+most\s+one identical retry per logical read/is);
   assert.match(check,/Keyword search, PR membership queries\s+and file-content equality do not establish ancestry/);
   assert.match(check,/before and after.*listing/s);
   assert.match(check,/Do not explore unrelated/);

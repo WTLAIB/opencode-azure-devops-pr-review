@@ -9,6 +9,18 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Private-role native shell/edit/skill/public-web denial with a scoped guard,
+  bounded repeated-attempt stop and receipt disclosure. MCP actions remain
+  host/server-controlled, without a catalog or read/write classifier.
+- Unambiguous seven-field findings/eight-field confirmed rows; bounded
+  unknown-cause read-retry guidance, distinct from output recovery. No automatic
+  MCP retries or installed server patch. Terminal tool events supplement missing
+  after-hook diagnostics without providing source evidence.
+- Reachable reproductions, static-versus-observed test wording, path-bounded
+  counterevidence, exact quotes and impact-based severity guidance. Known verifier
+  source/contract reads are grouped in the first read round where possible.
+  These changes still need representative live quality and latency evaluation.
+
 - Verifier submissions use fixed confirmed/merged/rejected/needs-info/new-finding
   arrays, adapted to the unchanged final evidence/disposition contract. Unique
   snapshot path sets compare independently of ordering. Both transports and

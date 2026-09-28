@@ -76,13 +76,19 @@ not proof of a commit tree or absent guidance. Read discovered source/contracts
 with the supported exact-commit content selector. Do not retry a failing SHA
 directory call. Other servers/versions may differ; follow their actual contract.
 
-Do not repeat an identical failed request for a deterministic parameter, version,
-not-found or permission error. Correct the specific argument or report the gap;
-do not cycle through speculative search terms, paths or version types. At most
-one identical retry is allowed for an explicitly transient read failure, within
-the existing session budget and host guidance. An unexplained error or an empty
-search is not proof of a transient failure. Never retry denied access or writes.
-This is call-selection guidance, not a plugin-managed MCP retry mechanism.
+Do not repeat an identical failed request for an explicit authentication,
+permission, parameter, version, not-found or other deterministic error. Correct
+the specific argument or report the gap; never bypass a denial or cycle through
+speculative paths, credentials, tools or selectors. An explicitly transient read
+failure permits at most one identical retry per logical read. Separately, an
+unexplained failure permits at most one unknown-cause read retry in this entire
+stage, only when the tool contract identifies an idempotent read and its target,
+path and version are established. Keep all arguments identical and the original
+deadline; a second failure is a gap, not permission to try again. Never retry
+writes, publication, execution, truncation or an empty search through this rule.
+Disclose the failed read and repeat outcome briefly in report even if recovered;
+success does not establish a transient cause. This is call-selection guidance,
+not a plugin-managed MCP retry mechanism or the outputRetries allowance.
 
 Review the entire current PR change list, not just the last push. Follow exposed
 pagination and disclose truncation or missing pages; do not claim full coverage
@@ -158,8 +164,25 @@ Separate observations from inferences: zero search results do not prove an index
 is unavailable; matching file contents do not prove commit ancestry; an empty CI
 query only describes that query's result. Static test analysis is not execution:
 a test may stop at its first failed assertion. Check that a proposed reproduction
-actually demonstrates the claimed impact under all input limits. Assess severity
-from supported impact and scope, not merely the direction of a monetary change.
+actually demonstrates the claimed impact under all input limits, using values
+that callers can supply. Label inferred outcomes as static predictions; observed
+execution requires actual tool or CI evidence tied to the reviewed SHA. Trace
+assertion order: later assertions may never execute after the first failure.
+
+Keep negative claims bounded to inspected paths and safeguards. Name the guard
+or caller checked and its result; do not claim that no wrapper exists anywhere
+or that a repository has only one class without complete supporting evidence.
+Quote source exactly, or paraphrase without quotation marks.
+
+Assess severity from supported impact, affected scope, reachability and recovery:
+- high: substantial security-boundary violation, data loss/corruption, or broad
+  service failure supported by a concrete reachable path.
+- medium: a material functional or data-correctness failure with bounded impact
+  or practical recovery, without evidence for high impact.
+- low: a small but concrete behavioral defect, not a cosmetic preference.
+Explain the decisive impact briefly in the existing evidence; do not infer high
+severity just from a money/stock change or lower it solely because the trigger
+is unusual. These labels measure impact, not confidence or reviewer agreement.
 
 Conditional defects are valid when their trigger is supported: races, unusual
 inputs, partial failure and permission boundaries must not be excluded merely
@@ -175,12 +198,14 @@ If execution is needed, propose a minimal verification case instead of running i
 
 Produce the complete envelope described by your role, using the configured Output transport instructions. Write intermediate reviews in English. The verifier uses outputLanguage for all human-readable structured descriptions and its brief report; the runtime renders their details. Keep JSON keys, status values, finding IDs, code identifiers, and source quotes unchanged. Provide checkable conclusions, evidence, counterevidence, and recommendations, not private reasoning traces.
 
-Before submitting, check every finding object uses only these seven keys:
-id, summary, evidence, counterevidence, location, severity, suggestion. All are
-required for final confirmed findings and newFindings; only initial candidates may omit
-location as described above. Copy keys literally, without leading/trailing
-spaces or extra fields. Put source notes inside evidence and limitations inside
-the appropriate existing field; do not add evidence_note or placeholder fields.
+The finding fields are id, summary, evidence, counterevidence, location, severity
+and suggestion. Initial findings and newFindings use these seven keys; only
+initial candidates may omit location as described above. Final confirmed rows
+add reason as their eighth required key. Follow the role's category/envelope
+contract, not a seven-key limit on confirmed rows or disposition categories.
+Copy keys literally, without surrounding spaces or undocumented fields. Put
+source notes in evidence and limitations in the appropriate existing field;
+do not add evidence_note, quality scores or placeholder fields.
 Check unique role-prefixed IDs and nonempty required values. This formatting
 check cannot supply missing evidence or make an incomplete review COMPLETE.
 

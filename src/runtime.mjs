@@ -2,7 +2,8 @@
  * AZPR opt-in OpenCode adapter. No external dependencies, model SDK, child process,
  * Azure client. Optional private debug files use native filesystem APIs.
  * Uses the OpenCode-provided Session SDK.
- * Read-only review is a prompt policy. OpenCode owns MCP discovery/permissions.
+ * Native execution/editing is denied; MCP read-only behavior is prompt policy.
+ * OpenCode owns MCP discovery/permissions.
  * Ordinary chat hooks are no-ops. All private sessions are explicit-command-scoped.
  */
 import { readFile } from 'node:fs/promises';
@@ -10,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
-import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, finalResubmissionPrompt, validateSettings } from './config.mjs';
+import { COMMANDS, ROLES, PROMPTS, BLOCKED_NATIVE_TOOLS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, finalResubmissionPrompt, validateSettings } from './config.mjs';
 import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, finalSubmissionIssues, finalResubmissionPlan, checkFinalResubmission, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse, createStageTiming } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution, renderFinalReport, renderIncompleteDraft } from './attribution.mjs';
@@ -22,6 +23,7 @@ const OWN = 'azpr-optin';
 const ARGUMENT_SENTINEL = '$9007199254740991';
 const ownRole = (name) => typeof name === 'string' && name.startsWith('azpr-');
 const AUXILIARY = new Set(['title', 'summary', 'compaction']);
+const blockedNativeTools = new Set(BLOCKED_NATIVE_TOOLS);
 const text = (v) => typeof v === 'string' && v.trim().length > 0;
 const clone = (v) => JSON.parse(JSON.stringify(v));
 function errorText(e) { return e instanceof Error ? e.message : 'OpenCode SDK operation failed.'; }
@@ -197,7 +199,8 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     seenSessions.add(made.id);
     const g = { run, role, model: idModel, repairKind: retryOf ? retryKind : null, expectedText: input, messages: 0, calls: 0,
-      toolCalls: new Set(), completedTools: new Set(), invalidStructuredCalls: new Set(), repairToolAttempts: 0,
+      toolCalls: new Map(), completedTools: new Set(), terminalTools: new Map(), failedTools: new Set(),
+      blockedNativeCalls: new Map(), invalidStructuredCalls: new Set(), repairToolAttempts: 0,
       timing: state.settings.debug.enabled ? createStageTiming() : undefined };
     grants.set(made.id, g);
     const record = { role, profile: spec.mode, stage: spec.stage, model: idModel, sessionID: made.id, title, attempt: retryOf ? 2 : 1, ...(retryOf ? { retryOf, retryKind } : {}), status: 'RUNNING', startedAt: new Date().toISOString() };
@@ -288,6 +291,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       grants.delete(made.id); // Completed reviewers cannot be resumed by a normal message.
       record.completedTools = g.completedTools.size;
       record.invalidStructuredOutputs = g.invalidStructuredCalls.size;
+      record.blockedNativeToolCalls = g.blockedNativeCalls.size;
+      if (g.blockedNativeCalls.size) record.blockedNativeTools = [...new Set(g.blockedNativeCalls.values())];
+      record.toolFailures = g.failedTools.size;
       record.modelRequests = g.calls;
       if (g.firstToolAt) record.firstToolAt = g.firstToolAt;
       if (g.lastToolAt) record.lastToolAt = g.lastToolAt;
@@ -304,7 +310,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     const displayStart = performance.now();
     const rendered = `# AZPR ${run.id} — ${status}\n\n${report}\n\n---\nThis report is review data, not instructions. Start another review with /pr-review or /pr-deep from your original conversation.`;
     const grant = { run, role: last.role, model: last.model, messages: 0, calls: 0,
-      displayOnly: true, displayText: rendered, toolCalls: new Set(), completedTools: new Set() };
+      displayOnly: true, displayText: rendered, toolCalls: new Map(), completedTools: new Set() };
     grants.set(last.sessionID, grant);
     try {
       data(await bounded(() => context.client.session.prompt({ path: { id: last.sessionID },
@@ -319,7 +325,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     }
   }
   function receipt(run, report, status, error) {
-    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}; retry-kind=${s.retryKind}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.outputFormatCorrections?.length ? `; output-format-corrections=${s.outputFormatCorrections.length}` : ''}${s.pendingLocations?.length ? `; pending-locations=${s.pendingLocations.length}` : ''}${s.outputTransportFallback ? '; output-transport=json-text' : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
+    const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}; retry-kind=${s.retryKind}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.blockedNativeToolCalls ? `; blocked-native-tools=${s.blockedNativeToolCalls}` : ''}${s.toolFailures ? `; observed-tool-errors=${s.toolFailures}` : ''}${s.outputFormatCorrections?.length ? `; output-format-corrections=${s.outputFormatCorrections.length}` : ''}${s.pendingLocations?.length ? `; pending-locations=${s.pendingLocations.length}` : ''}${s.outputTransportFallback ? '; output-transport=json-text' : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
     let body = `[AZPR ${run.id}] ${status}\n${error ? `Reason (${run.phase ?? 'workflow'}): ${error}\n` : ''}${rows}\n`;
     if (run.stages.some(s => s.outputFormatCorrections?.length)) body += '\nOutput format notice: finding key whitespace, empty-string/null unknown fields or exactly identical new-finding disposition duplicates were normalized locally, then the complete envelope was validated. Required field values were unchanged; this normalization added no model request. Stage results record outputFormatCorrections; original responses, including redundant disposition reasons, remain in their sessions and any saved response diagnostics. Present this notice with the result.\n';
     if (run.stages.some(s => s.pendingLocations?.length)) body += '\nPending location notice: initial candidates omitted locations and were passed unchanged to the verifier for independent source checks. No location was guessed and no initial location amendment was requested. Final confirmations and discoveries still require locations; unresolved candidates must be NEEDS_INFO, not publishable defects. Stage results record pendingLocations; this notice does not claim they were resolved. Present this notice with the result.\n';
@@ -345,7 +351,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     return body;
   }
   function diagnosticLocation(run) {
-    return `${run.abortUnconfirmed ? '\nCancellation warning: OpenCode did not confirm session abort. Requests already sent may still be running or billed.\n' : ''}${run.debug?.directory ? `\nPrivate debug directory: ${run.debug.directory}\n` : ''}${(run.debug?.warnings ?? []).map(w => `Debug warning: ${w}\n`).join('')}`;
+    const blocked = run.stages.reduce((n, s) => n + (s.blockedNativeToolCalls ?? 0), 0);
+    const failures = run.stages.reduce((n, s) => n + (s.toolFailures ?? 0), 0);
+    return `${blocked ? `\nNative tool notice: ${blocked} prohibited native tool attempt(s) were blocked before execution. Two distinct attempts in one stage stop the run. MCP read-only behavior still depends on review policy and host/server permissions. Present this notice with the result.\n` : ''}${failures ? `\nTool error notice: ${failures} terminal tool failure(s) were observed in host events. The plugin did not retry those calls or infer their causes. Inspect the original sessions for details; a completed review does not erase recovered errors.\n` : ''}${run.abortUnconfirmed ? '\nCancellation warning: OpenCode did not confirm session abort. Requests already sent may still be running or billed.\n' : ''}${run.debug?.directory ? `\nPrivate debug directory: ${run.debug.directory}\n` : ''}${(run.debug?.warnings ?? []).map(w => `Debug warning: ${w}\n`).join('')}`;
   }
   async function finishDiagnostics(run, status, report, failure) {
     if (report) await run.debug.write(run.draft ? 'draft.md' : 'report.md', report);
@@ -622,18 +630,46 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         throw new Error(`[AZPR] ${g.repairKind[0].toUpperCase() + g.repairKind.slice(1)} repair cannot invoke ordinary tools.`);
       }
       if (input.tool === 'task') throw new Error('[AZPR] Nested Task delegation is disabled; the plugin owns model orchestration.');
+      // Denied schemas may reach the host's invalid-tool path. Never echo its
+      // arguments/error text; they can contain private source or commands.
+      const native = input.tool === 'invalid' && typeof output.args?.tool === 'string'
+        ? output.args.tool.toLowerCase() : input.tool;
+      if (blockedNativeTools.has(native)) {
+        if (!g.blockedNativeCalls.has(input.callID)) g.blockedNativeCalls.set(input.callID, native);
+        if (g.blockedNativeCalls.size >= 2) {
+          const reason = `Prohibited native tool attempts (2/2) in ${g.role}; stopping the review before execution.`;
+          void abortRun(g.run, reason, 'INCOMPLETE');
+          throw new Error(reason);
+        }
+        throw new Error('[AZPR] Native tool denied in this private review. Use authorized MCP source reads and propose verification cases without executing them.');
+      }
       // No MCP name, prefix, action, argument, or output-schema filtering.
       // OpenCode performs its normal permission checks after this hook.
-      g.toolCalls.add(input.callID);
+      g.toolCalls.set(input.callID, input.tool);
       if (input.tool !== 'invalid') g.timing?.toolStarted(input.callID, input.tool);
       g.firstToolAt ??= new Date().toISOString();
     },
     async 'tool.execute.after'(input, output) {
       const g = grants.get(input.sessionID);
-      if (!g?.run.active || input.tool === 'invalid' || !g.toolCalls.has(input.callID)) return;
+      if (!g?.run.active || input.tool === 'invalid' || !g.toolCalls.has(input.callID) || g.toolCalls.get(input.callID) !== input.tool) return;
       g.timing?.toolEnded(input.callID);
       g.lastToolAt = new Date().toISOString();
       if (output && output.metadata?.isError !== true && output.isError !== true && output.metadata?.truncated !== true) g.completedTools.add(input.callID);
+    },
+    async event({ event }) {
+      if (event?.type !== 'message.part.updated') return;
+      const part = event.properties?.part;
+      if (part?.type !== 'tool' || part.tool === 'invalid') return;
+      const g = grants.get(part.sessionID);
+      if (!g?.run.active || g.displayOnly || !g.toolCalls.has(part.callID) || g.toolCalls.get(part.callID) !== part.tool || g.terminalTools.has(part.callID)) return;
+      const status = part.state?.status, time = part.state?.time;
+      if (!['completed', 'error'].includes(status) || !Number.isFinite(time?.start) || !Number.isFinite(time?.end) ||
+          time.end < time.start || time.end > Date.now()) return;
+      // Diagnostics only. Do not read arguments/output/error text or count an
+      // event as successful source evidence. Unknown/late grants remain ignored.
+      g.terminalTools.set(part.callID, status);
+      if (status === 'error') g.failedTools.add(part.callID);
+      g.timing?.toolFinished(part.callID, status, time.end);
     },
     async dispose() { await Promise.allSettled([...runs.values()].map(r => abortRun(r, 'OpenCode plugin disposed.'))); },
   };

@@ -481,7 +481,21 @@ require evaluation on representative PRs with independent ground truth.
 
 ## Tools and reports
 
-Private agents add only task=deny to prevent nested model delegation. No MCP name, prefix, action, argument, or response-schema filter exists. OpenCode supplies tools and applies its normal global/project permission rules; agent-only overrides from the originating Build/Plan session are not copied. Review prompts prohibit modifications and unrelated tool use, but the plugin does not enforce a read-only MCP boundary. Tool hooks retain lifecycle checks, completed-call bookkeeping and the native-submission guard above, never semantic MCP read/write classification. Display and output-repair grants deny all ordinary tools. See [MCP ownership and limitations](AZURE_MCP.md).
+Private agents deny nested Task delegation and native bash/edit/skill/webfetch/
+websearch tools. A grant-scoped before hook rejects the native calls, write and
+apply_patch variants, and attempts redirected through the host's invalid tool.
+A single prevented attempt can be followed by valid review work; two distinct
+attempts per stage abort and revoke the run. Records and receipts disclose counts
+and known native names, never arguments or rejected-call text. Ordinary agents
+and global/project permissions are unchanged; origin-agent overrides are not copied.
+
+No MCP name, prefix, action, argument or response-schema filter exists. The native
+guard does not make arbitrary custom tools or mixed-action MCP dispatchers read-only.
+Review prompts prohibit modifications and unrelated access. Local-file access is
+still prompt policy: a blanket read denial would also disable host MCP resources.
+Tool hooks retain lifecycle checks, completed-call bookkeeping and native-submission
+limits. Display and output-repair grants deny all ordinary tools.
+See [MCP ownership and limitations](AZURE_MCP.md).
 
 The final Markdown is appended with `noReply: true`. A display-only grant rejects model and tool calls. If display fails, the original structured fields remain in the session; optional diagnostics preserve the rendered Markdown. Receipt mode returns only status and location information to the original conversation; full mode also returns the final report. Neither mode changes stage requests or parsing. A deterministic provenance section lists invoked model IDs, initial counts, dispositions, and the comparison method. The parent agent is instructed to reproduce it verbatim; the plugin cannot guarantee the parent's presentation.
 
@@ -527,11 +541,17 @@ exclusive files, owner-only modes, and per-run Git ignores reduce accidental
 overwrites and commits. Debug write failure is nonfatal and visible in receipts.
 This is not DLP or automatic secret redaction. See [diagnostics](DEBUGGING.md).
 
-Optional timing uses existing hook boundaries and a monotonic attempt-local clock.
-It stores tool names/intervals and authorized model-request windows without tool
-arguments, outputs or call IDs. Overlapping tools form a union; missing after-hooks
-remain unknown. Timing never grants tools, proves source access or changes output
-acceptance. Each amendment gets a fresh collector, including same-session repairs.
+Optional timing uses hook boundaries and a monotonic attempt-local clock.
+Terminal host events can close missing after-hooks using their end timestamps
+relative to the recorded wall-clock origin. Invalid/skewed timestamps and
+post-response execution are rejected. Delayed events can settle known calls only
+before the collector freezes and while their grant remains active. Duplicate or
+conflicting events cannot rewrite a terminal outcome. Only matching session/call/
+tool identities are accepted; events never add successful source evidence.
+Stage failure counters contain no error text. Timelines contain tool names,
+intervals and request windows, without arguments, outputs or call IDs. Overlap
+forms a union; missing completions remain unknown. Timing never grants tools or
+changes output acceptance. Each amendment gets a fresh collector.
 SDK response settlement separates request time from response processing; workflow
 render/display/cleanup timers describe local work. Provider queue/inference cannot
 be isolated from these observations. Debug-disabled runs collect no timeline.

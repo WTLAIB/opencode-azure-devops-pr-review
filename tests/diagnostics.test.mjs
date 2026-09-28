@@ -6,6 +6,30 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createDiagnostics, createStageTiming } from '../src/diagnostics.mjs';
 
+test('terminal error events settle missing after hooks without persisting error content',()=>{
+  let now=0;const timing=createStageTiming(()=>now,()=>1000+now);
+  timing.promptStarted();timing.modelRequest();now=2;timing.toolStarted('private-id','custom_read');
+  now=8;timing.promptSettled('returned');
+  // The host finished at t=6; delivery arrives after the prompt response.
+  now=10;timing.toolFinished('private-id','error',1006);
+  timing.toolFinished('private-id','completed',1007); // Conflicting late update.
+  timing.toolEnded('private-id'); // Late after hook cannot rewrite the outcome.
+  const result=timing.finish();
+  assert.equal(result.unfinishedTools,0);assert.equal(result.toolActiveMs,4);
+  assert.equal(result.lastToolToResponseMs,2);
+  assert.equal(result.toolCalls[0].outcome,'error');
+  assert.doesNotMatch(JSON.stringify(result),/private-id/);
+});
+test('terminal timing ignores unknown calls, invalid clocks and post-response execution',()=>{
+  let now=0;const timing=createStageTiming(()=>now,()=>1000+now);
+  timing.promptStarted();now=3;timing.toolStarted('known','custom_read');
+  now=7;timing.promptSettled('interrupted');now=10;
+  for(const end of [NaN,1001,1009,2000])timing.toolFinished('known','error',end);
+  timing.toolFinished('unknown','error',1005);
+  const result=timing.finish();assert.equal(result.unfinishedTools,1);
+  assert.equal(result.toolActiveMs,null);assert.equal(result.toolCalls[0].outcome,null);
+});
+
 test('stage timing separates overlapping tool intervals from model request windows',()=>{
   let now=0;const timing=createStageTiming(()=>now);
   now=2;timing.promptStarted();now=4;timing.modelRequest();

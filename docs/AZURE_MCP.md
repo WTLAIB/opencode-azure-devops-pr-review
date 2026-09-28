@@ -111,12 +111,23 @@ do not inherit it as a source cache. Unknown pagination and partial change count
 remain gaps, despite removing merge-base certification from normal/deep reviews.
 The plugin does not patch official MCP code or mask errors.
 
-Prompt policy forbids identical retries for deterministic/permission errors and
-speculative query loops. It allows at most one identical retry per logical read
-only for an explicit transient error, within the existing session budget and host
-guidance. This is not an enforced MCP retry counter, new session, wrapper, argument
-rewriter or permission filter. `outputRetries` permits bounded status, final-location or missing-merge
-amendments, not MCP recovery. Host/provider retries remain separate.
+Prompt policy forbids identical retries for explicit authentication/permission,
+parameter/selector/not-found errors and speculative query loops. An explicitly
+transient read permits one identical repeat per logical read. Separately, each
+stage may repeat at most one unknown-cause failure, only for a documented
+idempotent read with established target/path/version. Keep arguments identical
+and the original deadline; a second failure remains a coverage gap. Writes,
+publication, execution, truncation and empty searches never qualify. Disclose
+the failed read and repeat outcome even when recovered; success does not prove
+a transient cause. This is not an enforced MCP retry counter, new session,
+wrapper, argument rewriter or permission filter. `outputRetries` controls output
+amendments/resubmission, not MCP recovery. Host/provider retries remain separate.
+
+Private-role native shell/edit/skill/public-web denials are separate from MCP
+permissions. They neither narrow nor grant arbitrary MCP tools. Host resource
+reads retain their existing read permission; a generic read denial would also
+hide those resources. Server/account permissions remain necessary for a hard
+MCP write boundary, especially for tools combining read and write actions.
 
 These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history

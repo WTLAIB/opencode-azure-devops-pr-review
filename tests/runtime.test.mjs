@@ -6,7 +6,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAzurePrReviewPlugin } from '../src/runtime.mjs';
 import { ROLES, PROMPTS, COMMANDS, MODES, buildAgents, validateSettings, roleFor } from '../src/config.mjs';
+import { stageFormat } from '../src/output.mjs';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const PRIVATE_PERMISSIONS = {task:'deny',bash:'deny',edit:'deny',skill:'deny',webfetch:'deny',websearch:'deny'};
 const SNAP = { repository:'org/proj/repo',prId:123,base:'a'.repeat(40),head:'b'.repeat(40),scope:'pr',files:['/src/Main.java'] };
 const jclone = x => JSON.parse(JSON.stringify(x));
 const candidate = id => ({id,summary:'fixture issue',location:'head:/src/Main.java:12',evidence:'fixture branch evidence, reachable trigger and impact',counterevidence:'fixture caller guard does not cover the failing path',severity:'high',suggestion:'Add the missing guard and a regression test for the failing input.'});
@@ -131,6 +133,97 @@ async function fixture(t, opts={}) {
   const prompts=()=>calls.filter(c=>c.kind==='prompt' && !c.body.noReply);
   return {hooks,cfg,baseline,settings,dir,client,calls,logs,toasts,sessions,command,prompts};
 }
+
+for(const mode of MODES) for(const tool of ['bash','edit','write','apply_patch','skill','webfetch','websearch']) test(`private native tool denied before execution: ${mode}/${tool}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,role,id})=>{
+    if(!role.endsWith('-verifier'))return;
+    await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool,callID:'blocked-private-call'},
+      {args:{command:'PRIVATE_COMMAND_MUST_NOT_EXECUTE'}}),/Native tool.*denied/);
+  }});
+  const out=await f.command(mode==='deep'?'pr-deep':'pr-review');
+  assert.match(out,/] COMPLETE/);assert.match(out,/Native tool notice/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
+  assert.equal(stage.blockedNativeToolCalls,1);assert.deepEqual(stage.blockedNativeTools,[tool]);
+  assert.equal(stage.completedTools,1);assert.equal(stage.modelRequests,1);
+  assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_COMMAND|blocked-private-call/);
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
+});
+
+test('hidden native-tool submissions stop at two distinct attempts and revoke the run',async t=>{
+  let verifierID;
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,role,id,model})=>{
+    if(!role.endsWith('-verifier'))return;verifierID=id;
+    const input={sessionID:id,tool:'invalid',callID:'first'};
+    for(let n=0;n<2;n++)await assert.rejects(hooks['tool.execute.before'](input,{args:{tool:'bash',error:'PRIVATE_REJECTED_ARGS'}}),/Native tool.*denied/);
+    await assert.rejects(hooks['tool.execute.before']({...input,callID:'second'},{args:{tool:'write'}}),/2\/2/);
+    await assert.rejects(hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{}),/authorization/);
+  }});
+  const out=await f.command();assert.match(out,/] INCOMPLETE/);assert.match(out,/blocked-native-tools=2/);
+  assert.doesNotMatch(out,/PRIVATE_REJECTED_ARGS/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
+  assert.equal(stage.blockedNativeToolCalls,2);assert.equal(stage.completedTools,0);
+  assert.deepEqual(stage.blockedNativeTools,['bash','write']);
+  await assert.rejects(f.hooks['tool.execute.before']({sessionID:verifierID,tool:'custom_read',callID:'late'},{args:{}}),/expired/);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
+});
+
+test('tool terminal events settle error diagnostics without adding successful evidence or leaking content',async t=>{
+  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,role,id})=>{
+    if(!role.endsWith('-verifier'))return;
+    const input={sessionID:id,tool:'arbitrary_read',callID:'private-event-call'};
+    await hooks['tool.execute.before'](input,{args:{secret:'PRIVATE_ARGUMENT'}});
+    const stamp=Date.now();
+    const part={type:'tool',sessionID:id,callID:input.callID,tool:input.tool,state:{status:'error',error:'PRIVATE_ERROR',time:{start:stamp,end:stamp}}};
+    const emit=p=>hooks.event({event:{type:'message.part.updated',properties:{part:p}}});
+    await emit({...part,sessionID:'unrelated'});await emit({...part,tool:'wrong_tool'});
+    await emit({...part,callID:'unknown'});await emit({...part,state:{status:'running'}});
+    await emit(part);await emit(part);
+    await emit({...part,state:{...part.state,status:'completed',output:'PRIVATE_OUTPUT'}});
+  }});
+  const out=await f.command();assert.match(out,/] COMPLETE/);assert.match(out,/observed-tool-errors=1/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
+  assert.equal(stage.toolFailures,1);assert.equal(stage.completedTools,1);
+  assert.equal(stage.timing.unfinishedTools,0);assert.notEqual(stage.timing.toolActiveMs,null);
+  assert.equal(stage.timing.toolCalls.find(c=>c.tool==='arbitrary_read').outcome,'error');
+  assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_|private-event-call/);
+  await f.hooks.event({event:{type:'message.part.updated',properties:{part:{type:'tool',sessionID:stage.sessionID,tool:'arbitrary_read',callID:'private-event-call',state:{status:'completed'}}}}});
+  assert.equal(JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1).toolFailures,1);
+});
+
+for(const mode of MODES) for(const native of [true,false]) test(`role instructions agree with category schemas and bounded reads: ${mode}/${native}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.structuredOutput=native});
+  for(const stage of ['check','functional','risk','verifier','comment-plan','comment-publish']){
+    const prompt=f.cfg.agent[roleFor(mode,stage)].prompt;
+    assert.match(prompt,/at most one unknown-cause read retry[\s\S]*?entire\s+stage|at most one unknown-cause read retry[\s\S]*?stage/);
+    assert.match(prompt,/idempotent read/);assert.match(prompt,/original\s+deadline/);
+    assert.match(prompt,/success(?:ful repeat)? does\s+not establish a transient cause/);
+    assert.match(prompt,/not a plugin-managed MCP\s+retry mechanism|not a plugin-managed MCP retry mechanism/);
+  }
+  const prompt=f.cfg.agent[roleFor(mode,'verifier')].prompt;
+  assert.doesNotMatch(prompt,/every finding object uses only these seven keys/);
+  assert.match(prompt,/confirmed rows\s+add reason as their eighth required key/);
+  const fields=stageFormat(roleFor(mode,'verifier')).schema.properties;
+  assert.equal(fields.confirmed.items.required.length,8);assert.ok(fields.confirmed.items.required.includes('reason'));
+  assert.equal(fields.newFindings.items.required.length,7);assert.ok(!fields.newFindings.items.required.includes('reason'));
+  assert.match(prompt,/static predictions/);assert.match(prompt,/assertion order/);
+  assert.match(prompt,/negative claims bounded to inspected paths/);assert.match(prompt,/Quote source exactly/);
+  assert.match(prompt,/high: substantial security-boundary/);assert.match(prompt,/same first read\s+round/);
+});
+
+test('native tool denial also covers check, comment preview and explicit publisher grants',async t=>{
+  const f=await fixture(t,{settings:s=>s.comments.enabled=true,duringPrompt:async({hooks,role,id})=>{
+    if(!['check','comment-plan','comment-publish'].includes(ROLES[role].stage))return;
+    await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'bash',callID:'blocked'},{args:{}}),/Native tool denied/);
+  }});
+  assert.match(await f.command('pr-check'),/Native tool notice/);
+  const id=reviewId(await f.command());
+  assert.match(await f.command('pr-comment',id),/Native tool notice/);
+  assert.match(await f.command('pr-comment',id+' --publish'),/Native tool notice/);
+  assert.equal(f.calls.filter(c=>c.kind==='tool'&&c.tool==='custom_mcp_annotate').length,1);
+});
 
 for(const mode of MODES) for(const native of [true,false]) test(`final categories and bounded resubmission (${mode}, native=${native})`,async t=>{
   let originalID;
@@ -267,7 +360,7 @@ for(const mode of MODES) for(const native of [true,false]) test(`lightweight che
   assert.equal(checker.model,f.cfg.agent[roleFor(mode,'risk')].model);
   assert.equal(checker.steps,f.settings.steps.check);
   for(const stage of ['functional','risk','verifier']) assert.match(f.cfg.agent[roleFor(mode,stage)].prompt,/## Finding quality/);
-  assert.deepEqual(checker.permission,{task:'deny'});
+  assert.deepEqual(checker.permission,PRIVATE_PERMISSIONS);
   assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
   assert.deepEqual(f.cfg.permission,f.baseline.permission);
 });
@@ -1058,11 +1151,11 @@ test('configuration preserves every original model, agent, permission, MCP and c
   const f=await fixture(t);const restored=jclone(f.cfg);for(const name of Object.keys(ROLES)) delete restored.agent[name];
   assert.deepEqual(restored,f.baseline);assert.equal(f.calls.length,0);
 });
-test('private agents inherit host tool permissions and only disable nested Task delegation',async t=>{
+test('private agents deny native execution while inheriting MCP and resource permissions',async t=>{
   const f=await fixture(t);
   for(const name of Object.keys(ROLES)){
     assert.equal(f.cfg.agent[name].mode,'primary'); assert.equal(f.cfg.agent[name].hidden,true);
-    assert.deepEqual(f.cfg.agent[name].permission,{task:'deny'});
+    assert.deepEqual(f.cfg.agent[name].permission,PRIVATE_PERMISSIONS);
   }
 });
 test('ordinary Plan/Build hooks are no-ops even after the settings file is deleted',async t=>{
@@ -1452,7 +1545,7 @@ test('second review from the same origin is rejected rather than double billed',
 test('global asks, denies and nested patterns are left intact for the host to enforce',async t=>{
   const f=await fixture(t,{config:c=>c.permission={'*':'deny','custom_*':'ask',specific_tool:{'*':'deny',safe:'ask'}}});
   assert.deepEqual(f.cfg.permission,f.baseline.permission);
-  for(const role of Object.keys(ROLES)) assert.deepEqual(f.cfg.agent[role].permission,{task:'deny'});
+  for(const role of Object.keys(ROLES)) assert.deepEqual(f.cfg.agent[role].permission,PRIVATE_PERMISSIONS);
 });
 test('SDK create failure cannot prompt a model or grant a reviewer',async t=>{
   const f=await fixture(t,{createError:true});assert.match(await f.command(),/INCOMPLETE/);assert.equal(f.prompts().length,0);
@@ -1779,7 +1872,7 @@ test('cancellation during the async tool settings check cannot dispatch a write'
 
 test('comment settings retain local opt-in and plan caps, not MCP permissions',async t=>{
   const f=await fixture(t,{settings:enableComments});
-  assert.deepEqual(f.cfg.agent['azpr-review-comment-publish'].permission,{task:'deny'});
+  assert.deepEqual(f.cfg.agent['azpr-review-comment-publish'].permission,PRIVATE_PERMISSIONS);
   for(const patch of [{maxComments:0},{maxComments:11},{maxComments:1.5},{enabled:'true'},{permission:'allow'}]) assert.throws(()=>validateSettings({...f.settings,comments:{...f.settings.comments,...patch}}));
 });
 

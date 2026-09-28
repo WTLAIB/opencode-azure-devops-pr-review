@@ -1,5 +1,28 @@
 # Validation
 
+## Native tools, recovery guidance and terminal diagnostics
+
+Regression coverage includes private native-tool denials and hidden-tool attempts,
+the second-attempt abort, ordinary-agent/MCP permission preservation, comment
+preview/publisher grants, and unchanged repair/display restrictions. Test the
+real host in an isolated directory with a local fake provider/MCP before installation:
+verify denied schemas disappear, forced native calls never execute, a blocked
+attempt remains disclosed, and repeated attempts revoke the run.
+
+Terminal event tests cover failed calls without after-hooks, duplicate/conflicting
+states, unrelated sessions, invalid timestamps, cancellation and late events.
+These events never supply successful evidence; diagnostics omit raw arguments,
+output and errors. Prompt/schema checks distinguish seven-field findings from
+eight-field confirmed rows and retain all existing evidence/version validators.
+
+Unknown-cause read recovery is model guidance, not a hard runtime retry counter.
+Evaluate one identical idempotent-read repeat, repeated failure becoming a gap,
+and no repeats for explicit denied/deterministic errors or writes. Quality tests
+still need independently labeled live examples for reachable triggers, static
+versus executed tests, bounded counterevidence, exact quotes and severity impact.
+Known-file batching must retain every necessary source read and final freshness;
+passing mocks does not prove less latency or improved model compliance.
+
 ## Offline checks
 
 Run from the repository root with a supported Node.js development runtime:

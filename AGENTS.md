@@ -37,8 +37,21 @@ It describes the development process, not instructions for agents reviewing a PR
   boundaries consistent across check, common review and comment policies.
 - OpenCode owns providers, MCP discovery, and permissions. Do not add hardcoded
   MCP tool catalogs, name/action allowlists, direct Azure/model clients, or
-  wildcard permission grants. Read-only review is a prompt policy, not a
-  programmatic MCP security boundary.
+  wildcard permission grants. MCP read-only review is a prompt policy, not a
+  programmatic MCP security boundary. Private roles deny native shell, editing,
+  skill and public-web tools through host permissions and a scoped execution
+  guard, including write/apply_patch and rejected native-tool submissions.
+  Two distinct blocked native attempts in one stage stop the run; record and
+  disclose prevented attempts without logging arguments. Keep ordinary agents
+  unchanged. Do not blanket-deny read: it also gates host MCP resource access.
+  Preserve event-scoped tool-failure counters and optional terminal-state timing;
+  events never provide successful source evidence or infer a failure cause.
+  Read recovery remains prompt guidance: one identical repeat per explicitly
+  transient logical read, plus at most one unknown-cause idempotent-read repeat
+  per stage with fixed arguments/target/version and the original deadline.
+  Explicit auth/permission, parameter/selector/not-found errors, writes,
+  publication, execution, truncation and empty searches are not exceptions.
+  Disclose recovered reads; do not add an MCP retry wrapper or expand outputRetries.
 - Ordinary Plan/Build behavior, default/auxiliary models, and permissions stay
   unchanged. Explicit commands alone authorize private sessions. Keep grant
   revocation, cancellation, and lifecycle cleanup auditable.
@@ -46,7 +59,8 @@ It describes the development process, not instructions for agents reviewing a PR
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
   Verifiers submit required confirmed/merged/rejected/needsInfo/newFindings arrays;
-  confirmed rows contain the seven finding fields plus reason. Convert explicit
+  confirmed rows contain the seven finding fields plus reason; keep common and
+  role-specific instructions consistent about these eight keys. Convert explicit
   categories to the existing disposition contract without inferring content. Accept
   legacy dispositions only alone, never mixed with category fields. Snapshot file
   identity is a unique path set, not array order; reject duplicates/missing paths.

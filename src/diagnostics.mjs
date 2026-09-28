@@ -6,8 +6,9 @@ import { visibleText } from './output.mjs';
 
 // Local hook intervals, not provider inference/queue time or Azure server time.
 // Keep only tool names and offsets: no call IDs, arguments, output or reasoning.
-export function createStageTiming(clock = () => performance.now()) {
+export function createStageTiming(clock = () => performance.now(), wallClock = () => Date.now()) {
   const start = clock(), requests = [], tools = new Map();
+  const wallStart = wallClock();
   let promptStart = null, response = null, responseOutcome = null, saved;
   const now = () => Math.max(0, clock() - start);
   const ms = value => Math.round(value * 1000) / 1000;
@@ -29,11 +30,21 @@ export function createStageTiming(clock = () => performance.now()) {
     promptStarted() { if (open() && promptStart === null) promptStart = now(); },
     modelRequest() { if (open()) requests.push(now()); },
     toolStarted(id, tool) {
-      if (open() && !tools.has(id)) tools.set(id, { tool, startMs: now(), endMs: null });
+      if (open() && !tools.has(id)) tools.set(id, { tool, startMs: now(), endMs: null, outcome: null, terminal: false });
     },
     toolEnded(id) {
       const tool = tools.get(id);
-      if (open() && tool && tool.endMs === null) tool.endMs = now();
+      if (open() && tool && tool.endMs === null) { tool.endMs = now(); tool.outcome = 'returned'; }
+    },
+    toolFinished(id, outcome, endedAt) {
+      const tool = tools.get(id);
+      if (saved || !tool || tool.terminal || !['completed', 'error'].includes(outcome) || !Number.isFinite(endedAt)) return;
+      const endMs = endedAt - wallStart;
+      // Millisecond host timestamps can round just before a fractional hook.
+      // Accept delayed delivery, never post-response execution or clock skew.
+      if (endMs < tool.startMs - 1 || endedAt > wallClock() || (response !== null && endMs > response + 1)) return;
+      tool.endMs ??= Math.max(tool.startMs, endMs);
+      tool.outcome = outcome; tool.terminal = true;
     },
     promptSettled(outcome) { if (open()) { response = now(); responseOutcome = outcome; } },
     finish() {
@@ -47,7 +58,7 @@ export function createStageTiming(clock = () => performance.now()) {
         toolActiveMs: unfinishedTools || active === null ? null : ms(active), unfinishedTools,
         lastToolToResponseMs: responseOutcome !== 'returned' || !rows.length || unfinishedTools ? null
           : ms(Math.max(0, response - rows.reduce((last, t) => Math.max(last, t.endMs), 0))),
-        toolCalls: rows.map(t => ({ tool: t.tool, startMs: ms(t.startMs), endMs: t.endMs === null ? null : ms(t.endMs),
+        toolCalls: rows.map(t => ({ tool: t.tool, outcome: t.outcome, startMs: ms(t.startMs), endMs: t.endMs === null ? null : ms(t.endMs),
           durationMs: t.endMs === null ? null : ms(t.endMs - t.startMs) })),
         modelRounds: requests.map((startMs, index) => {
           const endMs = requests[index + 1] ?? requestEnd, active = activeBetween(startMs, endMs);

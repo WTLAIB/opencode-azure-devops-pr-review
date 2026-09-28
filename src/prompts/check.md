@@ -69,10 +69,17 @@ against the required SHA and complete returned versions/results. If either check
 is unavailable or differs, it cannot establish snapshot completeness. Continue
 reading file contents by exact commit. Do not silently substitute branch source.
 
-For an explicitly transient read failure, at most one identical retry is allowed
-within the existing host/session budget. An unexplained error is not transient;
-never retry denied operations or writes. An empty search describes that query,
-not a service outage. Do not explore unrelated history, builds, wikis or projects.
+For an explicitly transient read failure, at most one identical retry per logical
+read is allowed. Separately, at most one unknown-cause read retry is allowed in
+this entire stage: the tool contract must identify an idempotent read with an
+established target, path and version. Keep arguments identical and the original
+deadline; if it fails again, report the gap. Never use this allowance for explicit
+authentication/permission, parameter, selector or not-found errors, writes,
+publication, execution, truncation or empty searches. A successful repeat does
+not establish a transient cause. Disclose the failed read and repeat outcome in
+sourceAccess/report. This is call-selection guidance, not a plugin-managed MCP
+retry mechanism or the outputRetries allowance. Do not explore unrelated
+history, builds, wikis or projects.
 A missing optional file may be a limitation; missing required evidence prevents
 READY. If output cannot be completed, do not rerun or repair the workflow yourself.
 

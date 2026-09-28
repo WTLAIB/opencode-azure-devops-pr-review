@@ -1,6 +1,10 @@
 // One catalog owns mode, role, model slot, prompt, output kind, and stage order.
 export const MODES = Object.freeze(['review', 'deep']);
 export const COMMANDS = Object.freeze({ 'pr-check': 'check', 'pr-review': 'review', 'pr-deep': 'deep', 'pr-stop': 'stop', 'pr-comment': 'comment' });
+// Native host capabilities only: never grant or classify MCP tools/actions.
+// Do not deny `read`: the host also uses it for MCP resource access.
+export const NATIVE_TOOL_PERMISSIONS = Object.freeze({ bash: 'deny', edit: 'deny', skill: 'deny', webfetch: 'deny', websearch: 'deny' });
+export const BLOCKED_NATIVE_TOOLS = Object.freeze([...Object.keys(NATIVE_TOOL_PERMISSIONS), 'write', 'apply_patch']);
 const MODEL_SLOTS = ['functional', 'risk', 'verifier'];
 const stages = {
   check: { slot: 'risk', prompt: 'check', step: 'check', format: 'check', order: 0, label: 'Source check' },
@@ -126,6 +130,6 @@ export function buildAgents(settings, prompts) {
       '\n\n# Output transport\n' + (settings.structuredOutput
         ? 'After completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. Supply field values using their declared types. Do not print a separate JSON text/code block or surrounding commentary. Examples describe the envelope fields, not a separate text response. The output schema describes the envelope, not an MCP tool restriction.'
         : 'Return one valid JSON object, optionally in a single JSON code fence, without surrounding commentary. Serialize strings as JSON strings, escaping quotes and newlines correctly.'),
-    steps: settings.steps[spec.step], permission: { task: 'deny' },
+    steps: settings.steps[spec.step], permission: { task: 'deny', ...NATIVE_TOOL_PERMISSIONS },
   }]));
 }

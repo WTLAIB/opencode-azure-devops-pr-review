@@ -134,12 +134,20 @@ The shared `outputLanguage` setting controls the final report and comment prose.
 
 This plugin orchestrates models and combines their results. OpenCode supplies tools,
 schemas, and normal permission checks; each model selects the appropriate calls.
-There is no plugin tool-name, prefix, or action allowlist. Unknown/new MCP names do
+There is no plugin MCP tool-name, prefix, or action allowlist. Unknown/new MCP names do
 not require a code change. Prompts instruct reviewers to read and analyze without
 changing code, PRs, work items, votes, or pipelines. Prompt compliance is not a
 security guarantee. Nested `task` delegation is disabled so models cannot start
 unbudgeted reviewer agents. A separate guard stops repeated rejected native
 `StructuredOutput` submissions; it does not filter MCP operations.
+
+Private roles also deny native shell, editing, skill and public-web tools. A
+command-scoped guard blocks attempted execution, including write/apply_patch
+variants and rejected calls to hidden native tools. Two distinct blocked attempts
+in a stage stop the run; receipts disclose even a single prevented attempt.
+This does not classify MCP calls or make mixed read/write MCP dispatchers read-only.
+Local-file access remains prohibited by prompt policy; a blanket `read` permission
+denial would also disable MCP resource reads.
 
 Old installed `azure` settings are accepted but ignored, with a startup warning.
 You may remove that obsolete block; the installer preserves your private settings.
@@ -153,6 +161,10 @@ their own session, and do not repeat deterministic parameter errors. No official
 MCP patch, wrapper, argument adapter, automatic source-workflow restart or allowlist is added.
 Actual error reduction needs live verification; see
 [source-access discipline](docs/AZURE_MCP.md#avoiding-repeated-lookup-failures).
+Prompt guidance permits at most one unknown-cause idempotent-read repeat per
+stage, with identical arguments and the original deadline. Explicit denied or
+deterministic errors and writes are excluded. Recovered failures stay disclosed;
+the plugin neither performs the retry nor labels an unknown cause transient.
 
 ## Model roles
 

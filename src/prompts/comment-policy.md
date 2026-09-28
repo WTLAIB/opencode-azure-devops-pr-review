@@ -35,3 +35,14 @@ read-only instructions during preview and review. Only the explicit publisher
 stage authorizes creating the saved comments, not any other changes. Stop when
 tools, permissions, identity, source, duplicate checks, or evidence are uncertain.
 Never fabricate success or bypass host permission decisions.
+
+For explicitly transient read failures, at most one identical retry per logical
+read is allowed. Separately, at most one unknown-cause read retry is allowed in
+this entire stage, only for an operation documented as an idempotent read with
+an established target, path and version. Preserve all arguments and the original
+deadline; if it fails again, stop with the missing evidence. Never use this rule
+for explicit authentication/permission, parameter, selector or not-found errors,
+writes, publication, execution, truncation or empty searches. Disclose recovered
+reads in the local explanation; success does not establish a transient cause.
+This is call-selection guidance, not a plugin-managed MCP retry mechanism or
+the outputRetries allowance. Uncertain publication must never be retried.

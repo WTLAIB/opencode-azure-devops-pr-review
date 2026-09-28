@@ -17,7 +17,14 @@ or a publishing attempt.
 `azpr-*-check: READY` is a standalone source-readiness result; review stages
 use COMPLETE. Normal/deep reviews no longer contain a check stage. This difference is intentional. A completed review can contain
 intermediate MCP errors: `warnings: []` concerns diagnostics/cleanup, not every
-tool invocation. Inspect the local child history for actual tool failures.
+tool invocation. `observed-tool-errors` counts terminal failures observed from
+matching host events, without classifying causes or replaying calls. Missing
+events are not proof of error-free execution; inspect the child tool history.
+
+`blocked-native-tools` and the native-tool notice identify prevented shell,
+editing, skill or public-web attempts. Plugin diagnostics omit their arguments.
+One prevented attempt may coexist with COMPLETE; two distinct attempts in one
+stage stop the run before execution. This does not certify MCP read-only behavior.
 
 Receipt mode points the human to read-only session navigation. It does not
 authorize the parent model to invoke Task or prompt a finished reviewer. The
@@ -33,8 +40,12 @@ then the verifier's combined paths. There is no checker handoff in normal/deep
 runs. Compare errors by operation/arguments, not just duration. Confirm changed
 files were explicitly requested before concluding the capability is missing.
 Identical retries cannot fix type/version errors; an empty search does not prove
-an index outage. Transient-read guidance is separate from outputRetries and is
-not a runtime-enforced MCP retry cap.
+an index outage. Read recovery is separate from outputRetries: one identical
+repeat per explicitly transient logical read, plus at most one unknown-cause
+idempotent-read repeat per stage with fixed arguments and deadline. Explicit
+permission/deterministic errors, writes and incomplete results are excluded.
+Successful recovery does not identify the cause. This is prompt guidance, not
+a runtime-enforced MCP retry cap.
 
 ## Inspect an existing failed session
 
@@ -347,15 +358,17 @@ failure. Failed calls that never reach the after-hook may lack an end timestamp.
 ### Timing without replaying a session
 
 Debug-enabled stage results include `timing`. Offsets are monotonic milliseconds
-relative to that attempt's grant creation (after session creation), independent of
-wall-clock adjustments. Collection uses the existing hooks and SDK promise; it
+relative to that attempt's grant creation (after session creation). Hook timing
+is monotonic; a host terminal event can supply a missing end relative to the
+recorded wall-clock origin, with bounds checks for skew and post-response execution.
+Collection uses existing hooks, events and the SDK promise; it
 does not fetch messages, add a model request, or alter validation/permissions.
 
 | Field | Interpretation |
 | --- | --- |
 | `elapsedMs` | Attempt time through validation/error cleanup, before writing its result file. |
 | `promptMs`, `responseOutcome` | SDK prompt dispatch until its promise settles: returned, rejected, or interrupted. A returned response can still fail validation. Null means dispatch/settlement was not observed. |
-| `toolCalls` | Ordinary tool name, startMs/endMs and durationMs from before/after hooks. No call ID, arguments, output or reasoning. End/duration remain null without an after-hook. |
+| `toolCalls` | Ordinary tool name, startMs/endMs, durationMs and outcome: returned after hook, terminal completed/error, or null. No call ID, arguments, output, error text or reasoning. End/duration remain null without an after-hook or valid terminal event. |
 | `toolActiveMs`, `unfinishedTools` | Union of tool intervals, counting overlap once; null if any completion is missing. A completed hook does not imply a successful tool result. |
 | `modelRounds` | Windows from an authorized chat.params hook to the next one or prompt settlement/stage stop. Each has startMs/endMs, durationMs, toolActiveMs, outsideToolMs and endReason. |
 | `lastToolToResponseMs` | Last observed ordinary tool completion to a returned SDK response; null with no tools, missing completions or rejected/interrupted dispatch. |
@@ -364,9 +377,10 @@ does not fetch messages, add a model request, or alter validation/permissions.
 Model windows include tool execution, permissions, host scheduling and provider
 waiting/generation; even `outsideToolMs` is **not** pure inference time. Tool
 intervals can include permission prompts and host overhead, not just Azure/MCP
-server work. Missing after-hooks make overlapping windows' active/outside values
-unknown rather than treating that time as model work. Duplicate hooks do not
-double-count a call; late callbacks cannot mutate a finished attempt. An amendment
+server work. Missing after-hooks without terminal events make active/outside
+values unknown rather than treating that time as model work. Duplicate/conflicting
+events do not rewrite terminal outcomes; late callbacks cannot mutate finished
+attempts or revoked grants. An amendment
 has its own timing even when it reuses the verifier session.
 
 The pinned host's native StructuredOutput can bypass ordinary tool hooks. The
