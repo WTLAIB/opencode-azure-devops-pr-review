@@ -27,7 +27,12 @@ It describes the development process, not instructions for agents reviewing a PR
   source-verifying final stage. Focus differs, required source coverage does not.
   Quality takes precedence over latency. No extra reviewer, fallback, or model
   selection change without an agreed reason and evaluation.
-- Check uses its own complete readiness policy; it must not inherit finding-review
+- Normal/deep reviews start the two initials directly. Compare repository/PR
+  identity and PR-reported source/target SHAs in the runtime, pass the union of
+  discovered paths to the verifier, and recheck both versions at completion.
+  Do not add a preliminary check or use commit dates as identity. The target
+  reference is not a proven merge base; do not reinstate ancestry certification.
+- Standalone /pr-check uses its own readiness policy, without finding-review
   rules. Keep read-only, untrusted-data, literal-context and host-permission
   boundaries consistent across check, common review and comment policies.
 - OpenCode owns providers, MCP discovery, and permissions. Do not add hardcoded
@@ -37,7 +42,7 @@ It describes the development process, not instructions for agents reviewing a PR
 - Ordinary Plan/Build behavior, default/auxiliary models, and permissions stay
   unchanged. Explicit commands alone authorize private sessions. Keep grant
   revocation, cancellation, and lifecycle cleanup auditable.
-- Keep strict snapshots, coverage ledgers, counterevidence, final dispositions,
+- Keep PR-version snapshots, coverage ledgers, counterevidence, final dispositions,
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
   Local finding-format normalization may trim ASCII JSON whitespace from known
@@ -49,6 +54,8 @@ It describes the development process, not instructions for agents reviewing a PR
   Preserve raw responses, fully validate the candidate, and disclose accepted
   changes in stage diagnostics and receipts. Limit this to initial/verifier
   findings with valid statuses, excluding output repair and comment sessions.
+  An initial PARTIAL result may omit an unavailable snapshot only with empty
+  coverage.files/findings and concrete gaps; it cannot enter final verification.
   Initial candidates may omit only the separate location field, with explicit
   pendingLocations diagnostics and verifier handoff. Never infer its value.
   Final confirmations/discoveries still require locations; unresolved candidates
@@ -61,14 +68,14 @@ It describes the development process, not instructions for agents reviewing a PR
   the same stopped session to retain that reviewer's source context. No ordinary
   tools, no existing field changes, one model request, full revalidation, raw
   failure retention and explicit notices. Missing/empty evidence, empty existing
-  locations, incomplete coverage, changed heads, comments and uncertain aborts
+  locations, incomplete coverage, changed PR versions, comments and uncertain aborts
   never qualify. No generic envelope regeneration or inferred source locations.
   Keep amendment instructions out of normal reviewer prompts. Only an explicit
   repair grant may replace the reviewer system prompt; verify that replacement
   before allowing the repair model request and preserve unrelated host context.
-  Keep native/text transport instructions separate. The native currentHead field
-  uses a scalar string; an unknown head stays INCOMPLETE. Never strip quotes or
-  fill a missing head from the snapshot to satisfy validation.
+  Keep native/text transport instructions separate. Native currentHead/currentBase
+  fields use scalar strings; an unknown PR version stays INCOMPLETE. Never strip
+  quotes or fill missing current versions from the snapshot to satisfy validation.
   Only an authorized amendment may accept complete JSON text after the pinned
   host's missing-native-submission error, with finish=stop, one request, no tool
   attempts/rejections, confirmed abort and an active grant. Reject duplicate keys,

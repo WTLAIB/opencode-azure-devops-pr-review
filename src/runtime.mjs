@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import { COMMANDS, ROLES, PROMPTS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, validateSettings } from './config.mjs';
-import { OutputStatusError, OutputLocationError, locationRepairPlan, applyLocationAmendment, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, finalEnvelope } from './output.mjs';
+import { OutputStatusError, OutputLocationError, locationRepairPlan, applyLocationAmendment, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution } from './attribution.mjs';
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -266,7 +266,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     if (run.stages.some(s => s.outputTransportFallback)) body += '\nAmendment transport notice: a complete JSON text amendment was accepted after the host reported no native StructuredOutput submission. The scoped amendment and full original envelope both passed validation; no additional model request or JSON repair occurred. The original host error remains in the session and any response diagnostics; stage results record outputTransportFallback. Present this notice with the result.\n';
     if (run.stages.some(s => s.retryKind === 'location')) body += '\nLocation amendment notice: a bounded amendment asked the same reviewer to supply only missing locations from its existing source context, with ordinary tools denied. Original fields stay immutable; acceptance requires full envelope validation. This is a model-authored amendment, not independent proof of source locations. Inspect both attempt statuses: original failures and available raw submissions remain in the session and any saved diagnostics. Present this notice with the result.\n';
     body += diagnosticLocation(run);
-    body += '\nStage status meanings: check READY means source access is ready; initial/verifier COMPLETE means that review stage completed. These are compatible success states, not a status mismatch. They do not approve the PR.\n';
+    body += run.mode === 'check'
+      ? '\nStage status: READY means source access is ready; it does not approve the PR.\n'
+      : '\nStage status: initial/verifier COMPLETE means that review stage completed; it does not approve the PR.\n';
     if (error && run.stages.some(s => s.status === 'FAILED')) body += '\nInspect a failed child session locally with: opencode export <sessionID> (use its session= value above, not the AZPR run ID). Exports may contain private source and credentials; do not upload them unredacted.\n';
     if (run.userContext) body += '\nSupplementary context was supplied for this command only. Repeat it on /pr-review or /pr-deep; it is not saved as a repository-wide rule.\n';
     if (report && state.settings.returnReport === 'full') {
@@ -390,17 +392,21 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     // Only explicit command events grant access; matching text in chat/MCP results does not.
     if (mode === 'deep' && !state.settings.deepReady) throw new Error('[AZPR] All three models.deep roles must be configured before /pr-deep. No fallback to review models.');
     const { run, status, report, failure, review } = await workflow({ origin: input.sessionID, mode, profile: mode === 'deep' ? 'deep' : 'review', userContext: request.userContext }, async run => {
-      run.phase = 'source check';
-      const pre = await stage(run, roleFor(run.profile, 'check'), request, result => checkEnvelope(result, request.prUrl));
-      if (pre.status !== 'READY' || mode === 'check') return { status: pre.status, report: pre.report };
-      const snapshot = pre.snapshot, candidates = initialRoles(run.profile);
+      if (mode === 'check') {
+        run.phase = 'source check';
+        const pre = await stage(run, roleFor(run.profile, 'check'), request, result => checkEnvelope(result, request.prUrl));
+        return { status: pre.status, report: pre.report };
+      }
       run.phase = 'initial reviews';
-      const packet = { ...request, snapshot, sourceAccess: pre.sourceAccess ?? {}, requirements: pre.requirements ?? '' };
-      const first = await Promise.allSettled(candidates.map(role => stage(run, role, packet, result => initialEnvelope(result, snapshot, ROLES[role].prefix))));
+      const candidates = initialRoles(run.profile);
+      const first = await Promise.allSettled(candidates.map(role => stage(run, role, request,
+        result => initialEnvelope(result, null, ROLES[role].prefix, request.prUrl))));
       const failed = first.find(r => r.status === 'rejected');
       if (failed) throw new Error(`Initial review incomplete: ${errorText(failed.reason)}`);
       const reviews = first.map(r => r.value);
       if (reviews.some(r => r.status !== 'COMPLETE')) throw new Error('At least one initial reviewer reported PARTIAL; final verification was not started.');
+      const snapshot = mergeInitialSnapshots(reviews);
+      const packet = { ...request, snapshot };
       const allFindings = reviews.flatMap(r => r.findings);
       run.phase = 'final verification';
       const pendingLocations = allFindings.filter(finding => !Object.hasOwn(finding, 'location')).map(finding => finding.id);

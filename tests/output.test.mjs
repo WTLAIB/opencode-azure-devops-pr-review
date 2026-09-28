@@ -325,7 +325,7 @@ test('native schemas and role prompt examples describe the same quality contract
     }
   }
 });
-test('source guidance records observed access recipes, preserves cumulative proof, and bounds exploration',async()=>{
+test('review guidance uses PR versions; standalone check retains cumulative proof',async()=>{
   const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');
   const check=await readFile(new URL('../src/prompts/check.md',import.meta.url),'utf8');
   const result=JSON.parse(/```json\n([\s\S]*?)\n```/.exec(check)[1]);
@@ -333,7 +333,7 @@ test('source guidance records observed access recipes, preserves cumulative proo
   assert.match(common,/blob.*commit/s);
   assert.match(common,/array.*string/s);
   assert.match(common,/short branch name.*refs\/heads\//s);
-  assert.match(common,/at\s+most one identical retry/s);
+  assert.match(common,/At\s+most\s+one identical retry/s);
   assert.match(check,/Keyword search, PR membership queries\s+and file-content equality do not establish ancestry/);
   assert.match(check,/before and after.*listing/s);
   assert.match(check,/Do not explore unrelated/);
@@ -343,8 +343,8 @@ test('source guidance records observed access recipes, preserves cumulative proo
   assert.match(check,/post-listing tip check unless that second read actually occurred/);
   assert.match(check,/Do not perform a code review or diagnose defects/);
   assert.match(check,/missing required evidence prevents\s+READY/);
-  assert.match(common,/commit support for directory\s+listing/);
-  assert.match(common,/Recount lines from complete content already\s+read in this session/);
+  assert.match(common,/does not imply directory-listing Commit support/);
+  assert.match(common,/Reuse complete exact-commit content\s+already obtained in your own session/s);
   result.snapshot=snapshot;
   assert.equal(checkEnvelope(result).status,'READY');
 });
@@ -354,7 +354,7 @@ test('compact verifier prose keeps evidence and delegates only the duplicate sta
   assert.match(prompt,/Explain every original ID's disposition once/);
   assert.match(prompt,/runtime supplies the complete disposition table from your validated entries/);
   assert.match(prompt,/independent checks performed even when no findings survive/);
-  assert.match(prompt,/read the current PR head again/);
+  assert.match(prompt,/read the same PR metadata again/);
 });
 test('finding locations must be recounted from exact source without transport wrappers',async()=>{
   const common=await readFile(new URL('../src/prompts/common.md',import.meta.url),'utf8');
@@ -406,4 +406,30 @@ test('diagnostic projection excludes reasoning, tool payloads, headers, and unkn
   const large = diagnosticResponse({ info: { structured: { report: 'x'.repeat(100) } }, parts: [{ type: 'text', text: 'y'.repeat(100) }] }, 10);
   assert.equal(large.text.length, 10); assert.equal(large.textCharacters, 100); assert.equal(large.textTruncated, true);
   assert.equal(large.structured, undefined); assert.equal(large.structuredTruncated, true); assert.equal(large.structuredPreview.length, 10);
+});
+
+
+test('PR version contract: direct initials need no ancestry proof and bind the requested PR ID',()=>{
+  const s={...snapshot,scope:'pr'};
+  const value={...initial(),snapshot:s};
+  assert.equal(initialEnvelope(value,null,'F','https://dev.azure.com/org/project/_git/repo/pullrequest/1').status,'COMPLETE');
+  assert.throws(()=>initialEnvelope(value,null,'F','https://dev.azure.com/org/project/_git/repo/pullrequest/2'),/PR ID/);
+  assert.throws(()=>initialEnvelope({...value,snapshot:{...s,head:'2026-01-01T00:00:00Z'}},null,'F'),/SHA/);
+});
+
+test('PR version contract: final freshness checks source and target versions',()=>{
+  const s={...snapshot,scope:'pr'};
+  const value={...final([]),snapshot:s,currentBase:s.base};
+  assert.equal(finalEnvelope(value,s,[]).status,'COMPLETE');
+  assert.equal(finalEnvelope({...value,currentBase:'c'.repeat(40)},s,[]).status,'STALE');
+  assert.equal(finalEnvelope({...value,currentHead:'c'.repeat(40)},s,[]).status,'STALE');
+  for(const currentBase of [undefined,'',null,'2026-01-01']) assert.throws(()=>finalEnvelope({...value,currentBase},s,[]),/target|base/i);
+  assert.equal(finalEnvelope({...value,status:'INCOMPLETE',currentBase:''},s,[]).status,'INCOMPLETE');
+});
+
+test('PR version contract: initial failures may omit unknown snapshot but cannot invent findings',()=>{
+  const value={status:'PARTIAL',coverage:{files:[],gaps:['PR metadata unavailable']},findings:[],report:'Missing PR metadata'};
+  assert.equal(initialEnvelope(value,null,'F').status,'PARTIAL');
+  for(const bad of [{...value,status:'COMPLETE'},{...value,findings:[finding()]},{...value,coverage:{files:[],gaps:[]}}])
+    assert.throws(()=>initialEnvelope(bad,null,'F'));
 });

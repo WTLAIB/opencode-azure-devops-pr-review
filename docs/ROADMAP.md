@@ -11,11 +11,11 @@ Implemented and covered by offline tests:
 
 - Opt-in normal/deep orchestration with two concurrent independent initial
   sessions and one final verifier; mode-specific three-role configuration.
-- Strict source snapshots, complete coverage ledgers, counterevidence, corrected
-  verified findings, complete dispositions, and stale-head handling.
+- PR-version snapshots, complete coverage ledgers, counterevidence, corrected
+  verified findings, complete dispositions, and stale source/target handling.
 - Native structured output plus explicit text compatibility; each role receives
-  only its selected submission policy. The verifier's head uses a scalar string
-  schema while unknown/stale-head validation remains strict. Receipt/full
+  only its selected submission policy. The verifier's source/target versions use
+  scalar strings while unknown/stale-version validation remains strict. Receipt/full
   presentation, opt-in diagnostics, final/comment language, model attribution.
 - Audited local finding-key whitespace/empty-string-or-null extension normalization, exact
   finding-key validation and field-path errors, without extra model requests or
@@ -41,21 +41,27 @@ Implemented and covered by offline tests:
 - Saved inline-comment previews and explicit, uncertainty-aware publication.
 - Shared lifecycle/cancellation handling, private-role grants, literal context,
   direct settings conversion, and the 24-file minimal installer.
-- Source-access identity hints and observed-call handoff, prompt guidance against
+- Source-access identity hints and independent initial discovery, guidance against
   deterministic lookup loops/unrelated discovery, exact-source line recounting,
   and receipt guidance that does not resume completed reviewers. Offline routing
   and policy checks are not proof of improved live MCP error rates or report quality.
 - Compact initial reports without duplicate finding prose, explicit base/head
-  direction checks including excluded changes, and failed-capability handoff
+  direction checks including excluded changes, and failed-call guidance
   by cause/version semantics. No official MCP or OpenCode host patch is included.
   Diagnostics add per-attempt timing, model-request and output-size observations.
 - A self-contained readiness policy avoids loading full finding-review rules in
-  check. Its short decision path and factual handoff preserve cumulative versions,
+  standalone check. Its short decision path and report preserve cumulative versions,
   full changes/source and failure statuses. Content/directory selector guidance,
   batched independent reads and concise final prose target unnecessary work;
   the runtime still supplies the complete attribution/disposition tables.
   Diagnostics add input/instruction sizes and remaining whole-run time per attempt.
   Live latency, model compliance and error-rate improvement remain unverified.
+
+The automatic check stage has been removed from normal/deep reviews. Initials
+establish PR-reference snapshots independently; runtime compares identity and
+versions and passes their combined paths to the verifier. Missing metadata can
+be PARTIAL without placeholder SHAs. Offline routing and contract coverage do
+not establish live stability, latency or finding-attribution gains.
 
 Repeated normal-profile smoke runs on one fixed synthetic PR are recorded
 privately. They completed with the expected defects but exposed variable latency,
@@ -103,10 +109,11 @@ PRs and approved model accounts. Individual evidence stays in the private handov
 - [x] Independently check initial normal-profile smoke results against a fixed
   synthetic snapshot and private expected outcomes, including a correct control.
   This milestone alone does not establish repeatability or general review quality.
-- [ ] `/pr-check` establishes the complete cumulative snapshot and exact-commit
-  source access; failures give concrete missing capabilities.
-- [ ] Normal review starts both initial sessions independently, validates full
-  coverage, and invokes the verifier even if no initial findings exist.
+- [ ] Optional standalone `/pr-check` establishes cumulative readiness or reports
+  concrete missing capabilities; its success is not a prerequisite for review.
+- [ ] Normal review starts both initials directly, validates identity/versions and
+  full coverage, and invokes the verifier even with no initial findings. Evaluate
+  discovery differences, mid-run versions and target-only changes.
 - [ ] Receipt and full modes preserve the same stage contracts. Check the actual
   final report against saved diagnostics; evaluate configured report/comment
   language and the model/method disclosure, not just status text.
@@ -138,22 +145,16 @@ Status: planned after P0; methodology proposed, not executed.
   if useful, a single-review baseline. Hold the verifier, snapshot, tool access,
   models/budgets, and evaluation protocol as constant as possible; repeat runs
   to expose variance and record any unavoidable differences.
-- Consider a three-session variant: concurrent functional/risk reviews followed
-  by the verifier, with `/pr-check` retained as a standalone diagnostic. Each
-  initial would establish its own fixed cumulative snapshot; repository/PR,
-  base/head, scope and the complete changed-file set must agree before verification.
-  Reject disagreements and partial coverage rather than silently reconciling
-  snapshots. Compare latency, duplicated discovery, mid-run PR changes and the
-  cost of discovering access failures late against the current shared check.
-  This is a future design/evaluation candidate, not an implemented mode or
-  authorization to remove the existing source-check stage.
-- First compare the compact shared-check policy with the previous policy at fixed
-  models, source, directory and time budget. Record optional empty exploration,
-  repeated failed capabilities, real source gaps, prompt/request counts and time
-  left for verification; retain failed samples. Also consider a later shared
-  source-preparation design with three AI reviewers, if a separately approved
-  host-compatible adapter can preserve the snapshot and permission boundaries.
-  Existing MCP capability gaps must remain explicit in either design.
+- Evaluate the implemented three-session flow against the recorded check-first
+  baseline: concurrent initials, local PR/version comparison, combined paths,
+  then verification. Keep models/budgets/source steady and record duplicated
+  discovery, MCP/output failures, final versions and remaining verifier time.
+  The accepted comparison uses PR-reported SHAs, not timestamps or independent
+  ancestry proof. Test target-only changes and metadata lag explicitly.
+- Compare source coverage, finding attribution and report quality before claiming
+  removal improves reliability. Fewer optional queries cannot repair server bugs
+  or missing review envelopes. No shared-source adapter or official MCP patch
+  is included in this change.
 - Match claims by root cause/trigger/impact. Report missed defects, false positives,
   duplicate rate, evidence/coverage gaps, contract failures, and comment usefulness.
   Record latency and actual usage/cost where available as secondary measurements.

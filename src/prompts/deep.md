@@ -8,4 +8,4 @@ Risk reviewer: examine interleavings, retries after partial success, transaction
 
 Final verifier: independently inspect the high-risk paths behind both initial reports, look for counterevidence and inconsistent assumptions, and verify the current PR head. Account for every F/R finding. Do not treat agreement as proof, or greater model cost as evidence of correctness.
 
-Both modes review the complete cumulative diff. Deep mode adds tracing and scrutiny, not permission to skip files in normal mode or claim completeness when source is missing. State unverified paths and limitations; never start more models or rerun the review automatically.
+Both modes review the complete current PR change list at the selected source/target references. Deep mode adds tracing and scrutiny, not permission to skip files in normal mode or claim completeness when source is missing. State unverified paths and limitations; never start more models or rerun the review automatically.

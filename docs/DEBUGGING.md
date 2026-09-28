@@ -14,8 +14,8 @@ available finish/error names and character counts, without dumping source into
 the receipt. Do not resolve these failures by automatically repeating reviews
 or a publishing attempt.
 
-`azpr-*-check: READY` is a successful source-readiness result; later review stages
-use COMPLETE. This difference is intentional. A completed review can contain
+`azpr-*-check: READY` is a standalone source-readiness result; review stages
+use COMPLETE. Normal/deep reviews no longer contain a check stage. This difference is intentional. A completed review can contain
 intermediate MCP errors: `warnings: []` concerns diagnostics/cleanup, not every
 tool invocation. Inspect the local child history for actual tool failures.
 
@@ -28,13 +28,13 @@ receipt and diagnostic location without retrieving or regenerating the report.
 A later explicit diagnostic request can read local artifacts; full return mode
 is an opt-in for including the entire report in the ordinary conversation.
 
-For repeated source lookups, inspect `sourceAccess` and the next stage's request:
-confirmed identity, successful argument shapes, failed attempts and checked
-alternatives should travel together. Compare tool errors by operation/arguments,
-not just final status or elapsed time. Incorrect types, object kinds and version
-selection need correction; identical retries do not repair them. A zero-result
-search is not evidence of an unavailable index. The prompt's transient-read retry
-guidance is separate from `outputRetries` and is not a runtime-enforced MCP cap.
+For repeated source lookups, inspect each initial's calls, snapshot and coverage,
+then the verifier's combined paths. There is no checker handoff in normal/deep
+runs. Compare errors by operation/arguments, not just duration. Confirm changed
+files were explicitly requested before concluding the capability is missing.
+Identical retries cannot fix type/version errors; an empty search does not prove
+an index outage. Transient-read guidance is separate from outputRetries and is
+not a runtime-enforced MCP retry cap.
 
 ## Inspect an existing failed session
 
@@ -69,7 +69,7 @@ not an ADO tool name or allowlist. The plugin still validates snapshots,
 finding IDs, dispositions, and comment-plan constraints.
 
 Only the chosen transport's submission instructions appear in each role prompt.
-The verifier declares currentHead as a scalar string: a full SHA, or an empty
+The verifier declares currentHead/currentBase as scalar strings: a full SHA, or an empty
 string only for INCOMPLETE when the current head could not be verified. JSON text
 needs normal JSON string serialization; quotation marks are not part of the SHA
 value passed to a tool. Older null/incomplete envelopes remain readable, but no
@@ -153,7 +153,7 @@ same session; the separate guard below bounds native structured rejections.
 This is not general recovery for `StructuredOutputError`, missing/malformed JSON,
 authentication or transport errors, incomplete coverage, missing evidence,
 changed heads, cancellation, or comments. Those still stop. No whole workflow is
-rerun, and the existing timeout is not reset. Each of the four review stages can
+rerun, and the existing timeout is not reset. Each of the three review stages can
 have at most one extra formatting request; extra usage may still be billed by
 the selected provider. Host-internal retries and auxiliary calls are separate.
 
@@ -284,8 +284,9 @@ printed in its receipt:
 | `result.json` | Overall outcome/error and all completed stage records. |
 | `report.md` | Runtime final report, including model attribution and dispositions; or the comment preview/publication receipt. Absent if no report was produced. |
 
-A complete normal or deep review normally has four stage records: source check,
-functional initial review, risk initial review, and final verification. An
+A complete normal or deep review normally has three stage records: functional
+initial review, risk initial review, and final verification. Standalone `/pr-check`
+has one source-check record. An
 enabled amendment adds one attempt record for the affected stage. Location repair
 uses the original session; status repair creates a new one. `MODE` is `review`
 or `deep`; the two initial file numbers may vary because the sessions start
@@ -313,7 +314,7 @@ time before the attempt record is written. They do not reserve time, shorten a
 stage or reset the deadline. Compare them to see how much budget reaches the
 verifier; a smaller prompt alone does not prove less model waiting or generation.
 
-For readiness regressions compare its sourceAccess claims with actual tool history,
+For standalone readiness regressions compare its sourceAccess claims with actual tool history,
 especially the cumulative base, continuation fields and both branch-tip reads of
 a claimed fallback. The compact checker does not inherit finding-analysis rules;
 it must still report NOT_READY if required evidence is missing. Count successful
@@ -329,7 +330,13 @@ the other reviewer or reinterpret the missing report as a completed review.
 For quality-contract failures, compare the saved response to its request schema:
 
 - Each initial review needs `coverage.files` and `coverage.gaps`. COMPLETE cannot
-  omit a snapshot file or carry review gaps; PARTIAL must explain its gaps.
+  omit a snapshot file or carry review gaps; PARTIAL must explain its gaps. An
+  unavailable snapshot may be omitted only with PARTIAL and empty files/findings.
+- Direct snapshots use scope=pr. Repository/PR and source/target SHAs must agree
+  between initials; path differences form a union for the verifier. A version
+  mismatch fails the run even if each stage passed its local output contract.
+- Final currentHead and currentBase are required for PR-scope COMPLETE. Either
+  changed version gives STALE; unavailable versions cannot produce COMPLETE.
 - Every finding needs `counterevidence`, severity and a correction/verification
   suggestion as well as its ID, summary and source evidence. Initial location
   alone may be absent; final confirmed findings/discoveries require it. No extra

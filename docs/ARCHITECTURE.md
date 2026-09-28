@@ -5,11 +5,10 @@
 ```text
 Explicit /pr-review or /pr-deep + URL + literal context
   -> command hook / shared lifecycle / session grants
-  -> source check (selected profile's risk model)
-  -> fixed cumulative PR snapshot
        +-> functional session --+
-       +-> risk session --------+  concurrent, independent, full coverage
-  -> verifier session (source checks + dispositions + current-head check)
+       +-> risk session --------+  concurrent PR discovery + full review
+  -> local repository/PR + source/target SHA comparison, union of paths
+  -> verifier session (source checks + dispositions + PR-version recheck)
   -> final report + deterministic model/method disclosure
   -> completed-review memory cache (only for COMPLETE)
        -> explicit /pr-comment: preview
@@ -19,7 +18,8 @@ Each stage -> OpenCode Session SDK -> configured providers and host tools/MCP
 Optional diagnostics <- stage records (private files; not a resumable cache)
 ```
 
-`/pr-check` stops after the source check and uses the normal profile's risk model.
+`/pr-check` is a standalone diagnostic using the normal profile's risk model;
+it is not invoked by `/pr-review` or `/pr-deep`.
 `/pr-stop` revokes active grants and requests child-session cancellation. There is
 no Azure client, model SDK, background job, or automatic publishing path here.
 
@@ -36,6 +36,7 @@ Revisit them with an explicit decision and evidence, not as incidental cleanup.
 | Decision | Reason and tradeoff | Revisit when |
 | --- | --- | --- |
 | Two full-scope initial reviews with different emphasis, then one verifier | Independent candidates plus evidence checking; costs more than one pass and does not prove better recall. | Representative, independently labeled PR evaluations support a change. |
+| Direct initial reviews with PR-reported versions | Removes preflight and ancestry investigation; discovery is duplicated and the target reference is not a proven merge base. | Live evaluation reveals unacceptable attribution gaps or instability. |
 | Separate three-role normal/deep profiles | Direct configuration, static model bindings, and no hidden deep fallback; six configurable slots need not mean six distinct models. | A demonstrated workflow need outweighs added configuration complexity. |
 | Host-owned tools with no MCP catalog | Supports renamed tools and existing connections; source truth and read-only compliance remain model/host responsibilities. | A separately approved adapter/security requirement justifies narrowing this scope. |
 | Strict evidence with audited format tolerance, deferred initial locations and one opt-in status OR final-location amendment | Reduces failures from redundant metadata and transport; final confirmations remain complete. No inferred evidence, extra tools or unbounded repair. | Representative live evaluation reveals a quality or reliability tradeoff. |
@@ -54,40 +55,41 @@ The local plugin controls a fixed workflow through the OpenCode-provided Session
 
 The source entry is `src/plugin.js`, which imports the runtime beside it. Installation creates a small `plugins/azpr.js` loader that re-exports `./azpr/plugin.js`. Runtime code, prompts, settings, generated module metadata, and any supplied optional uninstaller/docs/schema live under `plugins/azpr/`. The source `package.json` is not required; installation generates the minimal `type: module` declaration. The loader does not import through a parent directory. OpenCode 1.18.31 scans top-level plugin `.js`/`.ts` files; nested helpers are not separate entries.
 
-A source check runs first. Both normal and deep profiles then run two initial reviewers (functional and risk) concurrently in separate child sessions, each receiving the same request and snapshot but no other initial review. Their configured verifier starts only after both initial reviews complete successfully. Deep adds depth instructions and its own initial iteration budget, not a third initial reviewer or an automatic fallback.
+Both normal and deep profiles start functional and risk sessions concurrently,
+with the same literal request and URL hints, without a checker snapshot or sibling
+report. Each reads PR metadata, requests changes and reviews source. Once both
+return COMPLETE, the runtime compares identity/source/target versions, combines
+the paths and starts the verifier. Deep adds instructions and an initial budget,
+not a third initial or fallback.
 
-The check role compiles from its self-contained readiness policy plus the selected
-transport instruction. It does not inherit `common.md` finding-review rules or
-deep analysis instructions. Its own policy retains explicit read-only, untrusted
-data, literal-context and host-permission boundaries. Both initial reviewers and
-the verifier still use the complete common review policy. No file or setting was
-added to the 24-file installation contract.
+The target comparison reference is PR-reported, not a certified merge base.
+Prompts prefer native PR changes/diffs and exact-commit source, limit findings to
+the PR, and disclose uncertain attribution where target-only changes can confuse
+two-commit comparison. No ancestry/history or whole-tree proof is required.
+PR metadata can lag branch state; this is not an atomic repository snapshot.
 
-Readiness follows a short identity/comparison/complete-changes/source/decision
-path. The checker stops optional discovery on either supported readiness or a
-required capability gap, retaining all necessary source and pagination checks.
-It emits concise retrieval facts and a short report, without sharing suspected
-defects. The runtime passes only its snapshot, sourceAccess and requirements
-alongside the original request, not its report. These are model claims, not an
-audited source cache; no tool-result sharing, adapter or no-check mode is added.
+Standalone `/pr-check` retains its self-contained cumulative-readiness policy,
+without common finding rules or deep instructions. Its result is not passed to
+later reviews. The static role catalog and 24-file installation stay unchanged;
+an unused deep check definition is not a run.
 
-Each mode owns `functional`, `risk`, and `verifier` model settings. Its risk model also handles source checks and comments; standalone `/pr-check` uses the normal profile's risk model. The selected profile is bound to the run and cached with completed reviews, so later comment commands use the original profile even after a different mode runs.
+Each mode owns `functional`, `risk`, and `verifier` model settings. Its risk model also handles comments; standalone `/pr-check` uses the normal profile's risk model. The selected profile is bound to the run and cached with completed reviews, so later comment commands use the original profile even after a different mode runs.
 
 Command input is parsed into `prUrl` and literal `userContext`, while retaining
 the original request. All stages receive those fields directly; context is never
-replaced by the checker's summary or inherited from earlier commands. Receipt
+replaced by a model's summary or inherited from earlier commands. Receipt
 diagnostics identify the failing workflow phase without echoing supplementary text.
 
 Recognized cloud URL layouts also produce `urlIdentity` hints separating the
 organization/project/repository; unknown server layouts remain untouched. Hints
-are not verified server identity and never drive an API call. The checker's
-optional `sourceAccess` string map carries observed identity, successful argument
-recipes, failed attempts and checked alternatives through the existing packet to
-both initials and the verifier. These untrusted notes do not replace independent
-source reads or expose sibling findings. Prompt policy discourages deterministic
-retry loops and unrelated discovery while preserving cumulative scope, pagination
-and freshness. No MCP catalog, argument adapter or programmatic retry was added.
-See [source-access discipline](AZURE_MCP.md#avoiding-repeated-lookup-failures).
+are not verified server identity and never drive an API call. Each initial
+confirms the requested PR and uses the stable target repository ID. The verifier
+gets both original reviews and the combined snapshot. No checker recipe or
+source cache is shared. Prompts request changed-file inclusion explicitly,
+discourage deterministic retry loops and optional tree/history probes, and retain
+pagination, independent reads and final freshness. No MCP catalog, adapter or
+programmatic retry is added. See
+[source-access discipline](AZURE_MCP.md#avoiding-repeated-lookup-failures).
 
 ## Authorization
 
@@ -139,7 +141,7 @@ are outside those character counts.
 
 ## Evidence contract
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes, cumulative scope, and a nonempty unique file list. Initial and final snapshots must match, including file order. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot copies that union exactly. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
@@ -158,8 +160,10 @@ Initial envelopes also require `coverage: { files: [...], gaps: [...] }`. Files
 must be unique exact members of the snapshot; order does not matter. COMPLETE
 requires every snapshot file and no gaps, including reviews with zero findings.
 PARTIAL requires a concrete gap explanation and never reaches final verification.
-The snapshot itself still preserves the original file order. This ledger records
-the model's claimed coverage, not an independent source-access audit.
+If metadata is unavailable, a direct initial may omit snapshot only with PARTIAL,
+empty coverage.files/findings and concrete gaps. It cannot reach verification or
+status-only recovery. The verifier inspects the union and discovery differences;
+original lists remain intact. Coverage is model-reported, not an independent audit.
 
 All final confirmed findings and discoveries require `id`, `summary`, `location`, `evidence`, `counterevidence`,
 `severity` (high/medium/low), and `suggestion`. Prompts require a reachable trigger,
@@ -191,7 +195,7 @@ unresolved evidence, while REJECTED must explain a concrete refutation in prose.
 MERGED means the same root cause and correction; distinct triggers/impacts must
 be retained in the confirmed representative rather than silently discarded.
 
-The final verifier reports the current PR head. A mismatch becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
+The final verifier rereads the same PR and returns currentHead and currentBase. Either changed version becomes `STALE`, with no automatic rerun. Invalid JSON, inconsistent snapshots, missing dispositions, or partial initial reviews produce an incomplete result.
 
 The verifier explains each defect and every original disposition once in its
 localized prose, retaining evidence, counterevidence, corrections and limitations.
@@ -199,17 +203,15 @@ The runtime appends the complete model and ID/status/merge tables from validated
 records; the model need not reproduce those tables. Structured finding fields
 and disposition requirements are unchanged.
 
-The native `currentHead` schema has scalar `type: "string"`, avoiding tool
-converters that mishandle array-valued nullable types. Its value is the full SHA,
-without extra quote characters; an unavailable head is an empty string with
-INCOMPLETE. Existing runtime validation still accepts historical null/incomplete
-results, rejects unknown or malformed heads for COMPLETE/STALE, supports full
-40/64-character hashes, and marks a different current head STALE. It never strips
-quotes, copies the snapshot head into missing output, or parses XML tool markup
-as a substitute for an accepted envelope. This is a schema compatibility measure,
-not proof of any hosted provider's parser implementation or live reliability.
+Native `currentHead` and `currentBase` use scalar string schemas: full
+40/64-character SHAs without extra quote characters. An unavailable value uses
+an empty string with INCOMPLETE; COMPLETE requires both for PR scope. Legacy
+cumulative envelopes retain the former head contract. Comparison ignores SHA
+case. The runtime never strips quotes, copies missing current versions from the
+snapshot or parses XML tool markup as an envelope. Dates are not version identity.
+Fresh repository/PR identity remains a model check, not a provider-response audit.
 
-Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be reported as NOT_READY by the checker, not rejected because a preferred tool name was absent.
+Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be PARTIAL in initial review (NOT_READY for standalone check), not rejected because a preferred tool name was absent.
 
 ### Audited finding-format normalization
 
@@ -383,7 +385,7 @@ not its README's older confidence-scoring description. It does not copy fixed
 tool names, automatic PR skipping, diff-only restrictions, or per-finding agent
 fan-out. Two independent full reviews and one verifier remain the fixed workflow,
 with unchanged model settings and budgets. Even empty initial finding lists go
-through independent source verification and the current-HEAD check.
+through independent source verification and the final PR-version check.
 
 Applicable repository guidance can inform the review, but only as untrusted
 data. Rule-based findings must cite an explicit requirement, its file/commit and
@@ -445,8 +447,8 @@ exclusive files, owner-only modes, and per-run Git ignores reduce accidental
 overwrites and commits. Debug write failure is nonfatal and visible in receipts.
 This is not DLP or automatic secret redaction. See [diagnostics](DEBUGGING.md).
 
-Receipts explain that check READY and reviewer COMPLETE are compatible success
-states. In receipt mode, child-session navigation is a human read-only UI action,
+Receipts explain the applicable standalone READY or reviewer COMPLETE status;
+neither is PR approval. In receipt mode, child-session navigation is a human read-only UI action,
 not an instruction to resume a revoked reviewer with Task or a new prompt. When
 navigation is unavailable the parent should present the receipt and diagnostic
 location. Full mode remains the explicit choice for returning the report text.

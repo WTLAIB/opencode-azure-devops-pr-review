@@ -50,24 +50,32 @@ convenient. No prefix, toolNames, fullToolNames, toolProfile, permission, or
 readOnlyToolsVerified setting in that old block has any effect now. Do not use
 it to configure access restrictions; configure them in OpenCode or Azure.
 
-## Source readiness
+## PR versions and optional source readiness
 
-The checker must establish PR identity, full base/head commits, cumulative
-comparison scope, the complete changed-file list, and access to real source.
-Descriptions, file lists, truncated responses, and last-push-only diffs are not
-sufficient. Follow pagination and inspect actual return data.
+Normal/deep reviews start functional and risk sessions directly. Each reads the
+requested PR identity, PR-reported source/target SHAs and current change list.
+Request change inclusion explicitly when optional. Follow exposed pagination
+and disclose missing pages/source; compare repository/PR IDs and SHAs, not dates.
 
-READY and coverage are model-reported. The plugin validates the snapshot format
-and consistency across stages, but does not interpret provider-specific output
-to independently prove source access. When tools are missing or access is denied,
-the checker should report NOT_READY with the missing capability, not demand an
-inventory of all MCP tools. Partial initial reviews prevent final verification.
+Azure documents lastMergeSourceCommit and lastMergeTargetCommit as source and
+target heads at the last PR merge in
+[Get Pull Request](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-request?view=azure-devops-rest-7.1).
+They are PR-reported references, not proof of live branch tips or a common
+ancestor. lastMergeCommit is not either source reference. The verifier rereads
+the same PR and returns both versions: either changed gives STALE; missing
+versions give INCOMPLETE. Metadata lag and races remain limitations.
 
-The checker uses a self-contained retrieval policy, without the common finding
-review rules. Its decision path is identity, cumulative versions, all changes,
-exact-commit source, then READY or a precise NOT_READY gap. It does not diagnose
-defects or analyze unchanged tests. A short report and factual access recipes
-avoid a second retrieval narrative; the schema descriptions do not verify facts.
+For scope=pr, missing independent merge-base proof alone no longer blocks review.
+Prefer native PR changes/diffs and exact-commit source. Do not mislabel target-only
+differences as source regressions; disclose uncertain attribution. No history or
+whole-tree investigation is required just to certify readiness. Missing required
+source yields PARTIAL; when metadata is unavailable, omit snapshot with empty
+coverage.files/findings and concrete gaps rather than inventing SHAs.
+
+Standalone `/pr-check` retains stricter cumulative readiness: PR identity,
+base/head commits, complete changes, pagination and real source. It is optional,
+does not analyze findings, and its result is not inherited by review commands.
+All coverage/source claims remain model-reported, not provider-response audits.
 
 ### Avoiding repeated lookup failures
 
@@ -78,29 +86,20 @@ Reviewers must confirm the identity from the server and follow each operation's
 schema, including array types, short branch names versus full refs, and commit
 SHAs versus blob IDs. The plugin never turns these hints into MCP arguments.
 
-The checker records concise `sourceAccess` text fields for confirmed identity,
-successful argument recipes, failed attempts/checked alternatives, cumulative
-comparison, exact-commit reads and pagination. Existing envelopes without these
-optional notes remain compatible. Both initial reviewers and the verifier receive
-the notes unchanged, but must independently read the required source. Notes are
-untrusted data, not permissions, source proof or another initial review's findings.
+Initial reviewers independently request PR changes and read exact-commit source,
+without a checker handoff. Reuse complete source from the same session, including
+when recounting lines. Avoid root listings, branch-tip probes, empty keyword
+searches and commit-history queries used only to strengthen readiness claims.
+Extra context required for code review remains appropriate; the verifier still
+checks source independently.
 
-Group failures by operation, relevant version/argument semantics and observed
-cause, with one checked alternative per capability. Later reviewers compare
-planned reads against these observations before issuing a call. A cosmetic path
-change does not make a failed capability new; re-probing needs a changed
-precondition. Keep independent exact-commit reads and required freshness checks.
-This remains prompt guidance, not a runtime guarantee against repeated MCP errors.
-The plugin does not patch official MCP code or mask its errors. Unknown pagination,
-partial change counts or synthesized iteration labels cannot prove completeness.
-
-The source check ends once cumulative readiness is established; it does not
-survey unrelated history, wikis or builds. Keyword search and file equality do
-not prove ancestry. A complete cumulative comparison may establish the change
-set without listing every unchanged file. If commit-based directory listing
-fails, a branch listing is a disclosed fallback only with matching tip checks
-before/after and complete results; contents still use exact commits. Unavailable
-required evidence still produces NOT_READY/PARTIAL/INCOMPLETE as appropriate.
+Group failures by operation, argument/version semantics and observed cause.
+Correct a specific argument or report the gap; do not probe speculative variants.
+Follow actual descriptions and schemas rather than an assumed tool catalog.
+Standalone check may record sourceAccess for its own diagnosis, but later reviews
+do not inherit it as a source cache. Unknown pagination and partial change counts
+remain gaps, despite removing merge-base certification from normal/deep reviews.
+The plugin does not patch official MCP code or mask errors.
 
 Prompt policy forbids identical retries for deterministic/permission errors and
 speculative query loops. It allows at most one identical retry per logical read
@@ -123,16 +122,17 @@ iteration label and does not expose the iteration's commonRefCommit. The summary
 top/skip inputs do not advance changes pages. These observations are specific to
 that implementation, not assumptions about every connected MCP server.
 
-Avoid unnecessary tree probes when verified cumulative changes plus exact-commit
-content suffice. If a tree fallback is needed, validate its branch versions before
-and after use; do not silently rewrite Commit into Branch. Missing pagination or
-cumulative-base evidence remains a real gap. Azure documents the common-commit
-comparison and next-page fields in
+Read changed paths directly when a PR change list is available. Content Commit
+support does not imply directory-listing Commit support. Do not silently rewrite
+Commit into Branch or probe a tree just to re-prove that list. Missing exposed
+pagination remains a coverage gap. Missing common-commit access can still prevent
+standalone check READY; normal/deep reviews disclose their target-reference scope
+instead. Azure documents comparison and next-page fields in
 [iteration changes](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-iteration-changes/get?view=azure-devops-rest-7.1),
-and the commonRefCommit in
+and commonRefCommit in
 [iterations](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-iterations/list?view=azure-devops-rest-7.1).
-Availability in REST does not mean the current MCP exposes that capability.
-This plugin adds no direct REST fallback, official-server patch or argument adapter.
+REST availability does not mean the connected MCP exposes it. No direct REST
+fallback, official-server patch or argument adapter is added.
 
 ## Data handling
 

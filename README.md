@@ -86,8 +86,8 @@ include `uninstall.sh` now or obtain the matching script when needed.
 | Command | Workflow |
 | --- | --- |
 | `/pr-check <Azure PR URL> [context]` | Check complete PR changes and fixed-commit source with `models.review.risk`. |
-| `/pr-review <Azure PR URL> [context]` | Source check, two independent initial reviewers, then evidence verification. |
-| `/pr-deep <Azure PR URL> [context]` | Source check, two independent initial reviewers, then final verification, using the deep profile and deeper analysis instructions. |
+| `/pr-review <Azure PR URL> [context]` | Two independent initial reviewers start directly, then evidence verification. |
+| `/pr-deep <Azure PR URL> [context]` | The same three-stage flow, using the deep profile and deeper analysis instructions. |
 | `/pr-comment <review-id> [--publish]` | Preview concise inline feedback; explicitly publish that saved preview. |
 | `/pr-stop [run-id]` | Revoke the run's grants and request cancellation of its review sessions. |
 
@@ -103,7 +103,7 @@ Everything after the URL is optional, literal `userContext`: repository backgrou
 acceptance criteria, or review priorities. No quoting is required; Unicode,
 embedded quotes, and newlines are preserved. The URL plus context is limited to
 16,000 characters. Each review stage receives the original context separately
-from PR data and the checker's summary. Reviewers are instructed to report any
+from PR data and other model-authored notes. Reviewers are instructed to report any
 unverified requirements; this does not guarantee perfect model compliance.
 
 Context applies **only to that command**. `/pr-check` checks readiness, not defects;
@@ -114,13 +114,15 @@ routing and configured `outputLanguage` remain controlled by the workflow. Do no
 requests retain it like other review input. The installed command templates
 prevent native argument expansion before the plugin handles this text.
 
-Source readiness uses a dedicated, compact policy instead of the full finding
-review rules. It establishes the common cumulative snapshot, complete change set
-and exact-commit source access, then stops optional discovery. It still precedes
-both independent initial reviews; missing required evidence remains NOT_READY.
-This reduces unrelated instructions, not evidence requirements. Models, iteration
-limits and the whole-run deadline are unchanged; reduced live latency or MCP error
-rates require evaluation. See [source access](docs/AZURE_MCP.md) for known limits.
+Normal and deep reviews start the initial reviewers directly. Each reads PR
+identity and source/target commit references, requests the changed files, and
+reviews them. The runtime compares identities/versions before verification.
+`/pr-check` remains an optional separate diagnostic with stricter cumulative
+readiness requirements; its result is not a prerequisite or cached review input.
+
+This removes a model session and ancestry/whole-tree discovery from the review
+path. It does not guarantee fewer live errors or faster models. See
+[source access](docs/AZURE_MCP.md) for limits and evaluation needs.
 
 ### Optional PR comments
 
@@ -144,12 +146,12 @@ You may remove that obsolete block; the installer preserves your private setting
 Global/project OpenCode permissions remain unchanged. Private reviewers are their
 own agents; they do not inherit another agent's private permission overrides.
 
-To reduce avoidable lookup errors, reviewers receive separate URL identity hints
-and the checker's observed successful calls/known failures. They still read source
-independently. Prompts require schema/type checks, distinguish commit IDs from blob
-IDs, avoid repeated deterministic errors and stop optional discovery once source
-readiness is established. No MCP wrapper, automatic stage retry or tool allowlist
-is added. Actual error reduction needs live verification; see
+To reduce avoidable lookup errors, reviewers receive URL identity hints and
+request the PR change list explicitly. They read changed files at exact commits,
+avoid directory/history probes used only to prove readiness, reuse source within
+their own session, and do not repeat deterministic parameter errors. No official
+MCP patch, wrapper, argument adapter, automatic stage retry or allowlist is added.
+Actual error reduction needs live verification; see
 [source-access discipline](docs/AZURE_MCP.md#avoiding-repeated-lookup-failures).
 
 ## Model roles
@@ -159,12 +161,12 @@ Configure three roles under `models.review` and the same three under `models.dee
 | Role in either profile | Responsibility | Selection criteria |
 | --- | --- | --- |
 | `functional` | Independent correctness review: requirements, boundaries, state changes, API compatibility, and regressions. | Strong code comprehension in the repository's languages. |
-| `risk` | Independent failure/risk review: exceptions, retries, concurrency, authorization, and data consistency. Also the profile's source checks and comments. | Evidence-based cross-path reasoning and reliable MCP tool use. |
+| `risk` | Independent failure/risk review: exceptions, retries, concurrency, authorization, and data consistency. Also the profile's comments and standalone normal-profile source check. | Evidence-based cross-path reasoning and reliable MCP tool use. |
 | `verifier` | Recheck both initial reports against source, seek counterevidence, merge duplicates, and write the final report. | Strong evidence judgment, long-context handling, and instruction following; not just summarization. |
 
 Every role needs reliable tool use and structured output. Use services approved for the PR's data and check actual cost and latency; neither mode implies a pricing tier. The same model ID may fill multiple roles or both profiles. Sessions stay separate, but model diversity and independent reasoning quality are not guaranteed. Never commit your private model mappings, internal endpoints, credentials, or review output.
 
-Both modes run a source check, **two independent initial reviews**, and one final verification stage. Initial reviewers run concurrently on the full cumulative PR without seeing each other's results. They use `F-` and `R-` finding IDs. The final verifier receives both reports and must check the source again, accounting for every original finding as confirmed, requiring information, rejected, or merged. It does not decide by majority vote.
+Both modes run **two independent initial reviews** concurrently, then one final verification stage: three child sessions in the ordinary case. There is no automatic check stage. Initial reviewers discover and review the current PR changes without seeing each other's results. They use `F-` and `R-` finding IDs. The final verifier receives both reports and must check the source again, accounting for every original finding as confirmed, requiring information, rejected, or merged. It does not decide by majority vote.
 
 Quality takes priority over speed: no file sampling, confidence-score cutoff,
 automatic skip for small/draft/already-commented PRs, or removal of final
@@ -181,9 +183,22 @@ and evidence fields in both output transports; it cannot prove that a model
 actually read the files or that its conclusions are true. See the
 [evidence contract](docs/ARCHITECTURE.md#evidence-contract).
 
-Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.check` (24), `steps.final` (100), and the run timeout. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
+Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.final` (100) and the run timeout; `steps.check` (24) applies only to standalone `/pr-check`. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
 
-A source check fixes the repository, PR ID, base/head commits, and cumulative changed-file list. It uses that mode's `risk` model; standalone `/pr-check` uses `models.review.risk`. A snapshot whose PR ID differs from the URL is rejected. Incomplete initial reviews prevent final verification, and circular finding merges cannot produce a complete report. A model-reported changed PR head produces `STALE`; the plugin never automatically reruns the review.
+Each initial establishes a `scope: "pr"` snapshot: repository identity, PR ID,
+PR-reported source/target SHAs and discovered changed paths. The PR ID must match
+the URL. Both initials must agree on identity and versions; different file order
+or discovery lists become a sorted union for the verifier to inspect. Original
+lists and coverage remain in the reports. This is not proof of a common ancestor
+or of independently complete file discovery.
+
+The verifier rereads the same PR and returns `currentHead` and `currentBase`.
+A changed source or target reference gives `STALE`; an unknown version gives
+`INCOMPLETE`. Commit timestamps cannot substitute for SHAs. PR metadata may lag
+branch changes; this is not an atomic server-side guarantee. Missing source gives
+PARTIAL with concrete gaps, not invented values. Incomplete initials prevent
+verification, circular finding merges remain invalid, and no review reruns
+automatically.
 
 ## Reports and cancellation
 
@@ -276,11 +291,11 @@ reviews. If the host cannot apply that isolated prompt, repair stops before a
 model request. Provider/host system context and ordinary agents are preserved.
 
 This does not retry malformed/missing JSON, general host/provider errors, incomplete
-evidence/coverage, empty existing locations, changed PR heads, cancellations, or
+evidence/coverage, empty existing locations, changed PR versions, cancellations, or
 comment preview/publication. A
 second failure ends that stage. The existing run timeout is not reset. A full
-review has four stages, so enabling this setting permits at most four extra
-formatting requests; it is not a spending cap or proof of review quality.
+review has three stages, so enabling this setting permits at most three extra
+formatting requests (one for standalone `/pr-check`); it is not a spending cap or proof of review quality.
 Restart OpenCode after changing the setting. See [bounded output amendments](docs/DEBUGGING.md#bounded-output-amendments).
 
 Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):
@@ -298,7 +313,7 @@ Restart OpenCode. Empty `directory` saves outside the project under `${XDG_STATE
 
 Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or an output amendment. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
 
-Source-check `READY` and later-stage `COMPLETE` are the expected success statuses;
+Standalone-check `READY` and review-stage `COMPLETE` are the expected success statuses;
 neither approves the PR. In receipt mode, inspect the final session through the
 human UI without sending a prompt. A Task invocation that resumes it is not
 navigation. If that UI is unavailable, keep the receipt/session IDs and diagnostic

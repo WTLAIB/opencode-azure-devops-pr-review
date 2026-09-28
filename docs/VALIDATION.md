@@ -9,7 +9,7 @@ npm test
 npm run check
 ```
 
-Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, two independent initial sessions in both modes, incomplete-profile refusal, snapshot consistency, complete finding dispositions, stale heads, cancellation, and display-only reports. Concurrent normal/deep tests verify static model bindings; comment tests verify the cached originating profile survives later reviews in another mode. Guidance-only settings never reach model instructions.
+Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, two independent initial sessions in both modes, incomplete-profile refusal, snapshot consistency, complete finding dispositions, stale source/target versions, cancellation, and display-only reports. Concurrent normal/deep tests verify static model bindings; comment tests verify the cached originating profile survives later reviews in another mode. Guidance-only settings never reach model instructions.
 
 Lifecycle regressions cover unresponsive advisory UI/log requests, SDK abort calls
 that ignore cancellation signals, abort API errors, lock release, and cancellation
@@ -55,20 +55,24 @@ and old-to-nested installation migration/rollback.
 
 Test output is generated on demand rather than committed as a historical log.
 
-Source-access regressions cover cloud URL identity hints without rewriting literal
-context or guessing custom layouts, propagation of arbitrary successful/failed
-call notes to both independent initials and the verifier, and unchanged host MCP
-configuration/permissions. Prompt checks retain cumulative proof, before/after
-tip checks for branch-listing fallback, bounded query exploration and independent
-reads. Location guidance requires counting actual source lines without transport
-wrappers; receipt checks distinguish successful READY from COMPLETE and forbid
-retasking a reviewer to retrieve a report. These tests do not execute a model or
-MCP server and cannot establish fewer errors, accurate line numbers or lower cost.
+Source-access regressions cover URL identity hints without altering literal
+context or guessing custom layouts, independent initial inputs, and unchanged
+host MCP permissions/configuration. Normal/deep tests require three stages,
+matching PR identities and source/target SHAs, sorted path union, retained
+original lists, and a final check of both versions. Identity/version mismatches
+prevent verification. Missing metadata can produce honest PARTIAL without fake
+SHAs; a status-only placeholder remains a failed review, not an amendment.
+
+Standalone policy retains cumulative proof and branch-fallback limits; review
+policy avoids ancestry/tree discovery and requests changed-file inclusion.
+Location guidance counts source lines without wrappers; receipts forbid
+retasking completed reviewers. These tests do not prove fewer live errors,
+accurate source anchors or lower cost.
 
 For live comparisons, keep the snapshot/configuration fixed and record all MCP
 errors (including recovered ones), query arguments, per-stage/whole-run duration,
 structured rejections and status amendments. Verify successful exact-commit reads,
-complete coverage, source-access notes, final line anchors and evidence wording.
+complete coverage, independently discovered change lists, final line anchors and evidence wording.
 Check report retrieval separately from review completion. Do not interpret empty
 warnings or a passing output schema as proof of error-free tool use or correct
 claims. Repeat seeded and clean controls before generalizing a reliability gain.
@@ -82,7 +86,7 @@ will support native structured output or obey language/attribution instructions.
 
 Finding-format regressions reproduce a padded evidence key and empty-string/null unknown
 field in native/text output for both profiles. They verify unchanged evidence,
-raw-response retention, an explicit receipt/diagnostic audit and exactly four
+raw-response retention, an explicit receipt/diagnostic audit and exactly three
 ordinary review requests. Conflicting aliases, content-bearing extras,
 misspellings, missing evidence, bad severity, duplicate IDs and snapshot/coverage
 failures cannot pass or start a retry. Verifier paths and stale/unknown-head gates
@@ -127,7 +131,7 @@ ambiguous prompt replacement prevents repair inference. A status-only initial
 submission reports the missing full-review fields and is never repaired.
 
 Transport regressions require only the selected native/text submission policy
-in each compiled role. The verifier schema uses a scalar string currentHead;
+in each compiled role. The verifier schema uses scalar string currentHead/currentBase fields;
 tests retain 40/64-character SHA support, reject missing or extra-quoted heads
 for COMPLETE/STALE, keep unknown heads INCOMPLETE and different heads STALE.
 These contract tests do not emulate every hosted tool parser or prove that a
@@ -150,7 +154,7 @@ Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing
 1. Confirm `opencode --version` is **1.18.31**, and record normal Plan/Build model and tool behavior. Other host versions require a new compatibility audit. Do not share credential-bearing debug configuration.
 2. Confirm ordinary chat does not create private review sessions. Existing agents should still edit files and use their original tools and subagents.
 3. Leave the `models.deep` roles empty initially. Deep mode must refuse to start. Run `/pr-check` against a small known PR and verify `models.review.risk` routing, complete cumulative changes, pagination, and exact-commit source access.
-4. Run normal review mode. Inspect actual session/model IDs for source check, both independent initial reviews, and the separately configured verifier. The parent development conversation must not be copied into them.
+4. Run normal review without a preceding check. Inspect actual session/model IDs for exactly two independent initials followed by the separately configured verifier. The parent development conversation must not be copied into them.
 5. Inspect the final report through child-session navigation. Completed private sessions must refuse reuse.
 6. Configure all three approved `models.deep` roles only when ready. Verify exactly two initial reviews, deeper analysis instructions, routing, and finding dispositions. Partial initial reviews must prevent final verification; changed heads must not automatically rerun a review. Inspect provider usage records. Run a normal review afterward and confirm comments for the earlier deep review still use `models.deep.risk`.
 7. Cancel from another ordinary session in the same process with `/pr-stop <run-id>`. Confirm only review sessions are affected.
@@ -213,11 +217,18 @@ results to prove those claims. Live evaluation must compare notes to raw calls.
 Input/instruction sizes and remaining-budget diagnostics are checked for both
 successful and invalid check results; they must not change requests or deadlines.
 
-Keep the four-session baseline and budgets fixed for the first comparison. Count
-real defects, equivalent/guarded changes, clean controls, full source coverage,
-snapshot disagreement and final head changes along with completion and elapsed
-time. A newly exposed NOT_READY capability gap is not evidence of worse transport
-reliability, and a faster unsupported READY is not an optimization success.
+Compare the three-session path with recorded four-session runs at the same
+models, PR and budgets where possible. Record duplicated discovery, MCP errors
+(including recovered ones), gaps, identity/version disagreements, changed-path
+differences, final source/target changes, verifier budget and elapsed time.
+Include an independently moved target branch: target-only changes must not
+become invented source regressions. Disclose possible PR metadata lag.
+
+Keep seeded defects, guarded changes, clean controls and independent source
+checks. A quicker unsupported COMPLETE is not an optimization success. Diagnose
+status-only output separately from access failure; removing check cannot make
+an absent review valid. Standalone NOT_READY diagnoses its stricter requirements
+and is not a prerequisite for direct review.
 
 Before wider adoption, evaluate known historical PRs for missed issues, false positives, coverage, time, and cost. This integration is not a merge gate.
 

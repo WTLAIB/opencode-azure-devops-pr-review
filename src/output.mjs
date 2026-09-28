@@ -5,6 +5,11 @@ const array = items => ({ type: 'array', items });
 const object = (properties, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });
 const status = (...values) => ({ type: 'string', enum: values });
 const snapshot = object({ repository: string, prId: { type: 'integer' }, base: string, head: string, scope: { const: 'cumulative', type: 'string' }, files: array(string) });
+const prSnapshot = { ...snapshot, properties: { ...snapshot.properties,
+  scope: { const: 'pr', type: 'string', description: 'Current PR changes at the PR-reported source and target commits; no independent merge-base proof.' },
+  base: { ...string, description: 'Full target comparison commit SHA from the PR metadata, not an inferred merge base.' },
+  head: { ...string, description: 'Full source commit SHA from the same PR metadata.' },
+} };
 const finding = object({ id: string, summary: string, evidence: string,
   counterevidence: { ...string, description: 'Source-based safeguards or alternative explanations checked, their effect on the claim, and any unavailable evidence; not private reasoning.' },
   location: { ...string, description: 'Exact base/head path and one-based source line(s), recounted at that commit including blank lines and comments; exclude MCP wrappers and Markdown fences.' },
@@ -29,15 +34,16 @@ export function stageFormat(role, statusOnly = false) {
     report: { ...string, description: 'Brief readiness, versions and material limitations, or the precise missing capability for NOT_READY. Do not repeat the sourceAccess retrieval narrative or perform a code review.' },
   }, ['status', 'report']);
   else if (kind === 'final') schema = object({
-    status: status('COMPLETE', 'INCOMPLETE', 'STALE'), snapshot,
+    status: status('COMPLETE', 'INCOMPLETE', 'STALE'), snapshot: prSnapshot,
     // A scalar type avoids nullable-union conversion failures in tool parsers.
     // Empty does not establish a verified head; finalEnvelope keeps that gate.
     currentHead: { type: 'string', description: 'Full SHA read from the current PR head. The string value contains only the SHA, with no extra quotation marks. Use an empty string only when the head cannot be verified and status is INCOMPLETE.' },
+    currentBase: { ...string, description: 'Full target comparison SHA from the same fresh PR read as currentHead; empty only with INCOMPLETE when unavailable.' },
     dispositions: array(object({ id: string, status: status('CONFIRMED', 'NEEDS_INFO', 'REJECTED', 'MERGED'), reason: string, mergedInto: string,
       verifiedFinding: { ...finding, description: 'Required for CONFIRMED: the complete corrected finding under this same ID. Omit for every other disposition.' },
     }, ['id', 'status', 'reason'])),
     newFindings: array(finding), report: string,
-  }, ['status', 'snapshot', 'currentHead', 'dispositions', 'report']);
+  }, ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
   else if (kind === 'comment-plan') schema = object({
     status: status('READY', 'INCOMPLETE'),
     comments: array(object({ findingId: string, severity: status('high', 'medium'), path: string, startLine: { type: 'integer' }, endLine: { type: 'integer' }, anchor: string, body: string })),
@@ -46,7 +52,11 @@ export function stageFormat(role, statusOnly = false) {
   else if (kind === 'comment-publish') schema = object({
     status: status('DONE', 'INCOMPLETE'), posted: array(object({ findingId: string, threadId: { type: ['string', 'integer'] } })),
   });
-  else schema = object({ status: status('COMPLETE', 'PARTIAL'), snapshot, coverage, findings: array(initialFinding), report: string });
+  else schema = object({ status: status('COMPLETE', 'PARTIAL'),
+    snapshot: { ...prSnapshot, description: 'Required for COMPLETE. Establish it from the requested PR, without a preflight or ancestry search. Omit only for PARTIAL when PR metadata is unavailable.' },
+    coverage, findings: array(initialFinding),
+    report: { ...string, description: 'Review summary and limitations. Submit the full review, never a status-only acknowledgement or placeholder.' },
+  }, ['status', 'coverage', 'findings', 'report']);
   if (statusOnly === 'location') schema = object({ locations: array(object({ id: string,
     location: { ...string, description: 'Exact base:/path:line or head:/path:start-end from source already read in this session. No guesses or new source reads.' },
   })) });
@@ -270,9 +280,9 @@ const sha = value => typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64}
 const text = value => typeof value === 'string' && value.trim().length > 0;
 export function validateSnapshot(s) {
   if (!isObject(s) || !text(s.repository) || !Number.isInteger(s.prId) || s.prId < 1 ||
-      !sha(s.base) || !sha(s.head) || s.scope !== 'cumulative' || !Array.isArray(s.files) ||
+      !sha(s.base) || !sha(s.head) || !['pr', 'cumulative'].includes(s.scope) || !Array.isArray(s.files) ||
       s.files.length === 0 || !s.files.every(text) || new Set(s.files).size !== s.files.length) {
-    throw new Error('Missing full base/head SHA, cumulative PR scope or complete unique file list.');
+    throw new Error('Missing full base/head SHA, PR scope or complete unique file list.');
   }
   return { repository: s.repository, prId: s.prId, base: s.base.toLowerCase(), head: s.head.toLowerCase(), scope: s.scope, files: [...s.files] };
 }
@@ -284,6 +294,7 @@ export function checkEnvelope(result, prUrl) {
   if (result.sourceAccess !== undefined && (!isObject(result.sourceAccess) || Object.values(result.sourceAccess).some(value => typeof value !== 'string'))) throw new Error('Source-check sourceAccess must describe capabilities as text fields.');
   if (result.status !== 'READY') return result;
   const snapshot = validateSnapshot(result.snapshot);
+  if (snapshot.scope !== 'cumulative') throw new Error('Standalone source-check requires cumulative scope.');
   if (prUrl && String(snapshot.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Source-check snapshot PR ID does not match the requested URL.');
   return { ...result, snapshot };
 }
@@ -315,25 +326,43 @@ function validateFindings(findings, prefix, path = 'findings', allowMissingLocat
   const ids = new Set();
   findings.forEach((value, i) => validateFinding(value, prefix, ids, `${path}[${i}]`, allowMissingLocation));
 }
-export function initialEnvelope(result, expected, prefix) {
+export function initialEnvelope(result, expected, prefix, prUrl) {
   if (!isObject(result)) throw new Error('Invalid initial-review envelope: expected an object.');
+  const missingSnapshot = result.status === 'PARTIAL' && result.snapshot === undefined && !expected;
   const invalid = [
-    !isObject(result.snapshot) && 'snapshot must be an object',
+    !missingSnapshot && !isObject(result.snapshot) && 'snapshot must be an object',
     !isObject(result.coverage) && 'coverage must be an object',
     !Array.isArray(result.findings) && 'findings must be an array',
     !text(result.report) && 'report must be nonempty text',
   ].filter(Boolean);
   if (invalid.length) throw new Error(`Invalid initial-review envelope: ${invalid.join('; ')}.`);
   requireStatus(result, ['COMPLETE', 'PARTIAL'], 'initial-review');
-  if (snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
+  const selected = missingSnapshot ? null : validateSnapshot(result.snapshot);
+  if (expected && snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');
+  if (!expected && selected?.scope !== 'pr' && !missingSnapshot) throw new Error('Direct initial review requires PR scope, not ancestry certification.');
+  if (selected && prUrl && String(selected.prId) !== new URL(prUrl).pathname.split('/').filter(Boolean).at(-1)) throw new Error('Initial reviewer snapshot PR ID does not match the requested URL.');
+  const files = selected?.files ?? [];
   const coverage = result.coverage;
   if (!isObject(coverage) || !Array.isArray(coverage.files) || !Array.isArray(coverage.gaps) ||
-      !coverage.files.every(file => text(file) && expected.files.includes(file)) ||
+      !coverage.files.every(file => text(file) && files.includes(file)) ||
       new Set(coverage.files).size !== coverage.files.length || !coverage.gaps.every(text)) throw new Error('Invalid coverage ledger: list unique reviewed snapshot files and concrete gaps.');
-  if (result.status === 'COMPLETE' && (coverage.files.length !== expected.files.length || coverage.gaps.length)) throw new Error('COMPLETE requires coverage of every snapshot file with no review gaps.');
+  if (result.status === 'COMPLETE' && (coverage.files.length !== files.length || coverage.gaps.length)) throw new Error('COMPLETE requires coverage of every snapshot file with no review gaps.');
   if (result.status === 'PARTIAL' && !coverage.gaps.length) throw new Error('PARTIAL requires an explanation of the review gaps.');
+  if (missingSnapshot && result.findings.length) throw new Error('An initial review without a snapshot cannot report findings.');
   validateFindings(result.findings, prefix, 'findings', true);
   return result;
+}
+/** Compare metadata already read by the two initials; no tool/model request. */
+export function mergeInitialSnapshots(reviews) {
+  const snapshots = reviews.map(review => validateSnapshot(review.snapshot));
+  const first = snapshots[0];
+  if (!first || first.scope !== 'pr' || snapshots.some(s =>
+      ['repository', 'prId', 'base', 'head', 'scope'].some(key => s[key] !== first[key]))) {
+    throw new Error('Initial reviewers used different PR identities or source/target commits. Start a new review for a stable PR version.');
+  }
+  // Preserve both discovery results in reviews. The verifier examines every
+  // reported path; ordering or a different file set is not a version mismatch.
+  return { ...first, files: [...new Set(snapshots.flatMap(s => s.files))].sort() };
 }
 export function finalEnvelope(result, expected, originals) {
   if (!isObject(result) || !text(result.report) || !Array.isArray(result.dispositions)) throw new Error('Invalid final-review envelope.');
@@ -365,10 +394,11 @@ export function finalEnvelope(result, expected, originals) {
     for (const id of path) resolved.add(id);
   }
   if (result.newFindings !== undefined) validateFindings(result.newFindings, 'V', 'newFindings');
-  if (!sha(result.currentHead)) {
-    if (result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
-  } else if (result.currentHead.toLowerCase() !== expected.head) {
-    result = { ...result, status: 'STALE' }; // No automatic rerun.
-  } else if (result.status === 'STALE') throw new Error('STALE verdict contradicts reported head; require manual verification.');
+  if (!sha(result.currentHead) && result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR head.');
+  if (expected.scope === 'pr' && !sha(result.currentBase) && result.status !== 'INCOMPLETE') throw new Error('Final reviewer did not verify the current PR target base.');
+  const changedHead = sha(result.currentHead) && result.currentHead.toLowerCase() !== expected.head.toLowerCase();
+  const changedBase = expected.scope === 'pr' && sha(result.currentBase) && result.currentBase.toLowerCase() !== expected.base.toLowerCase();
+  if (changedHead || changedBase) result = { ...result, status: 'STALE' }; // No automatic rerun.
+  else if (result.status === 'STALE') throw new Error('STALE verdict contradicts reported versions; require manual verification.');
   return result;
 }
