@@ -1,5 +1,39 @@
 # Debugging review output
 
+## Provider rejection before source reads
+
+A provider error before any MCP call is separate from MCP login or an invalid
+review envelope. Some services reject requests when host permissions hide the
+native shell schema. If controlled checks establish that cause, explicitly set
+`shellToolPermission` to `ask` in the AZPR settings and restart. It retains the
+bash schema while the execution guard still rejects calls before host approval.
+Other native denials stay active. `run.json` records the selected setting.
+
+Keep the default `deny` when supported, and retest it after host/provider fixes.
+Do not infer this cause from every 403, disable the execution guard, or retry
+automatically. This compatibility setting does not repair malformed output,
+change providers or models, or establish a completed review. See the
+[actual-host checks](VALIDATION.md#native-tools-recovery-guidance-and-terminal-diagnostics).
+
+## Incomplete native submissions
+
+A native tool recorded as completed does not establish a valid review. If an
+initial or final response contains only `status`, the review content is missing;
+changing its spelling cannot supply evidence, coverage or dispositions. Compare
+the stored response to the full request schema and check whether any separate
+text exists. Do not infer a model-only, provider-only or host-only cause from the
+stored tool arguments. The OpenCode 1.18.33 [capture path](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts)
+records the tool submission; AZPR's independent validators remain necessary.
+
+For repeated incomplete native submissions, explicitly select
+`structuredOutput: false`, restart and evaluate a new authorized review with the
+same model, PR and budgets. This avoids the native submission mechanism while
+retaining the full review contract. It does not resume or repair the failed run.
+Keep both outcomes and compare source coverage and adjudication, not just status.
+JSON text with duplicate keys, including escaped equivalents, fails before any
+value can be accepted; a length/filter/error/cancelled finish also prevents
+acceptance or output recovery. No automatic format switch or model fallback exists.
+
 ## Receipt versus full
 
 `returnReport` changes only what is returned after the workflow. It does not

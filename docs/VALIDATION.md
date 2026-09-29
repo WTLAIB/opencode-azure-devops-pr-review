@@ -9,6 +9,18 @@ real host in an isolated directory with a local fake provider/MCP before install
 verify denied schemas disappear, forced native calls never execute, a blocked
 attempt remains disclosed, and repeated attempts revoke the run.
 
+Repeat with explicit `shellToolPermission: "ask"`: bash must remain in provider
+schemas while other denied native tools stay absent. Force native bash calls in
+both initial roles and the verifier, and two calls in one stage. Check tool states,
+runtime prevention counts, process execution traces and a harmless marker; no
+command or approval request may occur. Validate the trace/marker detector with
+a separate positive control outside review sessions. Use the actual unmodified
+runtime without an extra blocking plugin. Test settings migration from omission
+to deny, preservation of ask, rejection of allow/null, and unchanged ordinary
+agents/MCP permissions. Then separately test the selected real provider: record
+service acceptance and completed-review validation as different outcomes. A
+fake provider cannot establish compatibility with a hosted service.
+
 Terminal event tests cover failed calls without after-hooks, duplicate/conflicting
 states, unrelated sessions, invalid timestamps, cancellation and late events.
 These events never supply successful evidence; diagnostics omit raw arguments,
@@ -195,9 +207,27 @@ invalid calls from source bookkeeping. Timeout tests retain the explicit cause
 even when an SDK ignores or replaces the abort signal, and distinguish TIMED_OUT
 from manual CANCELLED. No test repairs or adopts the malformed output.
 
+## JSON text compatibility
+
+For explicit JSON text compatibility, exercise the actual host with a local
+provider that returns complete review JSON as text after MCP source calls.
+Verify no StructuredOutput schema/call appears, native execution is still
+blocked, all three stages validate, and source versions/dispositions are retained.
+Then compare real native/text runs at fixed models, PR versions and budgets.
+Distinguish malformed native submissions from transport-independent missing
+evidence; one passing text run does not prove the provider's root cause is fixed.
+Regressions reject duplicate top-level/nested/escaped keys in raw and fenced
+text, while preserving repeated keys across separate objects and literal source
+strings. Syntactically complete objects with truncated/filtered/error/cancelled
+finishes fail before recovery. Status-only responses in either transport cannot
+complete initials/finals, consume an evidence-filling retry or enable comments.
+
 ## What remains unverified
 
-Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing, Azure MCP capabilities, child-session navigation, cancellation propagation, or actual billing. No live end-to-end result is claimed.
+Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing,
+Azure MCP capabilities, child-session navigation, cancellation propagation, or
+actual billing. A recorded live acceptance sample applies only to its tested
+host, settings and PR; it does not certify other configurations or a success rate.
 
 ## Environment acceptance
 

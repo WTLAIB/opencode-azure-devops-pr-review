@@ -174,7 +174,12 @@
     "structuredOutput": {
       "type": "boolean",
       "default": true,
-      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false for explicit text compatibility. An authorized output amendment may accept complete JSON text after the pinned missing-native error, with full validation and an explicit notice. No model fallback."
+      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false explicitly when complete native submissions are unreliable; JSON text keeps the same evidence validation and rejects duplicate keys or incomplete finish reasons. No automatic transport or model fallback. An authorized output amendment may accept complete JSON text after the pinned missing-native error, with full validation and an explicit notice."
+    },
+    "shellToolPermission": {
+      "enum": ["deny", "ask"],
+      "default": "deny",
+      "description": "Private AZPR roles only. Default deny hides the native shell tool. Explicit ask retains its schema for providers that reject requests without it; the runtime still blocks execution before host approval. Other native denials and ordinary agents stay unchanged. No provider detection, automatic fallback or allow mode. Restart OpenCode after changes."
     },
     "outputRetries": {
       "type": "integer",

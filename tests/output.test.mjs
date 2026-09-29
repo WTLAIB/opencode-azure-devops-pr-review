@@ -118,13 +118,54 @@ test('status diagnostics identify the field and allowed values without correctin
   });
 });
 test('initial-envelope diagnostics list missing or mistyped fields without copying private values',()=>{
-  assert.throws(()=>initialEnvelope({status:'CCOMPLETE'},snapshot,'R'),/snapshot.*coverage.*findings.*report/);
+  assert.throws(()=>initialEnvelope({status:'CCOMPLETE'},snapshot,'R'),/status-only.*snapshot.*coverage.*findings.*report/);
   const malformed={status:'COMPLETE',snapshot:'PRIVATE_SOURCE_SENTINEL',coverage:[],findings:{},report:42};
   assert.throws(()=>initialEnvelope(malformed,snapshot,'R'),error=>{
     assert.match(error.message,/snapshot.*object.*coverage.*object.*findings.*array.*report.*text/);
     assert.doesNotMatch(error.message,/PRIVATE_SOURCE_SENTINEL/);return true;
   });
   assert.throws(()=>initialEnvelope(null,snapshot,'R'),/expected an object/);
+});
+
+test('status-only final diagnostics identify absent review content without echoing the status',()=>{
+  for(const status of ['COMPLETE','CLOSED_STATUS_PLACEHOLDER','PRIVATE_STATUS_SENTINEL']){
+    assert.throws(()=>finalEnvelope({status},snapshot,[]),error=>{
+      assert.match(error.message,/status-only.*snapshot.*dispositions.*report/);
+      assert.doesNotMatch(error.message,/PRIVATE_STATUS_SENTINEL/);return true;
+    });
+  }
+});
+
+test('JSON text rejects duplicate fields instead of silently replacing review evidence',()=>{
+  for(const raw of [
+    '{"status":"PARTIAL","status":"COMPLETE"}',
+    '{"status":"PARTIAL","st\\u0061tus":"COMPLETE"}',
+    '{"coverage":{"gaps":["PRIVATE_MISSING_EVIDENCE"],"gaps":[]}}',
+    '{"findings":[{"id":"F-1","evidence":"PRIVATE_EVIDENCE","evidence":"replacement"}]}',
+    '{"PRIVATE_KEY":null,"PRIVATE_KEY":null}',
+  ])for(const content of [raw,'Result:\n```json\n'+raw+'\n```']){
+    assert.throws(()=>parseJSONReport(response(content),settings),error=>{
+      assert.match(error.message,/duplicate JSON keys/);assert.doesNotMatch(error.message,/PRIVATE_/);return true;
+    });
+  }
+});
+
+test('JSON text preserves complete evidence with repeated keys in separate objects and source strings',()=>{
+  const value=initial();value.findings.push(finding('F-2'));
+  value.findings[0].evidence='Literal source: {"status":"PARTIAL","status":"COMPLETE"}; arrays [1,2] and braces {}.';
+  const configured={maxStageCharacters:10000};
+  for(const raw of [JSON.stringify(value),'```json\n'+JSON.stringify(value,null,2)+'\n```']){
+    const parsed=parseJSONReport(response(raw),configured);
+    assert.deepEqual(parsed,value);assert.equal(initialEnvelope(parsed,snapshot,'F').status,'COMPLETE');
+  }
+});
+
+test('incomplete finish rejects even syntactically complete native and text envelopes',()=>{
+  for(const finish of ['length','content-filter','error','cancelled'])for(const native of [true,false]){
+    const value=initial(),reply=response(JSON.stringify(value));reply.info.finish=finish;
+    if(native)reply.info.structured=value;
+    assert.throws(()=>parseJSONReport(reply,{maxStageCharacters:10000}),/did not finish successfully/);
+  }
 });
 
 test('source-check contracts reject malformed readiness before starting initial reviews',()=>{

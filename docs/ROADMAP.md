@@ -9,9 +9,26 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Explicit native/text transport evaluation for incomplete submissions, with
+  status-only initial/final diagnostics. Text parsing rejects duplicate keys
+  instead of replacing evidence; explicit truncated/filtered/error/cancelled
+  finishes cannot enter validation or recovery. Models, evidence requirements
+  and retry budgets stay unchanged; no automatic transport fallback is added.
+  One controlled live text-mode review on OpenCode 1.18.33 completed after two
+  native-mode failures with missing review content. It confirmed all three seeded
+  defects without output recovery; two MCP read failures were resolved and
+  disclosed. This is one acceptance sample, not a measured reliability increase.
+
 - Private-role native shell/edit/skill/public-web denial with a scoped guard,
   bounded repeated-attempt stop and receipt disclosure. MCP actions remain
   host/server-controlled, without a catalog or read/write classifier.
+- Explicit `shellToolPermission: "ask"` compatibility for providers that require
+  a visible shell schema, with `deny` remaining the default. The runtime guard,
+  repeated-attempt stop and other native denials remain unchanged. Settings and
+  migration regressions cover both values; no provider-specific fallback exists.
+  A controlled OpenCode 1.18.33 experiment accepted live requests with ask and
+  blocked five injected shell calls. That native-mode live review failed an initial
+  envelope check; shell compatibility alone does not establish review completeness.
 - Unambiguous seven-field findings/eight-field confirmed rows; bounded
   unknown-cause read-retry guidance, distinct from output recovery. No automatic
   MCP retries or installed server patch. Terminal tool events supplement missing

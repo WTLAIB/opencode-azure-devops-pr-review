@@ -239,6 +239,22 @@ test('settings are copied literally with private permissions', () => {
   original(s);
 });
 
+for(const value of [undefined,'ask']) test(`shell permission migration adds deny and preserves explicit ask (${value})`,async()=>{
+  const s=setup(),file=profile(s),settings=JSON.parse(readFileSync(file,'utf8'));
+  if(value===undefined)delete settings.shellToolPermission;else settings.shellToolPermission=value;
+  writeFileSync(file,JSON.stringify(settings,null,2)+'\n');
+  ok(install(s,['--settings',file]));ok(install(s,['--replace']));
+  const installed=JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'));
+  assert.equal(installed.shellToolPermission,value??'deny');
+  assert.deepEqual(installed.models,settings.models);
+  const module=await import(pathToFileURL(join(s.root,'plugins/azpr.js')).href),hooks=await module.AzurePrReview({});
+  const config={command:Object.fromEntries(['pr-check','pr-review','pr-deep','pr-stop','pr-comment'].map(name=>[name,{subtask:false,template:readFileSync(join(s.root,'commands',name+'.md'),'utf8')}]))};
+  await hooks.config(config);
+  assert.equal(Object.keys(config.agent).length,12);
+  for(const agent of Object.values(config.agent))assert.equal(agent.permission.bash,value??'deny');
+  original(s);clean(s);
+});
+
 test('duplicate installation refuses without replace', () => {
   const s = setup();
   ok(install(s));

@@ -3,6 +3,7 @@ export const MODES = Object.freeze(['review', 'deep']);
 export const COMMANDS = Object.freeze({ 'pr-check': 'check', 'pr-review': 'review', 'pr-deep': 'deep', 'pr-stop': 'stop', 'pr-comment': 'comment' });
 // Native host capabilities only: never grant or classify MCP tools/actions.
 // Do not deny `read`: the host also uses it for MCP resource access.
+// Shell schema compatibility never changes the execution guard's blocked set.
 export const NATIVE_TOOL_PERMISSIONS = Object.freeze({ bash: 'deny', edit: 'deny', skill: 'deny', webfetch: 'deny', websearch: 'deny' });
 export const BLOCKED_NATIVE_TOOLS = Object.freeze([...Object.keys(NATIVE_TOOL_PERMISSIONS), 'write', 'apply_patch']);
 const MODEL_SLOTS = ['functional', 'risk', 'verifier'];
@@ -47,7 +48,7 @@ export function languagePrompt(role, language) {
 }
 /** Validate local values only; model pricing, access, and quality are external. */
 export function validateSettings(raw) {
-  keys(raw, ['$schema', 'version', 'enabled', 'models', 'azure', 'steps', 'comments', 'debug', 'structuredOutput', 'outputRetries', 'outputLanguage', 'auxiliaryModels', 'returnReport', 'runTimeoutSeconds', 'maxStageCharacters'], 'settings');
+  keys(raw, ['$schema', 'version', 'enabled', 'models', 'azure', 'steps', 'comments', 'debug', 'structuredOutput', 'outputRetries', 'outputLanguage', 'auxiliaryModels', 'returnReport', 'shellToolPermission', 'runTimeoutSeconds', 'maxStageCharacters'], 'settings');
   if (raw.version !== 2) throw new Error('settings.version must be 2. Run install.sh --replace to migrate the old model settings.');
   if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') throw new Error('enabled must be boolean.');
   if (raw.$schema !== undefined && typeof raw.$schema !== 'string') throw new Error('$schema must be a string.');
@@ -74,6 +75,8 @@ export function validateSettings(raw) {
   const outputLanguage = languageTag(raw.outputLanguage === undefined ? 'en' : raw.outputLanguage);
   const structuredOutput = raw.structuredOutput === undefined ? true : raw.structuredOutput;
   if (typeof structuredOutput !== 'boolean') throw new Error('structuredOutput must be boolean.');
+  const shellToolPermission = withDefault(raw.shellToolPermission, 'deny');
+  if (!['deny', 'ask'].includes(shellToolPermission)) throw new Error('shellToolPermission must be deny or ask. Native shell execution remains blocked in both modes.');
   const outputRetries = raw.outputRetries === undefined ? 0 : raw.outputRetries;
   if (!Number.isInteger(outputRetries) || outputRetries < 0 || outputRetries > 1) throw new Error('outputRetries must be 0 or 1 (one shared status/location/merge amendment or final content resubmission per review stage).');
   const debug = raw.debug === undefined ? { enabled: false, directory: '' } : raw.debug;
@@ -88,7 +91,7 @@ export function validateSettings(raw) {
   keys(comments, ['enabled', 'maxComments'], 'comments');
   if (typeof comments.enabled !== 'boolean' || !Number.isInteger(comments.maxComments) || comments.maxComments < 1 || comments.maxComments > 10) throw new Error('comments requires enabled (boolean) and maxComments (1..10).');
   return { models, steps: { ...raw.steps }, comments: { ...comments }, structuredOutput, outputRetries, debug: { enabled: debug.enabled, directory: debug.directory ?? '' },
-    enabled: raw.enabled !== false, outputLanguage, returnReport, runTimeoutSeconds, maxStageCharacters, auxiliaryModels,
+    enabled: raw.enabled !== false, outputLanguage, returnReport, shellToolPermission, runTimeoutSeconds, maxStageCharacters, auxiliaryModels,
     deepReady: Object.values(models.deep).every(Boolean) };
 }
 
@@ -130,6 +133,6 @@ export function buildAgents(settings, prompts) {
       '\n\n# Output transport\n' + (settings.structuredOutput
         ? 'After completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. Supply field values using their declared types. Do not print a separate JSON text/code block or surrounding commentary. Examples describe the envelope fields, not a separate text response. The output schema describes the envelope, not an MCP tool restriction.'
         : 'Return one valid JSON object, optionally in a single JSON code fence, without surrounding commentary. Serialize strings as JSON strings, escaping quotes and newlines correctly.'),
-    steps: settings.steps[spec.step], permission: { task: 'deny', ...NATIVE_TOOL_PERMISSIONS },
+    steps: settings.steps[spec.step], permission: { task: 'deny', ...NATIVE_TOOL_PERMISSIONS, bash: settings.shellToolPermission },
   }]));
 }

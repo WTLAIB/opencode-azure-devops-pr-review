@@ -141,13 +141,24 @@ security guarantee. Nested `task` delegation is disabled so models cannot start
 unbudgeted reviewer agents. A separate guard stops repeated rejected native
 `StructuredOutput` submissions; it does not filter MCP operations.
 
-Private roles also deny native shell, editing, skill and public-web tools. A
+Private roles also deny native shell, editing, skill and public-web tools by default. A
 command-scoped guard blocks attempted execution, including write/apply_patch
 variants and rejected calls to hidden native tools. Two distinct blocked attempts
 in a stage stop the run; receipts disclose even a single prevented attempt.
 This does not classify MCP calls or make mixed read/write MCP dispatchers read-only.
 Local-file access remains prohibited by prompt policy; a blanket `read` permission
 denial would also disable MCP resource reads.
+
+If a provider rejects requests when the shell tool is hidden, explicitly set
+`"shellToolPermission": "ask"` in the installed AZPR settings and restart OpenCode.
+This retains the native `bash` schema for provider compatibility. The same runtime
+guard still rejects execution before the host asks for approval, and two distinct
+attempts in a stage still stop the run. Other native permissions, ordinary agents,
+MCP permissions and output validation are unchanged. Only `deny` (default) and
+`ask` are accepted; there is no `allow` option, provider-name detection, automatic
+fallback, or extra model request. Return to `deny` when your provider accepts it.
+Verify compatibility and forced-call blocking on your actual host before use;
+service acceptance alone does not establish review completeness or quality.
 
 Old installed `azure` settings are accepted but ignored, with a startup warning.
 You may remove that obsolete block; the installer preserves your private settings.
@@ -249,7 +260,20 @@ Saved inline comments also contain an AI/model attribution footer and a notice t
 
 ### Output reliability and private debug files
 
-By default, `structuredOutput: true` uses OpenCode 1.18.31's native JSON-schema output mechanism. This improves envelope reliability without selecting another model or automatically rerunning a failed stage. A provider must support the host's tool-based structured output. If it cannot, set `structuredOutput: false` and restart to use JSON text; a single fenced JSON response is supported, but malformed/truncated JSON is never silently repaired. Snapshot and finding checks apply to both transports.
+By default, `structuredOutput: true` supplies a JSON schema through OpenCode
+1.18.31's native output mechanism. A captured tool call can still omit required
+review content. If your model/provider cannot reliably submit complete native
+envelopes, explicitly set `structuredOutput: false` and restart to use JSON text.
+This changes transport without changing models, adding retries or relaxing
+snapshot, coverage, finding and disposition validation. A single unambiguous
+JSON fence is supported. Duplicate keys (including escaped equivalents), malformed
+JSON, and responses marked truncated, filtered, errored or cancelled are rejected;
+the plugin never selects a duplicate value or fills missing evidence.
+
+Status-only initial/final submissions remain incomplete in both modes. Compare
+the raw response with its requested schema before selecting a transport, and
+validate the new mode on a separate authorized run. A successful sample is not
+a guarantee for other models, PRs or host versions. There is no automatic switch.
 
 Role prompts include only the selected transport's submission instructions.
 The verifier's current-head field uses a simple string schema for tool-parser
@@ -431,6 +455,7 @@ require coverage, counterevidence, and corrected confirmed findings; older custo
 prompts that omit them will fail validation. No new model slot or mandatory
 installation file is needed. Existing private settings are preserved; a missing
 `outputRetries` is added as `0`, leaving recovery off until explicitly enabled.
+A missing `shellToolPermission` is added as `deny`; an explicit `ask` is preserved.
 
 ## Repository layout
 

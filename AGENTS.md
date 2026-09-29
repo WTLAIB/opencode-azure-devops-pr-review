@@ -38,9 +38,14 @@ It describes the development process, not instructions for agents reviewing a PR
 - OpenCode owns providers, MCP discovery, and permissions. Do not add hardcoded
   MCP tool catalogs, name/action allowlists, direct Azure/model clients, or
   wildcard permission grants. MCP read-only review is a prompt policy, not a
-  programmatic MCP security boundary. Private roles deny native shell, editing,
+  programmatic MCP security boundary. Private roles default to denying native shell, editing,
   skill and public-web tools through host permissions and a scoped execution
   guard, including write/apply_patch and rejected native-tool submissions.
+  Explicit shellToolPermission=ask may retain the bash schema for provider
+  compatibility; it must never change the runtime blocked set or permit execution.
+  Keep deny as the default, reject allow, preserve other native denials, and avoid
+  provider-name detection or automatic fallback. Verify both actual-host forced
+  calls and live service acceptance; one does not establish the other.
   Two distinct blocked native attempts in one stage stop the run; record and
   disclose prevented attempts without logging arguments. Keep ordinary agents
   unchanged. Do not blanket-deny read: it also gates host MCP resource access.
@@ -58,6 +63,11 @@ It describes the development process, not instructions for agents reviewing a PR
 - Keep PR-version snapshots, coverage ledgers, counterevidence, final dispositions,
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
+  Explicit JSON text compatibility keeps these same contracts. Reject duplicate
+  raw/fenced JSON keys, including escaped-equivalent keys, before accepting any
+  field value. Reject explicit truncated/filtered/error/cancelled finishes in
+  both transports before recovery. Status-only initial/final submissions cannot
+  supply missing review content or qualify as a status spelling amendment.
   Verifiers submit required confirmed/merged/rejected/needsInfo/newFindings arrays;
   confirmed rows contain the seven finding fields plus reason; keep common and
   role-specific instructions consistent about these eight keys. Convert explicit

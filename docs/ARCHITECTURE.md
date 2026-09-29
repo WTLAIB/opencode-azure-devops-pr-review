@@ -163,6 +163,16 @@ are outside those character counts.
 
 ## Evidence contract
 
+Text parsing rejects duplicate JSON keys at every object level, including
+escaped-equivalent spellings, before a parsed value can enter normalization or
+recovery. The grammar is parsed first; a shared structural scan also protects
+the scoped amendment text path. Keys repeated in separate objects and key-like
+text inside source strings remain valid. Neither raw nor fenced text can silently
+replace an earlier field. Native object captures no longer contain the original
+key spellings, so this scan cannot certify their upstream serialization.
+Both transports reject explicit length/content-filter/error/cancelled finishes
+before evidence validation, even if the stored object looks syntactically complete.
+
 Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot must contain the same unique file set; comparison ignores order and validated output uses sorted paths. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
@@ -482,12 +492,24 @@ require evaluation on representative PRs with independent ground truth.
 ## Tools and reports
 
 Private agents deny nested Task delegation and native bash/edit/skill/webfetch/
-websearch tools. A grant-scoped before hook rejects the native calls, write and
+websearch tools by default. A grant-scoped before hook rejects the native calls, write and
 apply_patch variants, and attempts redirected through the host's invalid tool.
 A single prevented attempt can be followed by valid review work; two distinct
 attempts per stage abort and revoke the run. Records and receipts disclose counts
 and known native names, never arguments or rejected-call text. Ordinary agents
 and global/project permissions are unchanged; origin-agent overrides are not copied.
+
+The explicit `shellToolPermission` setting controls only private-role `bash`
+permission compilation. `deny` is the default. `ask` keeps the shell schema in
+host requests for providers that reject its absence; it does not remove bash
+from the runtime's immutable blocked set. The before hook must reject execution
+before host permission approval. All twelve roles use the same setting, including
+source checks and comment roles; repair/display grants still deny ordinary tools.
+The setting is independent of provider/model names and host versions. There is
+no automatic downgrade, retry, model switch or `allow` mode. Diagnostics record
+the selected permission. Changing back to `deny` requires only a settings change
+and restart, not a provider-specific code patch. Actual-host acceptance and
+forced-call tests remain necessary when host behavior changes.
 
 No MCP name, prefix, action, argument or response-schema filter exists. The native
 guard does not make arbitrary custom tools or mixed-action MCP dispatchers read-only.

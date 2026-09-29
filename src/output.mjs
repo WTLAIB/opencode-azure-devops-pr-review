@@ -80,6 +80,7 @@ const finalCategories = ['confirmed', 'merged', 'rejected', 'needsInfo'];
  * Legacy dispositions remain accepted alone for transport compatibility. */
 export function finalSubmission(result) {
   if (!isObject(result)) return result;
+  if (Object.keys(result).length === 1 && Object.hasOwn(result, 'status')) throw new Error('Invalid final-review envelope: status-only submission; snapshot, current versions, dispositions and report are required.');
   const categories = finalCategories.some(key => Object.hasOwn(result, key));
   if (Object.hasOwn(result, 'dispositions')) {
     if (categories) throw new Error('Final submission mixes categories and legacy dispositions.');
@@ -316,12 +317,29 @@ export function applyLocationAmendment(original, role, missingLocations, amendme
 function requireStatus(result, allowed, label) {
   if (!allowed.includes(result.status)) throw new OutputStatusError(label, result.status, allowed);
 }
+// Call only after JSON.parse establishes grammar. Repeated keys must never
+// replace earlier evidence, even when the escaped spelling or value differs.
+function rejectDuplicateJSONKeys(content, message) {
+  const stack = [];
+  for (const [token] of content.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]/g)) {
+    if (token === '{') stack.push({ keys: new Set(), key: true });
+    else if (token === '[') stack.push(null);
+    else if (token === '}' || token === ']') stack.pop();
+    else if (token === ',') { if (stack.at(-1)) stack.at(-1).key = true; }
+    else if (token.startsWith('"') && stack.at(-1)?.key) {
+      const frame = stack.at(-1), key = JSON.parse(token);
+      if (frame.keys.has(key)) throw new Error(message);
+      frame.keys.add(key); frame.key = false;
+    }
+  }
+}
 export function parseJSONReport(response, settings) {
   const finish = String(response.info?.finish ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
   if (response.info?.error) {
     const name = String(response.info.error.name ?? 'UnknownError').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
     throw new Error(`Reviewer returned an OpenCode/model error (${name}; finish=${finish}). Inspect the session export or debug response. No automatic retry.`);
   }
+  if (['length', 'content-filter', 'error', 'cancelled'].includes(response.info?.finish)) throw new Error(`Reviewer output did not finish successfully (finish=${finish}); no partial response or output recovery was accepted.`);
   let result;
   if (response.info?.structured !== undefined) {
     result = response.info.structured;
@@ -332,13 +350,15 @@ export function parseJSONReport(response, settings) {
     // Compatibility for text-only providers: accept one fenced envelope with a
     // preamble, but never guess between multiple objects or repair broken JSON.
     const fences = [...content.matchAll(/^```(?:json)?[^\S\r\n]*\r?\n([\s\S]*?)^```[^\S\r\n]*$/gmi)];
+    let jsonContent = content;
     try { result = JSON.parse(content); }
     catch {
       if (fences.length === 1 && !/[{}]|```/.test(content.replace(fences[0][0], ''))) {
-        try { result = JSON.parse(fences[0][1]); } catch { /* Fail closed below. */ }
+        try { result = JSON.parse(fences[0][1]); jsonContent = fences[0][1]; } catch { /* Fail closed below. */ }
       }
       if (result === undefined) throw new Error(`Reviewer did not return the required JSON envelope (characters=${content.length}; finish=${finish}). Partial output remains in its session. Inspect the session export or debug response. No automatic retry.`);
     }
+    rejectDuplicateJSONKeys(jsonContent, 'Reviewer text contains duplicate JSON keys; no field value was selected or repaired.');
   }
   if (!isObject(result)) throw new Error('Review envelope must be an object.');
   return result;
@@ -360,20 +380,7 @@ export function parseAmendmentText(response, settings) {
   let result;
   try { result = JSON.parse(content); } catch { throw new Error('Amendment text must be one complete JSON object; no JSON repair or extraction is allowed.'); }
   if (!isObject(result)) throw new Error('Amendment text must be a JSON object.');
-  // JSON.parse establishes grammar first. Scan structural tokens afterward to
-  // reject duplicate (including escaped-equivalent) keys instead of choosing one.
-  const stack = [];
-  for (const [token] of content.matchAll(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]/g)) {
-    if (token === '{') stack.push({ keys: new Set(), key: true });
-    else if (token === '[') stack.push(null);
-    else if (token === '}' || token === ']') stack.pop();
-    else if (token === ',') { if (stack.at(-1)) stack.at(-1).key = true; }
-    else if (token.startsWith('"') && stack.at(-1)?.key) {
-      const frame = stack.at(-1), key = JSON.parse(token);
-      if (frame.keys.has(key)) throw new Error('Amendment text contains duplicate JSON keys; no transport fallback was accepted.');
-      frame.keys.add(key); frame.key = false;
-    }
-  }
+  rejectDuplicateJSONKeys(content, 'Amendment text contains duplicate JSON keys; no transport fallback was accepted.');
   return result;
 }
 
@@ -468,7 +475,8 @@ export function initialEnvelope(result, expected, prefix, prUrl) {
     !Array.isArray(result.findings) && 'findings must be an array',
     !text(result.report) && 'report must be nonempty text',
   ].filter(Boolean);
-  if (invalid.length) throw new Error(`Invalid initial-review envelope: ${invalid.join('; ')}.`);
+  const statusOnly = Object.keys(result).length === 1 && Object.hasOwn(result, 'status');
+  if (invalid.length) throw new Error(`Invalid initial-review envelope: ${statusOnly ? 'status-only submission; ' : ''}${invalid.join('; ')}.`);
   requireStatus(result, ['COMPLETE', 'PARTIAL'], 'initial-review');
   const selected = missingSnapshot ? null : validateSnapshot(result.snapshot);
   if (expected && snapshotKey(result.snapshot) !== snapshotKey(expected)) throw new Error('Initial reviewer used a different snapshot or file list.');

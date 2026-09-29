@@ -134,25 +134,26 @@ async function fixture(t, opts={}) {
   return {hooks,cfg,baseline,settings,dir,client,calls,logs,toasts,sessions,command,prompts};
 }
 
-for(const mode of MODES) for(const tool of ['bash','edit','write','apply_patch','skill','webfetch','websearch']) test(`private native tool denied before execution: ${mode}/${tool}`,async t=>{
-  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,role,id})=>{
-    if(!role.endsWith('-verifier'))return;
+for(const shellToolPermission of ['deny','ask']) for(const mode of MODES) for(const tool of ['bash','edit','write','apply_patch','skill','webfetch','websearch']) test(`private native tool denied before execution: ${shellToolPermission}/${mode}/${tool}`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.shellToolPermission=shellToolPermission;s.debug={enabled:true,directory:'.azpr-debug'};},duringPrompt:async({hooks,role,id})=>{
+    assert.equal(f.cfg.agent[role].permission.bash,shellToolPermission);
     await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool,callID:'blocked-private-call'},
       {args:{command:'PRIVATE_COMMAND_MUST_NOT_EXECUTE'}}),/Native tool.*denied/);
   }});
   const out=await f.command(mode==='deep'?'pr-deep':'pr-review');
   assert.match(out,/] COMPLETE/);assert.match(out,/Native tool notice/);
   const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
-  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
-  assert.equal(stage.blockedNativeToolCalls,1);assert.deepEqual(stage.blockedNativeTools,[tool]);
-  assert.equal(stage.completedTools,1);assert.equal(stage.modelRequests,1);
-  assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_COMMAND|blocked-private-call/);
+  for(const stage of JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages){
+    assert.equal(stage.blockedNativeToolCalls,1);assert.deepEqual(stage.blockedNativeTools,[tool]);
+    assert.equal(stage.completedTools,1);assert.equal(stage.modelRequests,1);
+    assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_COMMAND|blocked-private-call/);
+  }
   assert.deepEqual(f.cfg.permission,f.baseline.permission);
 });
 
-test('hidden native-tool submissions stop at two distinct attempts and revoke the run',async t=>{
+for(const shellToolPermission of ['deny','ask']) test(`hidden native-tool submissions stop at two distinct attempts and revoke the run (${shellToolPermission})`,async t=>{
   let verifierID;
-  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},duringPrompt:async({hooks,role,id,model})=>{
+  const f=await fixture(t,{settings:s=>{s.shellToolPermission=shellToolPermission;s.debug={enabled:true,directory:'.azpr-debug'};},duringPrompt:async({hooks,role,id,model})=>{
     if(!role.endsWith('-verifier'))return;verifierID=id;
     const input={sessionID:id,tool:'invalid',callID:'first'};
     for(let n=0;n<2;n++)await assert.rejects(hooks['tool.execute.before'](input,{args:{tool:'bash',error:'PRIVATE_REJECTED_ARGS'}}),/Native tool.*denied/);
@@ -213,8 +214,8 @@ for(const mode of MODES) for(const native of [true,false]) test(`role instructio
   assert.match(prompt,/high: substantial security-boundary/);assert.match(prompt,/same first read\s+round/);
 });
 
-test('native tool denial also covers check, comment preview and explicit publisher grants',async t=>{
-  const f=await fixture(t,{settings:s=>s.comments.enabled=true,duringPrompt:async({hooks,role,id})=>{
+for(const shellToolPermission of ['deny','ask']) test(`native tool denial also covers check, comment preview and explicit publisher grants (${shellToolPermission})`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.shellToolPermission=shellToolPermission;s.comments.enabled=true;},duringPrompt:async({hooks,role,id})=>{
     if(!['check','comment-plan','comment-publish'].includes(ROLES[role].stage))return;
     await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'bash',callID:'blocked'},{args:{}}),/Native tool denied/);
   }});
@@ -1158,6 +1159,40 @@ test('private agents deny native execution while inheriting MCP and resource per
     assert.deepEqual(f.cfg.agent[name].permission,PRIVATE_PERMISSIONS);
   }
 });
+test('shell permission compatibility is explicit, private-role-only and defaults to deny',async t=>{
+  const f=await fixture(t),legacy={...f.settings};delete legacy.shellToolPermission;
+  assert.equal(validateSettings(legacy).shellToolPermission,'deny');
+  for(const shellToolPermission of ['deny','ask']){
+    const configured=await fixture(t,{settings:s=>s.shellToolPermission=shellToolPermission});
+    const restored=jclone(configured.cfg);
+    for(const name of Object.keys(ROLES)){
+      assert.deepEqual(restored.agent[name].permission,{...PRIVATE_PERMISSIONS,bash:shellToolPermission});
+      delete restored.agent[name];
+    }
+    assert.deepEqual(restored,configured.baseline);
+    const normalized=validateSettings(configured.settings);
+    assert.deepEqual({...normalized,shellToolPermission:'deny'},validateSettings(legacy));
+  }
+  for(const shellToolPermission of ['allow','auto','',null,true,1,{},[]]){
+    const invalid=await fixture(t,{settings:s=>s.shellToolPermission=shellToolPermission});
+    assert.deepEqual(invalid.cfg,invalid.baseline);
+    await assert.rejects(invalid.command(),/shellToolPermission/);assert.equal(invalid.calls.length,0);
+  }
+  const schema=JSON.parse(await readFile(join(ROOT,'config/settings.schema.json'),'utf8'));
+  assert.deepEqual(schema.properties.shellToolPermission.enum,['deny','ask']);
+  assert.equal(schema.properties.shellToolPermission.default,'deny');
+});
+for(const mode of MODES) test(`two visible bash attempts still revoke an ask-compatible ${mode}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.shellToolPermission='ask',duringPrompt:async({hooks,role,id,model})=>{
+    if(!role.endsWith('-verifier'))return;
+    await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'bash',callID:'first'},{args:{command:'PRIVATE_SENTINEL'}}),/Native tool denied/);
+    await assert.rejects(hooks['tool.execute.before']({sessionID:id,tool:'bash',callID:'second'},{args:{command:'PRIVATE_SENTINEL'}}),/2\/2/);
+    await assert.rejects(hooks['chat.params']({sessionID:id,agent:role,model:{providerID:model.providerID,id:model.modelID}},{}),/authorization/);
+  }});
+  const out=await f.command(mode==='deep'?'pr-deep':'pr-review');
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/blocked-native-tools=2/);assert.doesNotMatch(out,/PRIVATE_SENTINEL/);
+  assert.equal(f.prompts().length,3);
+});
 test('ordinary Plan/Build hooks are no-ops even after the settings file is deleted',async t=>{
   const f=await fixture(t);await rm(join(f.dir,'settings.json'));
   for(const agent of ['plan','build','teamHelper']){
@@ -1930,13 +1965,26 @@ test('direct review: unavailable PR metadata can be reported honestly without pl
   assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),['functional','risk']);
 });
 
-test('direct review: status-only native initial output never becomes a completed review',async t=>{
-  const f=await fixture(t,{settings:s=>{s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},
-    result:({result,role})=>role.endsWith('-functional')?{status:'PLACEHOLDER'}:result,
-    answer:({answer,result})=>({data:{...answer,info:{...answer.info,structured:result},parts:[]}})});
-  const out=await f.command();assert.match(out,/snapshot must be an object.*coverage.*findings.*report/s);
+for(const native of [true,false])for(const stage of ['functional','risk','verifier'])test(`direct review: status-only ${stage} cannot complete or recover (native=${native})`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=native;s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({result,role})=>role.endsWith('-'+stage)?{status:stage==='verifier'?'CLOSED_STATUS_PLACEHOLDER':'CCOMPLETE'}:result,
+    answer:({answer,result})=>({data:native?{...answer,info:{...answer.info,structured:result},parts:[]}:answer})});
+  const out=await f.command();assert.match(out,/INCOMPLETE/);assert.match(out,/status-only/);
   assert.doesNotMatch(out,/output-retry=/);
-  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),['functional','risk']);
+  assert.deepEqual(f.prompts().map(p=>ROLES[p.body.agent].stage).sort(),stage==='verifier'?['functional','risk','verifier']:['functional','risk']);
+});
+
+for(const defect of ['duplicate-keys','length'])test(`text output ${defect} cannot use recovery or enable comments`,async t=>{
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=false;s.outputRetries=1;},answer:({answer,result,role})=>{
+    assert.equal(f.prompts().at(-1).body.format,undefined);
+    if(!role.endsWith('-verifier'))return {data:answer};
+    if(defect==='length')answer.info.finish='length';
+    else answer.parts=[{type:'text',text:JSON.stringify(result).replace('"status":"COMPLETE"','"status":"PARTIAL","status":"COMPLETE"')}];
+    return {data:answer};
+  }});
+  const out=await f.command();assert.match(out,/INCOMPLETE/);assert.doesNotMatch(out,/output-retry=/);
+  assert.equal(f.prompts().length,3);
+  await assert.rejects(f.command('pr-comment',reviewId(out)),/unavailable/);
 });
 
 
