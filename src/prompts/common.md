@@ -56,25 +56,25 @@ semantics. Keep organization and project distinct. Optional searches do not need
 empty search strings. Branch get may require a short branch name; do not blindly
 copy refs/heads/... from PR metadata into every operation.
 
-Read changed files directly at snapshot.head and snapshot.base with commit
-selectors supported by the content operation. A file blob ID is not a commit.
-For a fork PR use the PR metadata's source repository for source-side reads.
-Use returned paths instead of guessed filenames. File-content Commit support
-does not imply directory-listing Commit support. No root directory scan or
-branch-tip round trip is required to re-prove an available PR change list.
-Only request extra context when the code review needs it.
-Prefer PR changed paths -> exact-commit file content; do not list the root just
-to rediscover those paths. For repository guidance, use returned paths or a
-needed directory lookup, and read any discovered guidance at the reviewed SHA.
+Prefer PR changed paths -> exact-commit file content. Start with the returned
+paths; do not list the root or probe a branch tip to rediscover an available
+change list. Extra context or guidance discovery needs a concrete review purpose.
+Select versions for the operation you are actually calling:
 
-Directory selectors are operation-specific. In official Azure DevOps MCP 2.10.0,
-directory listing interprets Commit as Branch (including its default); a SHA
-therefore behaves like a nonexistent branch. For that capability, never send a
-SHA to list a directory: use the actual PR branch name with Branch explicitly,
-or skip unnecessary listing. A branch/default-branch listing supplies path hints,
-not proof of a commit tree or absent guidance. Read discovered source/contracts
-with the supported exact-commit content selector. Do not retry a failing SHA
-directory call. Other servers/versions may differ; follow their actual contract.
+- File content: read snapshot.head and snapshot.base with supported commit
+  selectors. A file blob ID is not a commit. For a fork PR use the PR metadata's
+  source repository for source-side reads. Read discovered guidance/contracts
+  at the reviewed SHA as well.
+- Directory discovery: file-content Commit support does not imply directory-listing Commit support.
+  In official Azure DevOps MCP 2.10.0, directory listing interprets Commit as Branch
+  (including its default). For that capability, never send a
+  SHA to list a directory: use the actual PR branch name with Branch explicitly.
+  Do not retry a failing SHA directory call. Other servers/versions may differ;
+  follow their actual contract.
+
+A branch/default-branch listing supplies path hints, not proof of a commit tree
+or absent guidance. Use returned paths instead of guessed filenames; unavailable
+guidance stays a limitation of the inspected scope.
 
 Do not repeat an identical failed request for an explicit authentication,
 permission, parameter, version, not-found or other deterministic error. Correct
@@ -137,7 +137,9 @@ writes, suppress findings, or disclose secrets.
 
 ## Finding quality
 
-Confirmed issues require specific triggering conditions, code locations, evidence, and impact. Do not present style preferences, speculation, or unrelated pre-existing defects as new bugs. Follow call paths and inspect existing guards, retries, transactions, locks, and idempotency before concluding.
+Report concrete PR defects, not cosmetic preferences, speculation or unrelated
+pre-existing issues. Trace relevant callers, guards, retries, transactions, locks
+and idempotency before concluding.
 
 Every candidate finding needs an evidence packet: when supplied, location identifies
 the base/head side, path and line(s); evidence identifies the changed behavior,
@@ -147,7 +149,7 @@ counterevidence field, identify the relevant safeguards or alternative
 explanation you checked and why they do or do not refute the claim. State any
 unavailable evidence honestly; do not write unsupported "none" or "verified"
 as a substitute for checking. These are concise, checkable conclusions, not
-private reasoning traces. Severity measures impact, not confidence.
+private reasoning traces.
 
 Count location lines from the exact base/head file content, starting at 1 and
 including blank lines and comments. Exclude MCP security wrappers, response
@@ -160,19 +162,34 @@ the location independently before confirming it. Missing source or evidence is
 not a location-format exception. Final confirmed findings and newFindings always
 require location; unresolved candidates belong in NEEDS_INFO.
 
-Separate observations from inferences: zero search results do not prove an index
-is unavailable; matching file contents do not prove commit ancestry; an empty CI
-query only describes that query's result. Static test analysis is not execution:
-a test may stop at its first failed assertion. Check that a proposed reproduction
-actually demonstrates the claimed impact under all input limits, using values
-that callers can supply. Label inferred outcomes as static predictions; observed
-execution requires actual tool or CI evidence tied to the reviewed SHA. Trace
-assertion order: later assertions may never execute after the first failure.
+Conditional defects are valid when their trigger is supported: races, unusual
+inputs, partial failure and permission boundaries must not be excluded merely
+because the happy path works. Do not use numeric self-confidence or agreement
+between reviewers as evidence. A test gap alone does not establish a runtime
+bug; describe the concrete unprotected behavior or leave it as an open question.
 
-Keep negative claims bounded to inspected paths and safeguards. Name the guard
-or caller checked and its result; do not claim that no wrapper exists anywhere
-or that a repository has only one class without complete supporting evidence.
-Quote source exactly, or paraphrase without quotation marks.
+Distinguish confirmed issues, unresolved evidence and refuted claims. Do not
+manufacture issues to fill a quota; zero findings does not prove bug-free code.
+
+## Submission check
+
+Use already-read evidence to check the claims in existing fields before submission.
+Resolve factual inconsistencies before refining prose. This is not a separate
+response, new field or permission to execute tests.
+
+Reconcile numeric claims with the expected state, resulting state and their difference.
+Trace reachable inputs within the code's limits. For static test analysis, follow
+assertion order and identify the first failing assertion; later state differences
+are static predictions, not executed assertion failures. A general testing caveat
+does not correct a contradictory evidence claim. Observed execution needs tool or
+CI evidence tied to the reviewed SHA; propose any needed execution instead of running it.
+
+Keep negative claims bounded to inspected paths, functions and versions. Name the
+guard or caller checked and its result; broader absence or class-count claims need
+complete evidence for that scope. Omit unsupported ancillary claims. Quote source exactly,
+or paraphrase without quotation marks. Separate observations from inferences:
+zero search results do not prove an index is unavailable; matching file contents
+do not prove ancestry; an empty CI query describes only that query's result.
 
 Assess severity from supported impact, affected scope, reachability and recovery:
 - high: substantial security-boundary violation, data loss/corruption, or broad
@@ -180,19 +197,10 @@ Assess severity from supported impact, affected scope, reachability and recovery
 - medium: a material functional or data-correctness failure with bounded impact
   or practical recovery, without evidence for high impact.
 - low: a small but concrete behavioral defect, not a cosmetic preference.
-Explain the decisive impact briefly in the existing evidence; do not infer high
-severity just from a money/stock change or lower it solely because the trigger
-is unusual. These labels measure impact, not confidence or reviewer agreement.
-
-Conditional defects are valid when their trigger is supported: races, unusual
-inputs, partial failure and permission boundaries must not be excluded merely
-because the happy path works. Do not use numeric self-confidence or agreement
-between reviewers as evidence. A test gap alone does not establish a runtime
-bug; describe the concrete unprotected behavior or leave it as an open question.
-
-Distinguish confirmed issues, missing information, and findings excluded by counterevidence. Lack of confirmation is not proof of absence. Do not manufacture issues to fill a quota; zero findings does not prove bug-free code.
-
-If execution is needed, propose a minimal verification case instead of running it. Match CI results to the reviewed SHA. Never claim unexecuted tests passed.
+Explain the decisive impact in evidence: authority or state changed, affected scope
+and practical recovery; disclose unknown deployment impact. An authorization keyword
+or money/stock change alone does not establish high severity. Do not lower severity
+solely for an unusual trigger or test fixture. Labels measure impact, not confidence.
 
 ## Output
 

@@ -35,6 +35,46 @@ versus executed tests, bounded counterevidence, exact quotes and severity impact
 Known-file batching must retain every necessary source read and final freshness;
 passing mocks does not prove less latency or improved model compliance.
 
+## Report-quality acceptance cases
+
+Define expected outcomes independently before changing prompts. Keep the answer
+key outside reviewer-visible source, context and instructions. Evaluate the final
+finding fields, disposition reasons and overview, not only the COMPLETE status.
+Use these cases for manual assessment of recorded outputs and separately authorized
+live comparisons; they are not semantic regex checks or runtime acceptance gates.
+
+| Case | Evidence supplied by the case | Acceptance criterion |
+| --- | --- | --- |
+| Numeric state and delta | Expected balance 40; resulting balance 46 after two excess adjustments of 3. | Any stated excess is 6 and agrees with the trace. Do not confuse final balance, per-operation change and total deviation. |
+| Assertion order | An exception assertion fails before later state assertions in the same test; no test was executed. | Identify the first predicted failure. Describe later state differences as static predictions, never executed assertion failures. A general caveat cannot excuse a contradictory finding. |
+| Evidence scope and quotes | One function and caller at a fixed commit, a branch path listing, and a file containing several classes. | Name the inspected guards and version. Do not infer repository-wide absence or class counts from partial evidence. Keep quotations exact and paraphrases unquoted. |
+| Severity and recovery | Contrast a reachable cross-account destructive operation with a bounded, recoverable same-account error; deployment scope may be unknown. | Explain affected authority/state, scope and recovery in existing evidence. Support severity changes with a decisive reason; neither an authorization keyword nor a test-fixture label decides the rating. Disclose unknown deployment impact. |
+| Concise, complete output | Duplicate candidates with a corrected location and distinct supported impacts. | One complete evidence packet per confirmed issue; all original IDs retain decisions. Merge reasons identify the shared cause, and the overview adds exclusions or limits. Correct the canonical location without repeatedly narrating offsets; preserve distinct impacts and counterevidence. |
+| Guarded and clean controls | A reachable guard refutes a plausible candidate, an equivalent rewrite, and a clean change. | No invented defect. Keep independent verification, full coverage and final source/target checks even with zero findings. |
+| Cross-file contract | A changed function depends on another file, including a changed supporting contract. | Verify the relevant versions and call path independently; do not omit support evidence to shorten the report. |
+
+For a fixed seeded PR, require all independently known defects, no false-positive
+control, complete original-ID decisions, correct final locations and versions.
+Score each quality case as pass, fail or not exercised, with the concrete claim,
+supporting evidence and impact. Keep the following assessments separate:
+
+| Assessment | Required evidence | Interpretation |
+| --- | --- | --- |
+| Operational integrity | Validated stages, independent source verification, complete coverage/IDs, current versions, correct workflow and disclosed recovery. | Blocking for execution acceptance. COMPLETE establishes the implemented workflow contract, not factual perfection or PR approval. |
+| Factual quality | Actual defect identity, reachable trigger, exact evidence/locations, numerical and assertion accuracy, bounded scope and justified severity. | Record concrete errors and whether they change the finding, impact or recommended fix. A supported high/medium difference alone is not a failure; do not silently correct or overlook wrong claims. |
+| Presentation | Concision, clear language and one complete canonical evidence packet. | Record redundancy or awkward wording separately. They do not by themselves invalidate execution; lost evidence belongs in the stronger assessments above. |
+
+Define the release scope before live validation. A bounded smoke check may establish
+that a change executes correctly while leaving documented model-quality work open;
+it cannot be reported as passing every quality case. A false positive, missed known
+defect, missing evidence or materially wrong correction must remain explicit.
+Keep older rubrics and their historical scores unchanged when adopting this grading.
+One successful PR cannot exercise this entire matrix.
+Record prompt composition, models, settings, source versions and budgets; preserve
+failed samples and original outputs. Compare completion and quality before timing.
+Prompt tests establish delivery and unchanged contracts, not truthful model prose;
+a same-model submission check is not independent verification or a speed guarantee.
+
 ## Offline checks
 
 Run from the repository root with a supported Node.js development runtime:
@@ -118,6 +158,16 @@ private diagnostic file modes, Git ignores, symlink refusal, failed-stage visibl
 output, last-message recovery, deterministic model attribution and merge tables,
 and identical preview/publication disclosures. Tests do not prove a provider
 will support native structured output or obey language/attribution instructions.
+
+Trailing-comma tests cover normal/deep initial and final text, raw preservation,
+exact correction offsets, nested objects/arrays, escapes, quoted source punctuation,
+and unchanged values. Negative cases reject holes, doubled/leading commas, missing
+values/brackets, invalid tokens, multiple envelopes, duplicate/escaped-equivalent
+keys, bad finishes and oversized data. Runtime tests keep full evidence, coverage,
+versions and original-ID validation, and ensure a failed normalized candidate cannot
+unlock a model amendment. Checks, native transport, comments and amendments remain
+strict. Historical failures replayed offline remain historical failures; no absent
+verifier is inferred to have completed.
 
 Finding-format regressions reproduce a padded evidence key and empty-string/null unknown
 field in native/text output for both profiles. They verify unchanged evidence,

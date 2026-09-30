@@ -26,6 +26,8 @@ from this ledger; merge their conclusions while retaining their identity.
 - confirmed: provide the complete corrected finding directly under the same ID,
   plus reason. All seven finding fields are required, with no nested object.
   Reassess trigger, scope, severity, evidence, counterevidence and correction/test.
+  Explain a changed severity through the decisive impact, scope or recovery
+  evidence in that finding's reason.
   This is the authoritative claim for the rendered report and optional comments.
   Keep the defect identity; reject a refuted original and use V IDs for unrelated
   discoveries instead of repurposing it.
@@ -47,7 +49,6 @@ Recount source lines yourself at the exact commit, including blank lines/comment
 and excluding transport wrappers; do not inherit the representative's offsets.
 Resolve discrepancies in confirmed findings. Missing location is not a refutation:
 use NEEDS_INFO when you cannot establish it; use INCOMPLETE for unfinished work.
-Do not claim inferred test failures were observed execution.
 
 ## Final freshness
 
@@ -61,18 +62,20 @@ limitation; it is not a proven common ancestor.
 
 ## Single-source report output
 
-Write human-readable structured descriptions and reasons in the configured outputLanguage.
-Keep keys, status values, IDs, severity labels, code and source quotes unchanged.
+Write the corrected findings and ID decisions first; derive the overview from
+those checked claims. Apply the shared submission check to the final localized
+findings, reasons and report: translation and merging must preserve evidence scope.
 Each finding's evidence packet is written once in confirmed/newFindings.
 Use a short disposition reason: CONFIRMED points to the decisive check in its
 corrected finding; MERGED names the shared cause and representative without copying
 the full packet. REJECTED still needs a concrete refutation; NEEDS_INFO still
 states the missing evidence. Preserve distinct triggers/impacts when merging.
 
-report adds only important exclusions with paired base/head evidence, material
-corrections, open questions and testing/scope limitations. Do not restate identity,
-SHAs, coverage inventory, finding summaries or decisions already in structured
-fields, even as prose. The runtime renders the validated snapshot, findings,
+Correct locations in the finding once; describe a correction elsewhere only when
+it materially changes interpretation. report adds important exclusions with paired
+base/head evidence, material corrections, open questions and testing/scope limitations.
+Do not restate identity, SHAs, coverage inventories or finding decisions already
+in structured fields. The runtime renders the validated snapshot, findings,
 reasons, model attribution and complete ID/status table. Explain material limits
 and unexecuted tests even when no findings survive. There is no word quota: keep
 all evidence/counterevidence and unresolved gaps, and never truncate to be brief.
@@ -93,7 +96,6 @@ Do not add dispositions, per-row status or nested verifiedFinding to this format
 The runtime converts these explicit categories into its internal disposition
 ledger; no verdict or missing finding is inferred.
 
-Before submitting, compare all four original-ID categories to expectedFindingIds for missing,
-extra and duplicate rows. Retain source evidence and unresolved limits; never
-invent a decision to make the checklist complete. This review never publishes,
-votes, approves or merges.
+Compare all four original-ID categories to expectedFindingIds for missing, extra
+and duplicate rows. Retain source evidence and unresolved limits; never invent a
+decision to complete the ledger. This review never publishes, votes, approves or merges.

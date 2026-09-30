@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import { COMMANDS, ROLES, PROMPTS, BLOCKED_NATIVE_TOOLS, roleFor, initialRoles, buildAgents, statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, finalResubmissionPrompt, validateSettings } from './config.mjs';
-import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, finalSubmissionIssues, finalResubmissionPlan, checkFinalResubmission, parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
+import { OutputStatusError, OutputLocationError, OutputDispositionError, dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment, finalSubmissionIssues, finalResubmissionPlan, checkFinalResubmission, parseJSONReport, parseReviewJSONReport, parseAmendmentText, normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope, initialEnvelope, mergeInitialSnapshots, finalEnvelope } from './output.mjs';
 import { createDiagnostics, diagnosticResponse, createStageTiming } from './diagnostics.mjs';
 import { reviewProvenance, provenanceReport, commentAttribution, renderFinalReport, renderIncompleteDraft } from './attribution.mjs';
 const REPAIR_PROMPTS = { status: statusRepairPrompt, location: locationRepairPrompt, disposition: dispositionRepairPrompt, final: finalResubmissionPrompt };
@@ -211,7 +211,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     Object.assign(record, { inputCharacters: input.length, instructionCharacters: instructions.length,
       remainingRunMsAtStart: Math.max(0, run.deadlineAt - Date.now()) });
     let receivedAnswer = false;
-    let envelope, prepared, validatingOutput = false, finalResubmission = false;
+    let envelope, prepared, syntaxCorrections = [], validatingOutput = false, finalResubmission = false;
     try {
       await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions });
       if (!run.active) throw new Error('Review stopped before model invocation.');
@@ -233,7 +233,10 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
       record.completedTools = g.completedTools.size;
       let usedTextAmendment = false;
-      try { envelope = parseJSONReport(answer, state.settings); }
+      try {
+        if (retryOf) envelope = parseJSONReport(answer, state.settings);
+        else ({ envelope, corrections: syntaxCorrections } = parseReviewJSONReport(answer, state.settings, role));
+      }
       catch (error) {
         // The compatibility path belongs to the existing one-request amendment
         // grant only, never ordinary reviews, comments, failed tools or aborts.
@@ -253,6 +256,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       finalResubmission = answer.info?.role === 'assistant' && answer.info?.sessionID === made.id &&
         !['length', 'content-filter', 'error', 'cancelled'].includes(answer.info?.finish) && !g.invalidStructuredCalls.size;
       prepared = retryOf ? { envelope, corrections: [] } : normalizeFindingFormat(envelope, role);
+      prepared.corrections = [...syntaxCorrections, ...prepared.corrections];
       const result = validate(prepared.envelope, record);
       if (prepared.corrections.length) record.outputFormatCorrections = prepared.corrections;
       if (usedTextAmendment) record.outputTransportFallback = { from: 'native', to: 'json-text', error: 'StructuredOutputError' };
@@ -266,11 +270,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     } catch (error) {
       if (run.controller.signal.aborted) error = abortError(run.controller.signal);
       record.status = 'FAILED'; record.error = errorText(error);
+      if (syntaxCorrections.length) record.rejectedOutputFormatCorrections = prepared?.corrections ?? syntaxCorrections;
       if (spec.format === 'final' && validatingOutput) {
         record.validationErrors = finalSubmissionIssues(envelope);
         if (!record.validationErrors.length) record.validationErrors = [{ path: '$', code: 'contract', message: errorText(error) }];
       }
-      if (!retryOf && (error instanceof OutputStatusError || error instanceof OutputLocationError || error instanceof OutputDispositionError ||
+      // Syntax tolerance must pass every contract locally; it cannot unlock an
+      // amendment/resubmission that the original malformed JSON could not enter.
+      if (!retryOf && !syntaxCorrections.length && (error instanceof OutputStatusError || error instanceof OutputLocationError || error instanceof OutputDispositionError ||
           (spec.format === 'final' && validatingOutput && finalResubmission))) error.submission = {
         envelope: prepared?.envelope ?? envelope, corrections: prepared?.corrections, sessionID: made.id, completedTools: g.completedTools.size,
         rawEnvelope: envelope, finalResubmission, validationErrors: record.validationErrors,
@@ -327,7 +334,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
   function receipt(run, report, status, error) {
     const rows = run.stages.map(s => `- ${s.role}: ${s.status}; session=${s.sessionID}; model=${s.model}${s.retryOf ? `; output-retry=1/1; retry-of=${s.retryOf}; retry-kind=${s.retryKind}` : ''}${s.invalidStructuredOutputs ? `; invalid-structured-output=${s.invalidStructuredOutputs}` : ''}${s.blockedNativeToolCalls ? `; blocked-native-tools=${s.blockedNativeToolCalls}` : ''}${s.toolFailures ? `; observed-tool-errors=${s.toolFailures}` : ''}${s.outputFormatCorrections?.length ? `; output-format-corrections=${s.outputFormatCorrections.length}` : ''}${s.pendingLocations?.length ? `; pending-locations=${s.pendingLocations.length}` : ''}${s.outputTransportFallback ? '; output-transport=json-text' : ''}${s.error ? `; error=${s.error}` : ''}`).join('\n');
     let body = `[AZPR ${run.id}] ${status}\n${error ? `Reason (${run.phase ?? 'workflow'}): ${error}\n` : ''}${rows}\n`;
-    if (run.stages.some(s => s.outputFormatCorrections?.length)) body += '\nOutput format notice: finding key whitespace, empty-string/null unknown fields or exactly identical new-finding disposition duplicates were normalized locally, then the complete envelope was validated. Required field values were unchanged; this normalization added no model request. Stage results record outputFormatCorrections; original responses, including redundant disposition reasons, remain in their sessions and any saved response diagnostics. Present this notice with the result.\n';
+    if (run.stages.some(s => s.outputFormatCorrections?.length)) body += '\nOutput format notice: trailing commas, finding key whitespace, empty-string/null unknown fields or exactly identical new-finding disposition duplicates were normalized locally, then the complete envelope was validated. Required field values were unchanged; this normalization added no model request. Stage results record outputFormatCorrections; original responses, including redundant disposition reasons, remain in their sessions and any saved response diagnostics. Present this notice with the result.\n';
     if (run.stages.some(s => s.pendingLocations?.length)) body += '\nPending location notice: initial candidates omitted locations and were passed unchanged to the verifier for independent source checks. No location was guessed and no initial location amendment was requested. Final confirmations and discoveries still require locations; unresolved candidates must be NEEDS_INFO, not publishable defects. Stage results record pendingLocations; this notice does not claim they were resolved. Present this notice with the result.\n';
     if (run.stages.some(s => s.outputTransportFallback)) body += '\nAmendment transport notice: a complete JSON text amendment was accepted after the host reported no native StructuredOutput submission. The scoped amendment and full original envelope both passed validation; no additional model request or JSON repair occurred. The original host error remains in the session and any response diagnostics; stage results record outputTransportFallback. Present this notice with the result.\n';
     if (run.stages.some(s => s.retryKind === 'location')) body += '\nLocation amendment notice: a bounded amendment asked the same reviewer to supply only missing locations from its existing source context, with ordinary tools denied. Original fields stay immutable; acceptance requires full envelope validation. This is a model-authored amendment, not independent proof of source locations. Inspect both attempt statuses: original failures and available raw submissions remain in the session and any saved diagnostics. Present this notice with the result.\n';

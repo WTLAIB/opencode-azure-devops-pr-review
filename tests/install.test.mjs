@@ -284,7 +284,7 @@ test('explicit settings replace the installed model mapping', () => {
   original(s);
 });
 
-test('replacement preserves a personal output language without prompt customizations', () => {
+test('replacement preserves a personal output language without prompt customizations', async () => {
   const s=setup(), file=profile(s);
   const settings=JSON.parse(readFileSync(file,'utf8'));
   settings.outputLanguage='zh-TW';
@@ -293,7 +293,11 @@ test('replacement preserves a personal output language without prompt customizat
   ok(install(s,['--replace']));
   assert.equal(JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8')).outputLanguage,'zh-TW');
   assert.ok(!existsSync(join(s.root,'azpr-backups')));
-  assert.match(readFileSync(join(s.root,'plugins/azpr/prompts/final.md'),'utf8'),/configured outputLanguage/);
+  const agents=await installedAgents(s);
+  for(const mode of ['review','deep']) {
+    assert.match(agents[`azpr-${mode}-verifier`].prompt,/outputLanguage: zh-TW/);
+    assert.match(agents[`azpr-${mode}-verifier`].prompt,/human-readable structured finding fields/);
+  }
   original(s); clean(s);
 });
 

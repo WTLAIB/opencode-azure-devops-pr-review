@@ -214,6 +214,32 @@ for(const mode of MODES) for(const native of [true,false]) test(`role instructio
   assert.match(prompt,/high: substantial security-boundary/);assert.match(prompt,/same first read\s+round/);
 });
 
+for(const mode of MODES) for(const native of [true,false]) test(`submission checks reach both initials and final output without another stage: ${mode}/${native}`,async t=>{
+  const f=await fixture(t,{settings:s=>s.structuredOutput=native});
+  for(const stage of ['functional','risk','verifier']) {
+    const prompt=f.cfg.agent[roleFor(mode,stage)].prompt;
+    assert.equal((prompt.match(/^## Submission check$/gm)||[]).length,1);
+    assert.match(prompt,/expected state, resulting state and their difference/);
+    assert.match(prompt,/first failing assertion/);
+    assert.match(prompt,/later state differences.*static predictions/s);
+    assert.match(prompt,/inspected paths, functions and versions/);
+    assert.match(prompt,/unknown deployment impact/);
+    assert.match(prompt,/authorization keyword/);
+    assert.match(prompt,/already-read evidence.*existing fields/s);
+  }
+  const final=f.cfg.agent[roleFor(mode,'verifier')].prompt;
+  assert.match(final,/Apply the shared submission check to the final localized/);
+  assert.match(final,/Explain a changed severity.*decisive.*scope.*recovery/s);
+  assert.match(final,/Correct locations in the finding once/);
+  for(const stage of ['check','comment-plan','comment-publish'])
+    assert.doesNotMatch(f.cfg.agent[roleFor(mode,stage)].prompt,/^## Submission check$/m);
+  assert.match(await f.command(`pr-${mode}`),/] COMPLETE/);
+  assert.equal(f.prompts().length,3);
+  assert.equal(new Set(f.prompts().map(p=>p.path.id)).size,3);
+  assert.deepEqual(f.cfg.permission,f.baseline.permission);
+  assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
+});
+
 for(const shellToolPermission of ['deny','ask']) test(`native tool denial also covers check, comment preview and explicit publisher grants (${shellToolPermission})`,async t=>{
   const f=await fixture(t,{settings:s=>{s.shellToolPermission=shellToolPermission;s.comments.enabled=true;},duringPrompt:async({hooks,role,id})=>{
     if(!['check','comment-plan','comment-publish'].includes(ROLES[role].stage))return;
@@ -636,6 +662,76 @@ test('verifier formatting is disclosed without debug logging or model resubmissi
   assert.match(out,/] COMPLETE/);assert.match(out,/azpr-review-verifier: COMPLETE;.*output-format-corrections=1/);
   assert.match(out,/Output format notice:/);assert.doesNotMatch(out,/Private debug directory/);
   assert.equal(f.prompts().length,3);
+});
+
+for(const mode of ['review','deep']) for(const slot of ['risk','verifier']) test(`audited trailing-comma tolerance retains the raw ${mode}/${slot} output without another request`,async t=>{
+  let raw;
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=false;s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},
+    answer:({answer,role,result})=>{
+      if(role.endsWith('-'+slot)) {
+        const json=JSON.stringify(result);raw=json.slice(0,-1)+',}';
+        if(mode==='deep')raw='```json\n'+raw+'\n```';
+        return {data:{...answer,info:{...answer.info,finish:'stop'},parts:[{type:'text',text:raw}]}};
+      }
+      return {data:answer};
+    }});
+  const out=await f.command('pr-'+mode);
+  assert.match(out,/] COMPLETE/);assert.match(out,/output-format-corrections=1/);
+  assert.match(out,/trailing commas/);assert.doesNotMatch(out,/output-retry=/);
+  assert.equal(f.prompts().length,3);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const files=await readdir(dir);
+  const saved=JSON.parse(await readFile(join(dir,files.find(n=>n.endsWith('-'+slot+'.response.json'))),'utf8'));
+  assert.equal(saved.text,raw);
+  const record=JSON.parse(await readFile(join(dir,files.find(n=>n.endsWith('-'+slot+'.result.json'))),'utf8'));
+  assert.equal(record.outputFormatCorrections.length,1);
+  assert.equal(record.outputFormatCorrections[0].action,'remove-trailing-comma');
+  assert.equal(record.attempt,1);assert.equal(record.retryOf,undefined);
+  const finalPacket=JSON.parse(f.prompts().find(p=>p.body.agent.endsWith('-verifier')).body.parts[0].text);
+  assert.deepEqual(finalPacket.reviews.flatMap(r=>r.findings),[candidate('F-1'),candidate('R-1')]);
+});
+
+for(const defect of ['missingEvidence','nonemptyExtra','collision','coverage','snapshot','invalidStatus','missingDisposition','finalLocation','stale','unknownVersion']) test(`trailing-comma tolerance cannot bypass ${defect} or start model recovery`,async t=>{
+  const finalDefect=['missingDisposition','finalLocation','stale','unknownVersion'].includes(defect);
+  const target=finalDefect?'verifier':'risk';
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=false;s.outputRetries=1;s.debug={enabled:true,directory:'.azpr-debug'};},
+    result:({result,role})=>{
+      if(!role.endsWith('-'+target))return result;
+      if(defect==='missingEvidence')delete result.findings[0].evidence;
+      if(defect==='nonemptyExtra')result.findings[0].PRIVATE_KEY_SENTINEL='PRIVATE_VALUE_SENTINEL';
+      if(defect==='collision')result.findings[0][' evidence']=result.findings[0].evidence;
+      if(defect==='coverage')result.coverage.files=[];
+      if(defect==='snapshot')result.snapshot.head='invalid-sha';
+      if(defect==='invalidStatus')result.status='CCOMPLETE';
+      if(defect==='missingDisposition')result.dispositions.pop();
+      if(defect==='finalLocation')delete result.dispositions[0].verifiedFinding.location;
+      if(defect==='stale')result.currentHead='c'.repeat(40);
+      if(defect==='unknownVersion')result.currentBase='';
+      return result;
+    },answer:({answer,role,result})=>{
+      if(!role.endsWith('-'+target))return {data:answer};
+      const raw=JSON.stringify(result);
+      return {data:{...answer,info:{...answer.info,finish:'stop'},parts:[{type:'text',text:raw.slice(0,-1)+',}'}]}};
+    }});
+  const out=await f.command();
+  assert.match(out,defect==='stale'?/] STALE/:/] INCOMPLETE/);
+  assert.doesNotMatch(out,/PRIVATE_|output-retry=/);
+  if(defect!=='stale')assert.doesNotMatch(out,/output-format-corrections=/);
+  assert.equal(f.prompts().length,finalDefect?3:2);
+});
+
+test('a bounded amendment still rejects trailing commas without a second recovery',async t=>{
+  const f=await fixture(t,{settings:s=>{s.structuredOutput=false;s.outputRetries=1;},result:({result,role,packet})=>{
+    if(role.endsWith('-risk')&&!packet.operation)result.status='CCOMPLETE';return result;
+  },answer:({answer,result,o})=>{
+    const packet=JSON.parse(o.body.parts[0].text);
+    if(!packet.operation)return {data:answer};
+    const raw=JSON.stringify(result);
+    return {data:{...answer,info:{...answer.info,finish:'stop'},parts:[{type:'text',text:raw.slice(0,-1)+',}'}]}};
+  }});
+  const out=await f.command();
+  assert.match(out,/] INCOMPLETE/);assert.match(out,/required JSON envelope/);
+  assert.doesNotMatch(out,/output-format-corrections=/);assert.equal(f.prompts().length,3);
 });
 
 for(const native of [true,false]) test(`normal role prompts contain only their configured output transport (native=${native})`,async t=>{
@@ -2146,8 +2242,10 @@ test('directory lookup guidance separates branch hints from exact-commit evidenc
     const prompt=f.cfg.agent['azpr-review-'+stage].prompt;
     assert.match(prompt,/directory listing interprets Commit as Branch/);
     assert.match(prompt,/never send a\s+SHA to list a directory/);
-    assert.match(prompt,/not proof of a commit tree or absent guidance/);
-    assert.match(prompt,/exact-commit content selector/);
+    assert.match(prompt,/not proof of a commit tree\s+or absent guidance/);
+    assert.match(prompt,/File content: read snapshot.head and snapshot.base with supported commit\s+selectors/);
+    assert.match(prompt,/Read discovered guidance\/contracts\s+at the reviewed SHA/);
+    assert.match(prompt,/Extra context or guidance discovery needs a concrete review purpose/);
   }
   assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
   assert.deepEqual(f.cfg.permission,f.baseline.permission);

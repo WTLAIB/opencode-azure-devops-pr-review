@@ -173,7 +173,7 @@ key spellings, so this scan cannot certify their upstream serialization.
 Both transports reject explicit length/content-filter/error/cancelled finishes
 before evidence validation, even if the stored object looks syntactically complete.
 
-Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted, but invalid/truncated JSON is not repaired and no full stage is automatically rerun. The audited finding-format normalization and opt-in bounded amendments below preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot must contain the same unique file set; comparison ignores order and validated output uses sorted paths. URL/ID consistency is not independent verification of repository identity or source contents.
+Every stage returns a JSON envelope. By default, the OpenCode 1.18.31 native JSON-schema transport puts it in `info.structured`; `structuredOutput: false` selects text compatibility. A single unambiguous JSON fence is accepted. Normal review text permits only the audited trailing-comma extension below; other invalid/truncated JSON remains rejected and no full stage is automatically rerun. Local normalization and opt-in bounded amendments preserve evidence validation. Snapshot validation requires a repository, positive PR ID matching the requested URL, full base/head hashes and a nonempty unique file list. Direct reviews use scope=pr; standalone check uses cumulative. Initials must agree on repository/PR, versions and scope. The runtime combines file sets into a sorted union, retaining original lists. The final snapshot must contain the same unique file set; comparison ignores order and validated output uses sorted paths. URL/ID consistency is not independent verification of repository identity or source contents.
 
 Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
@@ -255,6 +255,30 @@ snapshot or parses XML tool markup as an envelope. Dates are not version identit
 Fresh repository/PR identity remains a model check, not a provider-response audit.
 
 Every stage must observe message and parameter hooks. Source access, coverage, and current HEAD are model-reported; the runtime does not classify MCP calls or decode their results to verify those claims. Missing access should be PARTIAL in initial review (NOT_READY for standalone check), not rejected because a preferred tool name was absent.
+
+### Audited JSON separator normalization
+
+Only normal initial/verifier text submissions with structuredOutput=false,
+finish=stop and a valid role status may use the trailing-comma extension.
+An iterative grammar scan recognizes complete members/values and matching
+container boundaries, respecting JSON strings/escapes and whitespace. It removes
+only a separator immediately before a closing delimiter. Strict JSON parsing and
+duplicate-key detection then run, followed by existing finding normalization and
+the complete stage validator. Required data is never supplied or rewritten.
+
+Leading/doubled commas, array holes, missing values, malformed strings, incomplete
+containers, multiple envelopes and ambiguous fences fail. Keys, source quotations,
+number lexemes and ordering are preserved; no parse/reserialize repair is used.
+The raw response remains unchanged. Accepted outputFormatCorrections entries use
+action=remove-trailing-comma and zero-based UTF-16 offsets within the selected JSON
+body; offsets exclude any fence/preamble. Receipts disclose accepted changes even
+without debug logging. This adds no model request and leaves source checks,
+native transport, comments and all amendment grants on strict syntax parsing.
+
+Syntax-normalized candidates must pass all existing contracts locally. If they
+fail, rejectedOutputFormatCorrections retains attempted changes in diagnostics,
+without acceptance notices or newly eligible model amendments/resubmissions.
+A version change still returns STALE and cannot become a completed review.
 
 ### Audited finding-format normalization
 
@@ -488,6 +512,16 @@ substitutes for verification. Missing contracts and unexecuted tests stay visibl
 These changes strengthen auditability and prevent structural inconsistencies.
 They do not establish improved bug recall or lower false-positive rates; those
 require evaluation on representative PRs with independent ground truth.
+
+Common review policy owns one submission check for numerical state/delta claims,
+static assertion order, evidence scope/quotes and impact-based severity. The final
+role applies it to the localized findings, reasons and overview after independent
+source verification, with a decisive explanation for changed severity. This uses
+existing fields and already-read evidence; no extra stage, field, model request
+or semantic runtime validator is added. The canonical finding retains the full
+evidence packet and corrected location; reasons and overview add only necessary
+decisions, exclusions, corrections and limits. See the concrete
+[quality acceptance cases](VALIDATION.md#report-quality-acceptance-cases).
 
 ## Tools and reports
 

@@ -14,8 +14,11 @@ guarantee the model will choose every unfamiliar tool correctly.
 
 The plugin adds no MCP allow/ask/deny overrides and does not grant wildcard
 permissions. OpenCode's normal defaults and global/project permission rules
-govern these private agents. Their only explicit tool override is task=deny,
-to keep nested model delegation under the orchestrator's control. Session grants
+govern these private agents. Private roles deny Task delegation and native
+shell/edit/skill/public-web tools by default. Explicit shellToolPermission=ask
+retains the bash schema for provider compatibility; the scoped runtime guard
+still blocks execution, including write/apply_patch and hidden native attempts.
+These native restrictions do not classify or restrict MCP actions. Session grants
 also prevent expired reviewers and display-only messages from using tools.
 
 Private reviewers are separate agents, not clones of Build or Plan. A permission

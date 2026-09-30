@@ -266,9 +266,10 @@ review content. If your model/provider cannot reliably submit complete native
 envelopes, explicitly set `structuredOutput: false` and restart to use JSON text.
 This changes transport without changing models, adding retries or relaxing
 snapshot, coverage, finding and disposition validation. A single unambiguous
-JSON fence is supported. Duplicate keys (including escaped equivalents), malformed
-JSON, and responses marked truncated, filtered, errored or cancelled are rejected;
-the plugin never selects a duplicate value or fills missing evidence.
+JSON fence is supported. Duplicate keys (including escaped equivalents), missing
+or ambiguous content, and responses marked truncated, filtered, errored or
+cancelled are rejected; the plugin never selects a duplicate value or fills missing
+evidence. One narrow text-only syntax exception is described below.
 
 Status-only initial/final submissions remain incomplete in both modes. Compare
 the raw response with its requested schema before selecting a transport, and
@@ -279,6 +280,14 @@ Role prompts include only the selected transport's submission instructions.
 The verifier's current-head field uses a simple string schema for tool-parser
 compatibility. An unknown head remains INCOMPLETE; this never relaxes the full
 SHA comparison required for a completed review.
+
+Normal initial/verifier JSON text with finish=stop may contain trailing commas
+after complete object members or array values. A grammar-aware scan removes only
+those separators; strings, keys and values stay unchanged. Leading/double commas,
+array holes, missing values/brackets, duplicate keys and all other malformed JSON
+still fail. Full envelope validation is required, including a valid role status;
+this cannot unlock an extra model amendment when validation fails. Native output,
+source checks, comments and amendment sessions retain strict syntax parsing.
 
 Finding output tolerates surrounding ASCII whitespace on an otherwise exact
 field name and unknown fields whose value is exactly `""` or `null`. A redundant

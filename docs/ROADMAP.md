@@ -9,6 +9,21 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Audited trailing-comma tolerance for completed normal initial/verifier JSON text.
+  Grammar and duplicate-key checks, unchanged values, full envelope validation,
+  raw retention and receipt/diagnostic disclosure remain mandatory. Invalid
+  normalized candidates cannot unlock a model repair. No extra request, field,
+  model or retry is added. Operational, factual and presentation acceptance are
+  assessed separately; same-PR smoke evidence cannot establish general quality.
+
+- Consolidated common/final submission guidance checks numerical state/deltas,
+  static assertion order, inspected evidence scope and justified severity using
+  existing fields. Final prose keeps one complete evidence packet per defect and
+  avoids repeated correction narratives. The quality acceptance matrix includes
+  guarded/clean and cross-file contract controls. Prompt composition and unchanged
+  workflow contracts are offline checks; general quality improvement still needs
+  representative live evaluation. No extra field, review stage or retry is added.
+
 - Explicit native/text transport evaluation for incomplete submissions, with
   status-only initial/final diagnostics. Text parsing rejects duplicate keys
   instead of replacing evidence; explicit truncated/filtered/error/cancelled
@@ -137,6 +152,19 @@ Clean controls, the broader acceptance
 matrix and general review-quality improvement remain unestablished.
 CI is configured for Ubuntu 22.04/24.04 with Node 22;
 the workflow file alone is not evidence that a particular CI run passed.
+
+## Deferred validation tasks
+
+- [ ] Broaden PR cases after the current fixed-PR smoke scope: clean changes,
+  guard-refuted candidates, changed cross-file contracts, and contrasting impact
+  or recovery scope. Keep independent ground truth outside reviewer inputs.
+- [ ] Compare alternative models in a separately authorized evaluation. Freeze
+  the PRs, prompts and budgets for each comparison; record first-pass completion,
+  factual quality, false positives/misses, justified severity and recovery use.
+  Model selection, costs and live-run budgets require their own agreed scope.
+
+These are later tasks, not additional calls or environment changes authorized by
+the current implementation's fixed-PR validation.
 
 ## P0: Establish one reproducible live acceptance run
 

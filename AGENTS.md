@@ -83,6 +83,14 @@ It describes the development process, not instructions for agents reviewing a PR
   Preserve raw responses, fully validate the candidate, and disclose accepted
   changes in stage diagnostics and receipts. Limit this to initial/verifier
   findings with valid statuses, excluding output repair and comment sessions.
+  Normal initial/verifier JSON text with finish=stop may remove only trailing
+  separators after complete members/values before matching closing delimiters.
+  Use a grammar-aware scan, preserve raw bytes and every key/value, reject
+  duplicate keys, and validate the entire envelope. Require a valid role status;
+  no syntax tolerance for native output, checks, comments or amendment grants.
+  Record zero-based JSON-body UTF-16 offsets and disclose accepted corrections.
+  A candidate failing validation remains failed without unlocking a model repair;
+  rejected corrections are diagnostics, not accepted output. No generic JSON repair.
   An initial PARTIAL result may omit an unavailable snapshot only with empty
   coverage.files/findings and concrete gaps; it cannot enter final verification.
   Initial candidates may omit only the separate location field, with explicit

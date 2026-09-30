@@ -333,35 +333,111 @@ function rejectDuplicateJSONKeys(content, message) {
     }
   }
 }
+// Recognize JSON with only the trailing-separator extension. An iterative stack
+// rejects holes/missing values without recursion or editing quoted source. The
+// strict parser below still establishes grammar and duplicate-key rejection.
+function trailingCommaCandidate(content) {
+  const stack = [{ kind: 'root', next: 'value' }], offsets = [];
+  const token = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null/y;
+  let i = 0;
+  while (i < content.length) {
+    const char = content[i], frame = stack.at(-1);
+    if (' \t\r\n'.includes(char)) { i++; continue; }
+    if (char === '}' || char === ']') {
+      if (frame.kind !== (char === '}' ? 'object' : 'array')) return;
+      if (frame.comma !== undefined) offsets.push(frame.comma);
+      else if (!['end', 'first-key', 'first-value'].includes(frame.next)) return;
+      stack.pop(); i++; continue;
+    }
+    if (frame.next === 'colon') {
+      if (char !== ':') return;
+      frame.next = 'value'; i++; continue;
+    }
+    if (frame.next === 'end') {
+      if (char !== ',' || frame.kind === 'root') return;
+      frame.comma = i++;
+      frame.next = frame.kind === 'object' ? 'key' : 'value';
+      continue;
+    }
+    if (['key', 'first-key'].includes(frame.next)) {
+      if (char !== '"') return;
+      token.lastIndex = i;
+      const match = token.exec(content);
+      if (!match) return;
+      i = token.lastIndex; frame.next = 'colon'; delete frame.comma;
+      continue;
+    }
+    if (!['value', 'first-value'].includes(frame.next)) return;
+    frame.next = 'end'; delete frame.comma;
+    if (char === '{' || char === '[') {
+      stack.push({ kind: char === '{' ? 'object' : 'array', next: char === '{' ? 'first-key' : 'first-value' });
+      i++; continue;
+    }
+    token.lastIndex = i;
+    if (!token.exec(content)) return;
+    i = token.lastIndex;
+  }
+  if (stack.length !== 1 || stack[0].next !== 'end' || !offsets.length) return;
+  let start = 0;
+  const pieces = offsets.map(offset => { const piece = content.slice(start, offset); start = offset + 1; return piece; });
+  pieces.push(content.slice(start));
+  return { text: pieces.join(''), corrections: offsets.map(offset => ({ action: 'remove-trailing-comma', offset })) };
+}
+
+/** Strict parsing remains the contract for checks, comments and amendments. */
 export function parseJSONReport(response, settings) {
+  return parseReport(response, settings).envelope;
+}
+
+/** Normal review text only; callers must validate the complete envelope before
+ * accepting/disclosing corrections. Offsets are zero-based UTF-16 positions in
+ * the selected JSON body. The response and all member/value text stay untouched. */
+export function parseReviewJSONReport(response, settings, role) {
+  return parseReport(response, settings, role);
+}
+
+function parseReport(response, settings, role) {
   const finish = String(response.info?.finish ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
   if (response.info?.error) {
     const name = String(response.info.error.name ?? 'UnknownError').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
     throw new Error(`Reviewer returned an OpenCode/model error (${name}; finish=${finish}). Inspect the session export or debug response. No automatic retry.`);
   }
   if (['length', 'content-filter', 'error', 'cancelled'].includes(response.info?.finish)) throw new Error(`Reviewer output did not finish successfully (finish=${finish}); no partial response or output recovery was accepted.`);
-  let result;
+  const allowTrailingCommas = settings.structuredOutput === false && response.info?.finish === 'stop' &&
+    ['initial', 'final'].includes(ROLES[role]?.format);
+  let result, corrections = [];
   if (response.info?.structured !== undefined) {
     result = response.info.structured;
     if (JSON.stringify(result).length > settings.maxStageCharacters) throw new Error('Oversized structured reviewer output; nothing was silently truncated.');
   } else {
     let content = visibleText(response).trim();
     if (!content || content.length > settings.maxStageCharacters) throw new Error(`Empty or oversized reviewer output (characters=${content.length}; finish=${finish}); inspect the session export or debug response.`);
-    // Compatibility for text-only providers: accept one fenced envelope with a
-    // preamble, but never guess between multiple objects or repair broken JSON.
+    // Never guess between multiple envelopes. The scoped review extension may
+    // remove only grammar-checked trailing separators, never infer missing data.
     const fences = [...content.matchAll(/^```(?:json)?[^\S\r\n]*\r?\n([\s\S]*?)^```[^\S\r\n]*$/gmi)];
     let jsonContent = content;
-    try { result = JSON.parse(content); }
+    function parse(candidate) {
+      try { return { envelope: JSON.parse(candidate), text: candidate, corrections: [] }; }
+      catch (error) {
+        const normalized = allowTrailingCommas && trailingCommaCandidate(candidate);
+        if (!normalized) throw error;
+        return { envelope: JSON.parse(normalized.text), ...normalized };
+      }
+    }
+    let parsed;
+    try { parsed = parse(content); }
     catch {
       if (fences.length === 1 && !/[{}]|```/.test(content.replace(fences[0][0], ''))) {
-        try { result = JSON.parse(fences[0][1]); jsonContent = fences[0][1]; } catch { /* Fail closed below. */ }
+        try { parsed = parse(fences[0][1]); } catch { /* Fail closed below. */ }
       }
-      if (result === undefined) throw new Error(`Reviewer did not return the required JSON envelope (characters=${content.length}; finish=${finish}). Partial output remains in its session. Inspect the session export or debug response. No automatic retry.`);
+      if (parsed === undefined) throw new Error(`Reviewer did not return the required JSON envelope (characters=${content.length}; finish=${finish}). Partial output remains in its session. Inspect the session export or debug response. No automatic retry.`);
     }
+    ({ envelope: result, text: jsonContent, corrections } = parsed);
     rejectDuplicateJSONKeys(jsonContent, 'Reviewer text contains duplicate JSON keys; no field value was selected or repaired.');
   }
   if (!isObject(result)) throw new Error('Review envelope must be an object.');
-  return result;
+  if (corrections.length && !stageFormat(role).schema.properties.status.enum.includes(result.status)) throw new Error('Trailing-comma normalization requires a valid review status; no output recovery.');
+  return { envelope: result, corrections };
 }
 
 /** Only the scoped amendment caller may use this transport compatibility path.

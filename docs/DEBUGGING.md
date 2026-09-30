@@ -36,6 +36,14 @@ acceptance or output recovery. No automatic format switch or model fallback exis
 
 ## Receipt versus full
 
+For ordinary JSON-text reviews, inspect outputFormatCorrections for accepted
+remove-trailing-comma entries. Their offsets are zero-based UTF-16 positions in
+the selected JSON body, excluding fences/preamble. Compare the unchanged response
+artifact with the validated result; acceptance still requires full validation.
+rejectedOutputFormatCorrections records a syntax-normalized candidate that failed
+validation, not a completed review or a reason to start another model request.
+This extension never applies to checks, comments, native output or amendments.
+
 `returnReport` changes only what is returned after the workflow. It does not
 change reviewer models, stage prompts, source collection, language settings, or
 JSON validation. A receipt failure and a successful full run are two separate
