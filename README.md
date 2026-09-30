@@ -28,6 +28,8 @@ Edit the settings file printed by the installer. By default it is at `~/.config/
 4. Fully restart OpenCode and try `/pr-check` on a small, known PR.
 
 See [Azure MCP setup](docs/AZURE_MCP.md) and [validation](docs/VALIDATION.md) before enabling reviews for a team.
+An optional [MCP v2.10.0 response-boundary patch](https://github.com/WTLAIB/opencode-azure-devops-pr-review/tree/main/patches) is built and
+installed separately; the plugin installer never changes your MCP server.
 
 ### Manual copying without Git
 

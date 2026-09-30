@@ -63,6 +63,27 @@ tool invocation. `observed-tool-errors` counts terminal failures observed from
 matching host events, without classifying causes or replaying calls. Missing
 events are not proof of error-free execution; inspect the child tool history.
 
+Each stage also records value-free `toolObservations`. `hostCompleted` and
+`hostErrors` count matching terminal events; `afterHook` counts returned tool
+results. `reportedErrors` counts explicit `isError` flags (top-level or metadata),
+and `truncated` counts metadata truncation flags. Counts can overlap;
+`observedErrors` is the deduplicated union of host errors and reported errors.
+`unverifiedResults` counts observed outcomes without either error or truncation,
+not valid source reads. `withoutOutcome` counts registered calls with no matching
+after-hook result or terminal event. `evidenceValidity: "not-assessed"` and
+`recoveredReads: null` explicitly leave semantic validity and recovery unknown.
+The plugin does not inspect bodies, infer causes, match retries or certify content.
+`toolFailures`/`observed-tool-errors` retain their original host-event meaning;
+`completedTools` counts after-hook returns excluding observed errors/truncation.
+A later error event removes that call from `completedTools`. Repeated events and
+after-hooks do not double count; revoked sessions remain ignored.
+
+Audit retained host outputs separately for invalid/missing evidence and recovered
+reads. Keep original counters and responses unchanged in historical artifacts.
+Receipts disclose explicit result errors/truncation separately from host errors,
+and state that completion is not proof of source evidence. A successful later
+read does not erase an earlier failure or prove that its cause was transient.
+
 `blocked-native-tools` and the native-tool notice identify prevented shell,
 editing, skill or public-web attempts. Plugin diagnostics omit their arguments.
 One prevented attempt may coexist with COMPLETE; two distinct attempts in one

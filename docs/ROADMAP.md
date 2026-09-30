@@ -9,6 +9,17 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Tool observations distinguish host completion/errors, explicit result errors,
+  truncation and unobserved outcomes. Successful-looking results remain unverified;
+  recovered reads require a separate retained-output audit. Historical counters
+  keep their meaning. A separately applied MCP v2.10.0 patch uses HTTP status for
+  file failures and rejects absent/mismatched PR objects before enrichment.
+  Real-SDK loopback HTTP regressions preserve successful source literally, even
+  error-shaped source. This is not a plugin adapter, argument rewriter or retry.
+- The existing identity instruction distinguishes snapshot.repository comparison
+  labels from server IDs/names used in MCP calls. This is a narrow clarification,
+  not evidence of improved model arithmetic, scope or severity reasoning.
+
 - Audited trailing-comma tolerance for completed normal initial/verifier JSON text.
   Grammar and duplicate-key checks, unchanged values, full envelope validation,
   raw retention and receipt/diagnostic disclosure remain mandatory. Invalid
@@ -46,7 +57,7 @@ Implemented and covered by offline tests:
   envelope check; shell compatibility alone does not establish review completeness.
 - Unambiguous seven-field findings/eight-field confirmed rows; bounded
   unknown-cause read-retry guidance, distinct from output recovery. No automatic
-  MCP retries or installed server patch. Terminal tool events supplement missing
+  MCP retries or server patch applied by the plugin. Terminal tool events supplement missing
   after-hook diagnostics without providing source evidence.
 - Reachable reproductions, static-versus-observed test wording, path-bounded
   counterevidence, exact quotes and impact-based severity guidance. Known verifier
@@ -105,7 +116,7 @@ Implemented and covered by offline tests:
   and policy checks are not proof of improved live MCP error rates or report quality.
 - Compact initial reports without duplicate finding prose, explicit base/head
   direction checks including excluded changes, and failed-call guidance
-  by cause/version semantics. No official MCP or OpenCode host patch is included.
+  by cause/version semantics. These prompt changes do not patch MCP or the host.
   Diagnostics add per-attempt timing, model-request and output-size observations.
 - A self-contained readiness policy avoids loading full finding-review rules in
   standalone check. Its short decision path and report preserve cumulative versions,
@@ -242,8 +253,8 @@ Status: planned after P0; methodology proposed, not executed.
   ancestry proof. Test target-only changes and metadata lag explicitly.
 - Compare source coverage, finding attribution and report quality before claiming
   removal improves reliability. Fewer optional queries cannot repair server bugs
-  or missing review envelopes. No shared-source adapter or official MCP patch
-  is included in this change.
+  or missing review envelopes. The workflow change adds no shared-source adapter;
+  the optional dependency response patch is evaluated separately.
 - Match claims by root cause/trigger/impact. Report missed defects, false positives,
   duplicate rate, evidence/coverage gaps, contract failures, and comment usefulness.
   Record latency and actual usage/cost where available as secondary measurements.

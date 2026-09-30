@@ -1,0 +1,153 @@
+diff --git a/src/tools/repositories.ts b/src/tools/repositories.ts
+index 0701d6e..323594d 100644
+--- a/src/tools/repositories.ts
++++ b/src/tools/repositories.ts
+@@ -264,6 +264,12 @@ function configureRepoTools(server: McpServer, tokenProvider: () => Promise<stri
+           if (!pullRequestId) return { content: [{ type: "text", text: "pullRequestId is required for get" }], isError: true };
+ 
+           const pullRequest = await gitApi.getPullRequest(repositoryId, pullRequestId, project, undefined, undefined, undefined, undefined, includeWorkItemRefs);
++          // The SDK resolves HTTP 404 to null. Do not turn an absent or wrong PR
++          // into an apparently valid empty change list. Merge versions remain
++          // optional API fields; callers must assess their own readiness needs.
++          if (!pullRequest || pullRequest.pullRequestId !== pullRequestId) {
++            return { content: [{ type: "text", text: "Pull request not found or invalid response: missing or mismatched pullRequestId." }], isError: true };
++          }
+           let enhancedResponse: Record<string, unknown> = { ...pullRequest };
+ 
+           if (includeLabels) {
+@@ -557,9 +563,18 @@ function configureRepoTools(server: McpServer, tokenProvider: () => Promise<stri
+           const versionDescriptor: GitVersionDescriptor | undefined = version ? { version, versionType: GitVersionType[versionType as keyof typeof GitVersionType] } : undefined;
+ 
+           const stream = await gitApi.getItemText(repositoryId, path, project, undefined, undefined, undefined, undefined, false, versionDescriptor, true);
++          // getItemText returns the HTTP IncomingMessage even on non-2xx.
++          const statusCode = (stream as { statusCode?: number }).statusCode;
+           const content = await streamToString(stream);
+ 
+-          const streamError = extractAdoStreamError(content);
++          if (statusCode !== undefined && (statusCode < 200 || statusCode >= 300)) {
++            const detail = extractAdoStreamError(content) ?? content.trim();
++            return { content: [{ type: "text", text: `Error getting file content for '${path}': HTTP ${statusCode}${detail ? `: ${detail}` : ""}` }], isError: true };
++          }
++
++          // Preserve successful source literally, even if it resembles an ADO
++          // error. Retain the legacy fallback only for streams without status.
++          const streamError = statusCode === undefined ? extractAdoStreamError(content) : null;
+           if (streamError) {
+             return { content: [{ type: "text", text: `Error getting file content for '${path}': ${streamError}` }], isError: true };
+           }
+diff --git a/test/src/tools/repositories-http.test.ts b/test/src/tools/repositories-http.test.ts
+new file mode 100644
+index 0000000..277289e
+--- /dev/null
++++ b/test/src/tools/repositories-http.test.ts
+@@ -0,0 +1,110 @@
++// Copyright (c) Microsoft Corporation.
++// Licensed under the MIT License.
++
++import { createServer, Server } from "node:http";
++import { AddressInfo } from "node:net";
++import { GitApi } from "azure-devops-node-api/GitApi.js";
++import { configureRepoTools, REPO_TOOLS } from "../../../src/tools/repositories";
++
++jest.mock("../../../src/index", () => ({ orgName: "test-org" }));
++
++// Real SDK and loopback HTTP; only endpoint discovery is replaced. No Azure or
++// model calls, credentials, body-based source blacklist, or automatic retries.
++describe("repository HTTP response boundaries", () => {
++  let server: Server;
++  let git: GitApi;
++  let handlers: Map<string, (...args: any[]) => Promise<any>>;
++  let requests: number;
++  let status: number;
++  let body: string;
++
++  beforeEach(async () => {
++    requests = 0;
++    status = 200;
++    body = "";
++    server = createServer((_request, response) => {
++      requests++;
++      response.writeHead(status, { "Content-Type": "application/json", "Connection": "close" });
++      response.end(body);
++    });
++    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
++    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
++    git = new GitApi(endpoint, [], { allowRetries: false, allowRedirects: false });
++    jest.spyOn(git.vsoClient, "getVersioningData").mockResolvedValue({ apiVersion: "7.2-preview.1", requestUrl: endpoint } as any);
++    handlers = new Map();
++    configureRepoTools(
++      { tool: (name: string, _description: string, _schema: unknown, handler: any) => handlers.set(name, handler) } as any,
++      async () => "unused",
++      async () => ({ getGitApi: async () => git }) as any,
++      () => "offline-test"
++    );
++  });
++
++  afterEach(async () => {
++    git.http.dispose();
++    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
++  });
++
++  const fileArgs = { action: "get_content", repositoryId: "repo", project: "project", path: "/file.txt", version: "a".repeat(40), versionType: "Commit" };
++
++  it.each([
++    [404, "The controller for path '/_apis/git/repositories/org/project/repo/items' was not found or does not implement IController."],
++    [401, '{"typeName":"Unauthorized","message":"Authentication required"}'],
++    [403, "<html>Forbidden</html>"],
++    [500, ""],
++    [503, "Service unavailable"],
++  ])("file HTTP %i is a tool error, even for non-JSON/empty bodies", async (code, content) => {
++    status = code;
++    body = content;
++    const result = await handlers.get(REPO_TOOLS.repo_file)!(fileArgs);
++    expect(result.isError).toBe(true);
++    expect(result.content[0].text).toContain(`HTTP ${code}`);
++    expect(result.content[0].text).not.toContain("UNTRUSTED REPOSITORY FILE CONTENT");
++    expect(requests).toBe(1);
++  });
++
++  it.each([
++    "The controller for path '/example' was not found or does not implement IController.",
++    '{"typeName":"ExampleError","message":"This is source content"}',
++    "",
++    "Unicode source: 測試\nline two\n",
++  ])("successful file content is preserved literally: %s", async (content) => {
++    body = content;
++    const result = await handlers.get(REPO_TOOLS.repo_file)!(fileArgs);
++    expect(result.isError).not.toBe(true);
++    const text = result.content[0].text;
++    const match = text.match(/^<<([0-9a-f]{32})>> \[UNTRUSTED REPOSITORY FILE CONTENT[^\]]*\] <<\1>>\n([\s\S]*)\n<<\/\1>>$/);
++    expect(match?.[2]).toBe(content);
++    expect(requests).toBe(1);
++  });
++
++  it.each([
++    [404, "Not found"],
++    [200, "null"],
++    [200, "{}"],
++    [200, "[]"],
++    [200, '{"pullRequestId":99}'],
++  ])("absent/mismatched PR (%i, %s) cannot acquire an empty change list", async (code, content) => {
++    status = code;
++    body = content;
++    const iterations = jest.spyOn(git, "getPullRequestIterations").mockResolvedValue([]);
++    const labels = jest.spyOn(git, "getPullRequestLabels").mockResolvedValue([]);
++    const result = await handlers.get(REPO_TOOLS.repo_pull_request)!({ action: "get", repositoryId: "repo", pullRequestId: 2, includeChangedFiles: true, includeLabels: true });
++    expect(result.isError).toBe(true);
++    expect(result.content[0].text).not.toContain("changedFilesSummary");
++    expect(iterations).not.toHaveBeenCalled();
++    expect(labels).not.toHaveBeenCalled();
++    expect(requests).toBe(1);
++  });
++
++  it("a real PR without optional merge versions stays readable without fabricated versions", async () => {
++    body = '{"pullRequestId":2,"repository":{"id":"repo"},"sourceRefName":"refs/heads/feature","targetRefName":"refs/heads/main"}';
++    jest.spyOn(git, "getPullRequestIterations").mockResolvedValue([]);
++    const result = await handlers.get(REPO_TOOLS.repo_pull_request)!({ action: "get", repositoryId: "repo", pullRequestId: 2, includeChangedFiles: true });
++    expect(result.isError).not.toBe(true);
++    expect(result.content[0].text).toContain('"pullRequestId": 2');
++    expect(result.content[0].text).toContain('"fileCount": 0');
++    expect(result.content[0].text).not.toContain("lastMergeSourceCommit");
++    expect(requests).toBe(1);
++  });
++});

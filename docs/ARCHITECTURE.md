@@ -446,6 +446,15 @@ Receipt notices distinguish narrow model amendments and content resubmission fro
 Stage diagnostics include modelRequests, durationMs, parsed outputCharacters and
 firstToolAt/lastToolAt when observed. These measure host-hook activity, not provider
 internal retries, total token usage, tool error categories or source authenticity.
+Value-free toolObservations separate host terminal states, returned results,
+explicit error/truncation flags, and calls without observed outcomes. Error sets
+are deduplicated; successful-looking results remain unverified. Evidence validity
+and recovered reads are explicitly unassessed, not inferred from completion.
+Legacy toolFailures remains the host-event count; completedTools excludes any
+observed error/truncation. No output-body classification or retry wrapper exists.
+A separately applied, pinned [MCP source patch](https://github.com/WTLAIB/opencode-azure-devops-pr-review/tree/main/patches) repairs two
+dependency response boundaries. The plugin runtime and installer do not apply it,
+change connection settings, call Azure directly, or acquire a tool catalog.
 Receipts retain the first error even after recovery. Final provenance uses only
 validated results, with at most one accepted result per role. Live model
 compatibility and reliability improvement still require acceptance testing.

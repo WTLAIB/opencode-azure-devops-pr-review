@@ -20,10 +20,12 @@ receives both independent reviews and their combined file list. Do not run a
 separate readiness investigation, prove ancestry or reconstruct commit history.
 
 For an initial review, establish snapshot from one PR metadata response:
-- repository: organization/project/stable target repository ID, confirmed from
-  the response; prId: the requested PR ID. Confirm that the response identifies
-  the requested PR. urlIdentity separates organization/project/repository lookup
-  hints; it is not proof of server identity. Use the actual server IDs for calls.
+- repository: organization/project/repository.id, using the target repository's
+  stable ID from PR metadata, never its display name or the URL repository name.
+  prId: the requested PR ID, confirmed in that response. urlIdentity supplies
+  lookup hints only. snapshot.repository is a comparison label; do not copy it
+  into MCP repositoryId. For calls, follow the operation's schema using the
+  server's repository ID/name, not this compound label.
 - head: the full PR-reported source commit SHA; base: its full target comparison
   commit SHA. Azure PR lastMergeSourceCommit and lastMergeTargetCommit provide
   these version references. Do not use lastMergeCommit (a synthetic merge), file

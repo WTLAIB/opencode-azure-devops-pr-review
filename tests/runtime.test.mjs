@@ -2250,3 +2250,43 @@ test('directory lookup guidance separates branch hints from exact-commit evidenc
   assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
   assert.deepEqual(f.cfg.permission,f.baseline.permission);
 });
+
+test('tool observations distinguish host status, error flags, truncation and unknown evidence',async t=>{
+  const f=await fixture(t,{settings:s=>{s.debug.enabled=true;s.debug.directory='debug';},duringPrompt:async({hooks,role,id})=>{
+    if(!role.endsWith('-verifier'))return;
+    const stamp=Date.now();
+    const invoke=async(callID,output,status,afterFirst=true)=>{
+      const input={sessionID:id,tool:'arbitrary_mcp',callID};
+      await hooks['tool.execute.before'](input,{args:{secret:'PRIVATE_ARGUMENT'}});
+      const after=()=>output&&hooks['tool.execute.after'](input,output);
+      const emit=()=>status&&hooks.event({event:{type:'message.part.updated',properties:{part:{type:'tool',...input,state:{status,time:{start:stamp,end:stamp},output:'PRIVATE_OUTPUT',error:'PRIVATE_ERROR'}}}}});
+      if(afterFirst){await after();await emit();}else{await emit();await after();}
+      await after();await emit(); // Repeated notifications must not double count.
+    };
+    await invoke('flagged',{isError:true,metadata:{},output:'PRIVATE_OUTPUT'},'completed');
+    await invoke('metadata',{metadata:{isError:true}},'error',false);
+    await invoke('truncated',{metadata:{truncated:true}},'completed');
+    await invoke('unknown',{metadata:{},output:'PRIVATE_OUTPUT'},'completed');
+    await invoke('event-only',null,'completed');
+    await invoke('pending',null,null);
+    await invoke('host-error',{metadata:{}},'error');
+  }});
+  const out=await f.command();assert.match(out,/] COMPLETE/);
+  assert.match(out,/observed-tool-errors=2/);
+  assert.match(out,/reported-tool-errors=2/);assert.match(out,/truncated-tool-results=1/);
+  assert.match(out,/not proof of valid source evidence/);
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
+  assert.equal(stage.toolFailures,2,'Retain the raw host error count.');
+  assert.equal(stage.completedTools,2,'Error flags and later host errors cannot count as completed after-hooks.');
+  assert.deepEqual(stage.toolObservations,{registered:8,afterHook:6,hostCompleted:4,hostErrors:2,reportedErrors:2,truncated:1,observedErrors:3,unverifiedResults:3,withoutOutcome:1,evidenceValidity:'not-assessed',recoveredReads:null});
+  assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_|event-only|host-error/);
+});
+
+test('completed tools alone are not audited source evidence or zero recovered reads',async t=>{
+  const f=await fixture(t,{settings:s=>{s.debug.enabled=true;s.debug.directory='debug';}});
+  const out=await f.command();
+  const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
+  const result=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
+  for(const stage of result.stages)assert.deepEqual(stage.toolObservations,{registered:1,afterHook:1,hostCompleted:0,hostErrors:0,reportedErrors:0,truncated:0,observedErrors:0,unverifiedResults:1,withoutOutcome:0,evidenceValidity:'not-assessed',recoveredReads:null});
+});

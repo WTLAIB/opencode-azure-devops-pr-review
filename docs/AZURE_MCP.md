@@ -112,7 +112,11 @@ Follow actual descriptions and schemas rather than an assumed tool catalog.
 Standalone check may record sourceAccess for its own diagnosis, but later reviews
 do not inherit it as a source cache. Unknown pagination and partial change counts
 remain gaps, despite removing merge-base certification from normal/deep reviews.
-The plugin does not patch official MCP code or mask errors.
+The plugin runtime and installer do not patch MCP code or mask errors. An
+optional, separately built [v2.10.0 source patch](https://github.com/WTLAIB/opencode-azure-devops-pr-review/tree/main/patches) preserves
+HTTP file-read errors and rejects absent/mismatched PR objects before enrichment.
+It is scoped to that dependency version and does not change tool arguments,
+credentials, pagination or the review evidence/version gates.
 
 Prompt policy forbids identical retries for explicit authentication/permission,
 parameter/selector/not-found errors and speculative query loops. An explicitly
