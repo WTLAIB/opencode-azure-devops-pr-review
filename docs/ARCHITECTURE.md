@@ -452,9 +452,10 @@ are deduplicated; successful-looking results remain unverified. Evidence validit
 and recovered reads are explicitly unassessed, not inferred from completion.
 Legacy toolFailures remains the host-event count; completedTools excludes any
 observed error/truncation. No output-body classification or retry wrapper exists.
-A separately applied, pinned [MCP source patch](https://github.com/WTLAIB/opencode-azure-devops-pr-review/tree/main/patches) repairs two
-dependency response boundaries. The plugin runtime and installer do not apply it,
-change connection settings, call Azure directly, or acquire a tool catalog.
+MCP response defects remain external limitations. This project distributes no
+server patches or version-specific adapters. Shared prompts follow the connected
+operations' contracts; historical server quirks belong in troubleshooting notes.
+The runtime and installer do not change connection settings or call Azure directly.
 Receipts retain the first error even after recovery. Final provenance uses only
 validated results, with at most one accepted result per role. Live model
 compatibility and reliability improvement still require acceptance testing.

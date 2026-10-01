@@ -2238,10 +2238,13 @@ test('receipt-only failed draft keeps source private and display cancellation ca
 
 test('directory lookup guidance separates branch hints from exact-commit evidence',async t=>{
   const f=await fixture(t);
-  for(const stage of ['functional','risk','verifier']){
-    const prompt=f.cfg.agent['azpr-review-'+stage].prompt;
-    assert.match(prompt,/directory listing interprets Commit as Branch/);
-    assert.match(prompt,/never send a\s+SHA to list a directory/);
+  for(const mode of ['review','deep'])for(const stage of ['functional','risk','verifier']){
+    const prompt=f.cfg.agent[`azpr-${mode}-${stage}`].prompt;
+    assert.doesNotMatch(prompt,/2\.10\.0|directory listing interprets Commit as Branch|never send a\s+SHA to list a directory/);
+    assert.match(prompt,/Follow the directory operation's schema and supported selectors/);
+    assert.match(prompt,/Prefer exact-commit discovery when supported/);
+    assert.match(prompt,/if only branches are supported,\s+use the actual PR branch with its supported selector/);
+    assert.match(prompt,/Unknown or unsupported\s+version semantics remain a disclosed capability limit/);
     assert.match(prompt,/not proof of a commit tree\s+or absent guidance/);
     assert.match(prompt,/File content: read snapshot.head and snapshot.base with supported commit\s+selectors/);
     assert.match(prompt,/Read discovered guidance\/contracts\s+at the reviewed SHA/);

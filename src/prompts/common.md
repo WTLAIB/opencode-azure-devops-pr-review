@@ -67,12 +67,11 @@ Select versions for the operation you are actually calling:
   selectors. A file blob ID is not a commit. For a fork PR use the PR metadata's
   source repository for source-side reads. Read discovered guidance/contracts
   at the reviewed SHA as well.
-- Directory discovery: file-content Commit support does not imply directory-listing Commit support.
-  In official Azure DevOps MCP 2.10.0, directory listing interprets Commit as Branch
-  (including its default). For that capability, never send a
-  SHA to list a directory: use the actual PR branch name with Branch explicitly.
-  Do not retry a failing SHA directory call. Other servers/versions may differ;
-  follow their actual contract.
+- Directory discovery: file-content Commit support does not imply directory-listing
+  Commit support. Follow the directory operation's schema and supported selectors.
+  Prefer exact-commit discovery when supported; if only branches are supported,
+  use the actual PR branch with its supported selector. Unknown or unsupported
+  version semantics remain a disclosed capability limit, not permission to guess.
 
 A branch/default-branch listing supplies path hints, not proof of a commit tree
 or absent guidance. Use returned paths instead of guessed filenames; unavailable

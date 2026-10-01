@@ -12,10 +12,11 @@ Implemented and covered by offline tests:
 - Tool observations distinguish host completion/errors, explicit result errors,
   truncation and unobserved outcomes. Successful-looking results remain unverified;
   recovered reads require a separate retained-output audit. Historical counters
-  keep their meaning. A separately applied MCP v2.10.0 patch uses HTTP status for
-  file failures and rejects absent/mismatched PR objects before enrichment.
-  Real-SDK loopback HTTP regressions preserve successful source literally, even
-  error-shaped source. This is not a plugin adapter, argument rewriter or retry.
+  keep their meaning. MCP response defects remain external limitations; the
+  project does not distribute or maintain server patches. Shared directory
+  guidance follows operation capabilities, with exact-commit discovery when
+  supported and branch results limited to path hints. Historical version quirks
+  remain in troubleshooting documentation, not normal/deep reviewer prompts.
 - The existing identity instruction distinguishes snapshot.repository comparison
   labels from server IDs/names used in MCP calls. This is a narrow clarification,
   not evidence of improved model arithmetic, scope or severity reasoning.
@@ -57,8 +58,8 @@ Implemented and covered by offline tests:
   envelope check; shell compatibility alone does not establish review completeness.
 - Unambiguous seven-field findings/eight-field confirmed rows; bounded
   unknown-cause read-retry guidance, distinct from output recovery. No automatic
-  MCP retries or server patch applied by the plugin. Terminal tool events supplement missing
-  after-hook diagnostics without providing source evidence.
+  MCP retries or maintained server patches. Terminal tool events supplement
+  missing after-hook diagnostics without providing source evidence.
 - Reachable reproductions, static-versus-observed test wording, path-bounded
   counterevidence, exact quotes and impact-based severity guidance. Known verifier
   source/contract reads are grouped in the first read round where possible.
@@ -130,9 +131,9 @@ Single-source report rendering now uses localized final structured findings and
 disposition reasons, with a short verifier overview instead of a duplicate full
 Markdown report. Missing-ID diagnostics and explicit expected IDs improve feedback.
 Incomplete drafts preserve unconfirmed valid initial observations, remain outside
-the comment cache, and have a separate diagnostic file. Selector guidance addresses
-the observed official MCP 2.10.0 directory Commit-to-Branch behavior without a
-server patch or tool filter. Evaluate live error rate, first-pass completion,
+the comment cache, and have a separate diagnostic file. Selector guidance follows
+each operation's supported versions without server-version rules or tool filters.
+Evaluate live error rate, first-pass completion,
 latency, merge decisions and content quality; offline recovery alone proves none
 of these improvements.
 
@@ -253,8 +254,8 @@ Status: planned after P0; methodology proposed, not executed.
   ancestry proof. Test target-only changes and metadata lag explicitly.
 - Compare source coverage, finding attribution and report quality before claiming
   removal improves reliability. Fewer optional queries cannot repair server bugs
-  or missing review envelopes. The workflow change adds no shared-source adapter;
-  the optional dependency response patch is evaluated separately.
+  or missing review envelopes. The workflow adds no shared-source adapter or
+  maintained server fork; unavailable capabilities remain explicit limitations.
 - Match claims by root cause/trigger/impact. Report missed defects, false positives,
   duplicate rate, evidence/coverage gaps, contract failures, and comment usefulness.
   Record latency and actual usage/cost where available as secondary measurements.

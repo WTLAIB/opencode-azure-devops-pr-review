@@ -37,7 +37,10 @@ It describes the development process, not instructions for agents reviewing a PR
   boundaries consistent across check, common review and comment policies.
 - OpenCode owns providers, MCP discovery, and permissions. Do not add hardcoded
   MCP tool catalogs, name/action allowlists, direct Azure/model clients, or
-  wildcard permission grants. MCP read-only review is a prompt policy, not a
+  wildcard permission grants. Do not distribute or maintain patched MCP servers
+  or put server-version workarounds in shared reviewer prompts. Document external
+  limitations separately and follow the connected tools' actual contracts.
+  MCP read-only review is a prompt policy, not a
   programmatic MCP security boundary. Private roles default to denying native shell, editing,
   skill and public-web tools through host permissions and a scoped execution
   guard, including write/apply_patch and rejected native-tool submissions.

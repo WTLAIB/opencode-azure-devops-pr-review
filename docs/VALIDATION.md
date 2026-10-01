@@ -138,6 +138,11 @@ original lists, and a final check of both versions. Identity/version mismatches
 prevent verification. Missing metadata can produce honest PARTIAL without fake
 SHAs; a status-only placeholder remains a failed review, not an amendment.
 
+Shared directory-policy checks cover both profiles without a pinned server
+workaround. Live capability cases should distinguish commit-capable discovery,
+branch-only path hints and unavailable version semantics. Prompt assertions
+verify instruction delivery, not a server's implementation or model compliance.
+
 Standalone policy retains cumulative proof and branch-fallback limits; review
 policy avoids ancestry/tree discovery and requests changed-file inclusion.
 Location guidance counts source lines without wrappers; receipts forbid

@@ -96,15 +96,12 @@ searches and commit-history queries used only to strengthen readiness claims.
 Extra context required for code review remains appropriate; the verifier still
 checks source independently.
 
-For the official MCP **2.10.0**, directory listing converts a Commit selector
-(including its default) to Branch, while file content supports Commit. Passing a
-SHA to that directory operation therefore treats it as a branch name. Prefer the
-PR change list and exact-commit content reads. Use an actual PR branch with an
-explicit Branch selector only when directory discovery is necessary; returned
-paths are hints, not proof of a commit tree or absent repository guidance.
-Read discovered contracts/source at the reviewed SHA. Other versions or servers
-may differ; this capability note is not a tool catalog or argument rewriter.
-See the [versioned implementation](https://github.com/microsoft/azure-devops-mcp/blob/v2.10.0/src/tools/repositories.ts#L483-L529).
+Assess directory selectors separately from file-content selectors. Prefer
+exact-commit discovery when the directory operation supports it. If it only
+supports branches, use the actual PR branch with its supported selector and
+treat the returned paths as hints, not commit-tree or absent-guidance proof.
+Unknown or unsupported version semantics remain a disclosed capability limit.
+Read discovered source and contracts at the reviewed SHA.
 
 Group failures by operation, argument/version semantics and observed cause.
 Correct a specific argument or report the gap; do not probe speculative variants.
@@ -112,11 +109,9 @@ Follow actual descriptions and schemas rather than an assumed tool catalog.
 Standalone check may record sourceAccess for its own diagnosis, but later reviews
 do not inherit it as a source cache. Unknown pagination and partial change counts
 remain gaps, despite removing merge-base certification from normal/deep reviews.
-The plugin runtime and installer do not patch MCP code or mask errors. An
-optional, separately built [v2.10.0 source patch](https://github.com/WTLAIB/opencode-azure-devops-pr-review/tree/main/patches) preserves
-HTTP file-read errors and rejects absent/mismatched PR objects before enrichment.
-It is scoped to that dependency version and does not change tool arguments,
-credentials, pagination or the review evidence/version gates.
+The project does not distribute or maintain MCP patches. Server response defects
+remain external limitations; retain their evidence without rewriting responses
+or supplying missing metadata. Tool completion alone does not prove source validity.
 
 Prompt policy forbids identical retries for explicit authentication/permission,
 parameter/selector/not-found errors and speculative query loops. An explicitly
@@ -140,7 +135,23 @@ These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history
 and source coverage across controlled runs before making that claim.
 
-### Version-specific capability limits
+### MCP upgrades
+
+Use a maintained MCP release through your existing OpenCode connection. This
+plugin does not pin, install, upgrade or rewrite that server. Confirm which
+executable or script the connection actually starts: updating a global package
+does not update a separately configured checkout. After a server change, restart
+OpenCode and verify the required metadata, pagination and exact-version reads
+using the new operation schemas. A working older version does not certify another.
+Keep credentials and connection configuration private.
+
+Accept honestly reported model or server limitations instead of adding per-version
+adapters, speculative retries or extra model rounds to force completion. Missing
+required evidence still yields PARTIAL/INCOMPLETE; final source/version and finding
+contracts remain mandatory. See [diagnostics](DEBUGGING.md) to distinguish observed
+tool errors from unassessed source validity.
+
+### Historical troubleshooting: official MCP 2.10.0
 
 In the official Azure MCP
 [v2.10.0 repository handlers](https://github.com/microsoft/azure-devops-mcp/blob/v2.10.0/src/tools/repositories.ts),
@@ -149,6 +160,13 @@ Commit. Its PR change summary retrieves one changes page, synthesizes the first
 iteration label and does not expose the iteration's commonRefCommit. The summary's
 top/skip inputs do not advance changes pages. These observations are specific to
 that implementation, not assumptions about every connected MCP server.
+
+That version can also return failed file-read response bodies as source and
+enrich an absent PR object with an empty change summary. A completed tool state
+therefore cannot establish valid source or PR identity. Preserve the original
+result and disclose missing evidence; generic status counters cannot reliably
+identify a server's incorrectly reported success. Prefer upstream fixes rather
+than maintaining a patched server in this project.
 
 Read changed paths directly when a PR change list is available. Content Commit
 support does not imply directory-listing Commit support. Do not silently rewrite
