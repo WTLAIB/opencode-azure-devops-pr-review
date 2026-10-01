@@ -22,6 +22,11 @@ sh install.sh
 
 Edit the settings file printed by the installer. By default it is at `~/.config/opencode/plugins/azpr/settings.json`; `XDG_CONFIG_HOME` and `--config-dir` can change that location.
 
+Both installation and runtime loading reject duplicate JSON keys, including
+escaped-equivalent spellings and duplicates inside nested objects. Resolve the
+ambiguity before restarting; the runtime never chooses the last model or setting
+silently. Syntax errors are reported without copying private setting values.
+
 1. Run `opencode models` to find the exact provider/model IDs.
 2. Configure `models.review.functional`, `risk`, and `verifier`. Leave the three `models.deep` values empty until you want deep reviews. The `models._help` entries explain each role and model-selection criteria directly in the settings file.
 3. Confirm your existing OpenCode MCP connection can read the PR. No tool-name mapping, prefix, or plugin allowlist is required; host permissions apply.

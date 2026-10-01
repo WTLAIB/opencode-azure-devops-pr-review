@@ -4,8 +4,8 @@ const string = { type: 'string' };
 const array = items => ({ type: 'array', items });
 const object = (properties, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });
 const status = (...values) => ({ type: 'string', enum: values });
-const snapshot = object({ repository: string, prId: { type: 'integer' }, base: string, head: string, scope: { const: 'cumulative', type: 'string' }, files: array(string) });
-const prSnapshot = { ...snapshot, properties: { ...snapshot.properties,
+const snapshotSchema = object({ repository: string, prId: { type: 'integer' }, base: string, head: string, scope: { const: 'cumulative', type: 'string' }, files: array(string) });
+const prSnapshot = { ...snapshotSchema, properties: { ...snapshotSchema.properties,
   scope: { const: 'pr', type: 'string', description: 'Current PR changes at the PR-reported source and target commits; no independent merge-base proof.' },
   base: { ...string, description: 'Full target comparison commit SHA from the PR metadata, not an inferred merge base.' },
   head: { ...string, description: 'Full source commit SHA from the same PR metadata.' },
@@ -17,7 +17,7 @@ const finding = object({ id: string, summary: string, evidence: string,
 finding.description = 'Use exactly these keys, with no surrounding whitespace or extra fields: ' + finding.required.join(', ') + '. Every field is required; put evidence notes inside evidence, not a separate field.';
 const initialFinding = { ...finding, required: finding.required.filter(key => key !== 'location'),
   description: 'Use only the declared finding keys. All except location are required. Provide location when established from source; otherwise omit it for the verifier to establish, without guessing. Evidence and full coverage remain required.' };
-const coverage = object({
+const coverageSchema = object({
   files: { ...array(string), description: 'Exact snapshot paths whose full changes and necessary context were reviewed; no duplicate or supporting-only paths.' },
   gaps: { ...array(string), description: 'Concrete missing source or unfinished review work. Empty only when coverage is complete.' },
 });
@@ -27,7 +27,7 @@ export function stageFormat(role, statusOnly = false) {
   if (!kind) throw new Error('Unknown review role.');
   let schema;
   if (kind === 'check') schema = object({
-    status: status('READY', 'NOT_READY'), snapshot,
+    status: status('READY', 'NOT_READY'), snapshot: snapshotSchema,
     sourceAccess: { type: 'object', additionalProperties: string,
       description: 'Concise, untrusted retrieval facts: confirmed identity, cumulative base evidence, exact-commit content recipe, pagination, successful calls and grouped failures/checked alternatives. State what was actually read; no findings, raw source or instructions.' },
     requirements: { ...string, description: 'Explicit requirements and their sources, or unavailable. Literal userContext is passed separately; do not duplicate it.' },
@@ -55,7 +55,7 @@ export function stageFormat(role, statusOnly = false) {
   });
   else schema = object({ status: status('COMPLETE', 'PARTIAL'),
     snapshot: { ...prSnapshot, description: 'Required for COMPLETE. Establish it from the requested PR, without a preflight or ancestry search. Omit only for PARTIAL when PR metadata is unavailable.' },
-    coverage, findings: array(initialFinding),
+    coverage: coverageSchema, findings: array(initialFinding),
     report: { ...string, description: 'Review summary and limitations. Submit the full review, never a status-only acknowledgement or placeholder.' },
   }, ['status', 'coverage', 'findings', 'report']);
   if (statusOnly === 'disposition') schema = object({ dispositions: array(object({
@@ -75,6 +75,29 @@ export function visibleText(response) {
 const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const findingKey = key => key.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
 const finalCategories = ['confirmed', 'merged', 'rejected', 'needsInfo'];
+const disposition = object({
+  id: string, status: status('CONFIRMED', 'MERGED', 'REJECTED', 'NEEDS_INFO'),
+  reason: string, mergedInto: string, verifiedFinding: finding,
+}, ['id', 'status', 'reason']);
+
+// Native schemas, text validation and value-free diagnostics share key catalogs.
+// Domain validators still own conditional requirements, versions and evidence.
+function hasUnexpectedFields(value, schema) {
+  return isObject(value) && schema.additionalProperties === false &&
+    Object.keys(value).some(key => !Object.hasOwn(schema.properties, key));
+}
+function requireKnownFields(value, schema, label) {
+  if (hasUnexpectedFields(value, schema)) {
+    throw new Error(`Invalid ${label}: unexpected fields; names and values omitted.`);
+  }
+}
+function finalContract(result) {
+  const schema = stageFormat('azpr-review-verifier').schema;
+  if (!isObject(result) || !Object.hasOwn(result, 'dispositions')) return schema;
+  const { confirmed, merged, rejected, needsInfo, ...properties } = schema.properties;
+  return object({ ...properties, dispositions: array(disposition) },
+    ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
+}
 
 /** Convert explicit categories, never infer a verdict or copy initial evidence.
  * Legacy dispositions remain accepted alone for transport compatibility. */
@@ -84,10 +107,11 @@ export function finalSubmission(result) {
   const categories = finalCategories.some(key => Object.hasOwn(result, key));
   if (Object.hasOwn(result, 'dispositions')) {
     if (categories) throw new Error('Final submission mixes categories and legacy dispositions.');
+    requireKnownFields(result, finalContract(result), 'final submission');
     return result;
   }
-  const allowed = stageFormat('azpr-review-verifier').schema.properties;
-  if (Object.keys(result).some(key => !Object.hasOwn(allowed, key))) throw new Error('Final submission contains unexpected top-level fields; names and values omitted.');
+  const schema = finalContract(result);
+  requireKnownFields(result, schema, 'final submission');
   for (const key of [...finalCategories, 'newFindings']) {
     if (!Array.isArray(result[key])) throw new Error(`Invalid final submission: ${key} must be an array.`);
   }
@@ -99,8 +123,7 @@ export function finalSubmission(result) {
       const { reason, ...verifiedFinding } = item;
       dispositions.push({ id: item.id, status: 'CONFIRMED', reason, verifiedFinding });
     } else {
-      const keys = key === 'merged' ? ['id', 'mergedInto', 'reason'] : ['id', 'reason'];
-      if (Object.keys(item).some(field => !keys.includes(field))) throw new Error(`Invalid final submission: ${key}[${i}] contains unexpected fields; names and values omitted.`);
+      requireKnownFields(item, schema.properties[key].items, `final submission ${key}[${i}]`);
       dispositions.push({ ...item, status: { merged: 'MERGED', rejected: 'REJECTED', needsInfo: 'NEEDS_INFO' }[key] });
     }
   }
@@ -123,13 +146,11 @@ export function finalSubmissionIssues(result) {
     if (actual === 'object') {
       for (const key of schema.required ?? []) if (!Object.hasOwn(value, key)) add(path ? `${path}.${key}` : key, 'missing-field');
       for (const [key, child] of Object.entries(schema.properties ?? {})) if (Object.hasOwn(value, key)) scan(value[key], child, path ? `${path}.${key}` : key);
-      if (schema.additionalProperties === false && Object.keys(value).some(key => !Object.hasOwn(schema.properties, key))) add(path || '$', 'unexpected-fields');
+      if (hasUnexpectedFields(value, schema)) add(path || '$', 'unexpected-fields');
     }
   };
-  let schema = stageFormat('azpr-review-verifier').schema;
+  const schema = finalContract(result);
   if (isObject(result) && Object.hasOwn(result, 'dispositions')) {
-    const { confirmed, merged, rejected, needsInfo, ...properties } = schema.properties;
-    schema = object({ ...properties, dispositions: array(object({ id: string, status: status('CONFIRMED', 'MERGED', 'REJECTED', 'NEEDS_INFO'), reason: string, mergedInto: string, verifiedFinding: finding }, ['id', 'status', 'reason'])) }, ['status', 'snapshot', 'currentHead', 'currentBase', 'dispositions', 'report']);
     if (Array.isArray(result.dispositions)) result.dispositions.forEach((item, i) => {
       if (item?.status === 'CONFIRMED' && !isObject(item.verifiedFinding)) add(`dispositions[${i}].verifiedFinding`, 'missing-corrected-finding');
     });
@@ -333,6 +354,14 @@ function rejectDuplicateJSONKeys(content, message) {
     }
   }
 }
+
+/** Strict local JSON, including settings; no fencing, normalization or repair.
+ * Callers must replace syntax errors before exposing potentially private input. */
+export function parseUniqueJSON(content) {
+  const value = JSON.parse(content);
+  rejectDuplicateJSONKeys(content, 'Input contains duplicate JSON keys; no field value was accepted.');
+  return value;
+}
 // Recognize JSON with only the trailing-separator extension. An iterative stack
 // rejects holes/missing values without recursion or editing quoted source. The
 // strict parser below still establishes grammar and duplicate-key rejection.
@@ -495,6 +524,7 @@ function identityFromURL(url) {
 const sha = value => typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value);
 const text = value => typeof value === 'string' && value.trim().length > 0;
 export function validateSnapshot(s) {
+  requireKnownFields(s, snapshotSchema, 'snapshot');
   if (!isObject(s) || !text(s.repository) || !Number.isInteger(s.prId) || s.prId < 1 ||
       !sha(s.base) || !sha(s.head) || !['pr', 'cumulative'].includes(s.scope) || !Array.isArray(s.files) ||
       s.files.length === 0 || !s.files.every(text) || new Set(s.files).size !== s.files.length) {
@@ -505,6 +535,8 @@ export function validateSnapshot(s) {
 function snapshotKey(s) { const value = validateSnapshot(s); value.files.sort(); return JSON.stringify(value); }
 export function checkEnvelope(result, prUrl) {
   if (!isObject(result) || !text(result.report)) throw new Error('Invalid source-check envelope: a status and report are required.');
+  requireKnownFields(result, stageFormat('azpr-review-check').schema, 'source-check envelope');
+  requireKnownFields(result.snapshot, snapshotSchema, 'snapshot');
   requireStatus(result, ['READY', 'NOT_READY'], 'source-check');
   if (result.requirements !== undefined && typeof result.requirements !== 'string') throw new Error('Source-check requirements must be text.');
   if (result.sourceAccess !== undefined && (!isObject(result.sourceAccess) || Object.values(result.sourceAccess).some(value => typeof value !== 'string'))) throw new Error('Source-check sourceAccess must describe capabilities as text fields.');
@@ -544,6 +576,8 @@ function validateFindings(findings, prefix, path = 'findings', allowMissingLocat
 }
 export function initialEnvelope(result, expected, prefix, prUrl) {
   if (!isObject(result)) throw new Error('Invalid initial-review envelope: expected an object.');
+  requireKnownFields(result, stageFormat('azpr-review-functional').schema, 'initial-review envelope');
+  requireKnownFields(result.coverage, coverageSchema, 'coverage ledger');
   const missingSnapshot = result.status === 'PARTIAL' && result.snapshot === undefined && !expected;
   const invalid = [
     !missingSnapshot && !isObject(result.snapshot) && 'snapshot must be an object',
@@ -591,6 +625,7 @@ export function finalEnvelope(result, expected, originals) {
   const ids = new Set(originals.map(f => f.id));
   const accounted = new Set();
   for (const [i, item] of result.dispositions.entries()) {
+    requireKnownFields(item, disposition, `dispositions[${i}]`);
     if (!isObject(item) || !ids.has(item.id) || accounted.has(item.id) || !['CONFIRMED','NEEDS_INFO','REJECTED','MERGED'].includes(item.status) || !text(item.reason)) {
       throw new Error('Final review has an invalid/missing disposition or silently changed a finding ID.');
     }

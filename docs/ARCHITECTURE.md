@@ -179,6 +179,15 @@ Shared review policy is transport-neutral. The compiler appends exactly one
 submission instruction: native StructuredOutput or JSON text. Envelope examples
 describe field contents; they are not an additional text-output requirement.
 
+Declared object keys come from shared schema catalogs. Unknown envelope,
+snapshot, coverage and disposition fields are rejected in both transports,
+including legacy final submissions; empty/null extras at those levels are also
+rejected. Value-free diagnostics use the same catalogs. The audited finding-only
+normalization below remains separate and runs before finding validation. This
+does not add required fields or replace conditional evidence/version checks with
+a generic schema validator. Historical incomplete versions and PARTIAL initials
+retain their existing rules.
+
 Source checks, initial reviews, final verification, comment plans, and publication
 receipts all pass their local contract validator inside the stage boundary before
 the stage records a valid result. A malformed READY plan or DONE publication report
@@ -450,6 +459,13 @@ Value-free toolObservations separate host terminal states, returned results,
 explicit error/truncation flags, and calls without observed outcomes. Error sets
 are deduplicated; successful-looking results remain unverified. Evidence validity
 and recovered reads are explicitly unassessed, not inferred from completion.
+`rejectedSubmissions` counts distinct host `invalid` submissions before specialized
+guards run, including malformed or unknown requested tools. It can overlap the
+structured-output/native-guard counters, but is separate from ordinary registered
+calls and execution/result errors. No requested names, arguments, rejection text
+or call IDs enter saved observations. After-hooks/events cannot count these
+submissions as successful tools. Receipts disclose them without adding a retry,
+classifying MCP operations or changing acceptance/guard thresholds.
 Legacy toolFailures remains the host-event count; completedTools excludes any
 observed error/truncation. No output-body classification or retry wrapper exists.
 MCP response defects remain external limitations. This project distributes no
@@ -657,10 +673,10 @@ The runtime uses seven JavaScript files, including the tiny required entry point
 | `plugin.js` | OpenCode entry export. |
 | `runtime.mjs` | Host I/O, grants/hooks, one shared run lifecycle, and the review/comment workflows. |
 | `config.mjs` | Settings validation, immutable mode/role/prompt catalogs, and pure compilation of private agent definitions. |
-| `output.mjs` | Literal request parsing, JSON output schemas/parsing, snapshots, and review evidence contracts. |
+| `output.mjs` | Literal request parsing, strict JSON parsing, shared output-key catalogs, snapshots, and review evidence contracts. |
 | `comments.mjs` | Saved comment-plan contracts, markers, and publication-result bookkeeping. |
-| `diagnostics.mjs` | Opt-in private filesystem output; no workflow authority. |
-| `attribution.mjs` | Deterministic localized model/method disclosure from stage records. |
+| `diagnostics.mjs` | Pure tool-observation summaries, timing, and opt-in private filesystem output; no workflow authority. |
+| `attribution.mjs` | Deterministic reports, receipts, diagnostic notices and localized model/method disclosure. |
 
 The former tiny request-only module is folded into the contracts module. Pure contracts and formatting remain outside the stateful runtime; filesystem diagnostics and comment publication keep their own boundaries. Prompts remain editable Markdown because they are review policy, not JavaScript routing logic. A shared deep supplement is appended to both initial roles and the verifier only in deep mode. Each required prompt is read once at startup, then the pure compiler constructs both profiles without mutating settings or the prompt inputs. Missing/empty policies fail before any agent is injected.
 
@@ -673,7 +689,24 @@ runtime. A contract test compares the operational catalogs, actual source files,
 and documented manual package, while installer tests check every required file;
 drift fails development tests instead of adding another required manifest file.
 
+Runtime JSDoc defines Run, Grant, StageRecord and FailedSubmission handoffs.
+Attempt records retain validated results separately from raw/prepared failed
+submissions; display grants cannot execute models/tools. A shared active-amendment
+check preserves settings, revocation and abort checks after eligibility planning.
+These are editor-visible contracts, not a new build step or static type-checking
+claim. Receipt rendering takes explicit settings and performs no host I/O or
+state mutation. Contract tests exercise native, raw-text and fenced output for
+both profiles, including legacy final submissions and the existing finding-only
+tolerance. Host mock tests remain separate from actual-host certification.
+
 The Python settings migrator is installer-only, not another runtime service. It converts the previous four slots to schema version 2 and recursively fills missing defaults. `models._help` is documentation and is excluded from normalized runtime settings and model instructions. Runtime defaults apply to omitted optional fields, not explicit invalid values such as null; the installer preserves such values for the user to correct. The optional JSON schema supplies editor hints; runtime validation does not depend on that file. Installation retains no persistent backup; temporary rollback files are removed on success. See [migration and update behavior](../README.md#update-disable-or-uninstall).
+
+Both paths reject duplicate raw JSON keys at every object level, including
+escaped-equivalent names. Runtime settings loading shares the structural key
+scanner used for review text, with strict syntax and no normalization. This check
+also precedes the disabled-mode shortcut; ambiguous input cannot silently select
+a model or disable the plugin. User-visible syntax/duplicate errors omit key names
+and values. The installer remains Python-only and preserves its existing rollback.
 
 ## Interface references
 

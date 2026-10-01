@@ -9,6 +9,18 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- Runtime settings reject duplicate JSON keys consistently with installation,
+  including nested and escaped-equivalent names. Shared output-key catalogs align
+  native/text validation and legacy final diagnostics without expanding finding
+  tolerance or changing evidence/version/ID gates. Rejected host tool submissions
+  have a distinct, value-free counter and receipt notice; historical execution
+  counters keep their meaning and no retry is added.
+- Runtime state and failed-submission handoffs have JSDoc contracts. Deterministic
+  receipts and diagnostic summaries live in the existing presentation/diagnostics
+  modules. Seven runtime modules and the 24-file package remain unchanged.
+  Cross-transport/profile contract tests supplement host mocks; actual-host
+  compatibility and model prose quality remain separate validation gates.
+
 - Tool observations distinguish host completion/errors, explicit result errors,
   truncation and unobserved outcomes. Successful-looking results remain unverified;
   recovered reads require a separate retained-output audit. Historical counters

@@ -2282,7 +2282,7 @@ test('tool observations distinguish host status, error flags, truncation and unk
   const stage=JSON.parse(await readFile(join(dir,'result.json'),'utf8')).stages.at(-1);
   assert.equal(stage.toolFailures,2,'Retain the raw host error count.');
   assert.equal(stage.completedTools,2,'Error flags and later host errors cannot count as completed after-hooks.');
-  assert.deepEqual(stage.toolObservations,{registered:8,afterHook:6,hostCompleted:4,hostErrors:2,reportedErrors:2,truncated:1,observedErrors:3,unverifiedResults:3,withoutOutcome:1,evidenceValidity:'not-assessed',recoveredReads:null});
+  assert.deepEqual(stage.toolObservations,{registered:8,rejectedSubmissions:0,afterHook:6,hostCompleted:4,hostErrors:2,reportedErrors:2,truncated:1,observedErrors:3,unverifiedResults:3,withoutOutcome:1,evidenceValidity:'not-assessed',recoveredReads:null});
   assert.doesNotMatch(JSON.stringify(stage),/PRIVATE_|event-only|host-error/);
 });
 
@@ -2291,5 +2291,101 @@ test('completed tools alone are not audited source evidence or zero recovered re
   const out=await f.command();
   const dir=/Private debug directory: ([^\n]+)/.exec(out)[1];
   const result=JSON.parse(await readFile(join(dir,'result.json'),'utf8'));
-  for(const stage of result.stages)assert.deepEqual(stage.toolObservations,{registered:1,afterHook:1,hostCompleted:0,hostErrors:0,reportedErrors:0,truncated:0,observedErrors:0,unverifiedResults:1,withoutOutcome:0,evidenceValidity:'not-assessed',recoveredReads:null});
+  for(const stage of result.stages)assert.deepEqual(stage.toolObservations,{registered:1,rejectedSubmissions:0,afterHook:1,hostCompleted:0,hostErrors:0,reportedErrors:0,truncated:0,observedErrors:0,unverifiedResults:1,withoutOutcome:0,evidenceValidity:'not-assessed',recoveredReads:null});
+});
+
+test('runtime rejects duplicate settings keys before registering agents or choosing a model', async t => {
+  const settings = JSON.parse(await readFile(join(ROOT, 'config/settings.example.json'), 'utf8'));
+  settings.models.review = { functional: 'fixture/first', risk: 'fixture/risk', verifier: 'fixture/verifier' };
+  const raw = JSON.stringify(settings);
+  const ambiguous = [
+    raw.replace('"functional":"fixture/first"', '"functional":"fixture/first","functional":"fixture/last"'),
+    raw.replace('"functional":"fixture/first"', '"functional":"fixture/first","funct\\u0069onal":"fixture/last"'),
+    '{"enabled":false,"en\\u0061bled":false}',
+    '{"enabled":false,"nested":[{"PRIVATE_KEY":"PRIVATE_VALUE","PRIVATE_KEY":null}]}',
+  ];
+  for (const duplicate of ambiguous) {
+    const f = await fixture(t, { raw: duplicate });
+    assert.deepEqual(f.cfg, f.baseline);
+    await assert.rejects(f.command(), error => {
+      assert.match(error.message, /valid JSON.*duplicate keys/);
+      assert.doesNotMatch(error.message, /PRIVATE_|fixture\/first|fixture\/last/);
+      return true;
+    });
+    await f.hooks['chat.params']({ agent: 'build', sessionID: 'normal', model: { providerID: 'fixture', id: 'normal' } }, {});
+    assert.equal(f.calls.length, 0);
+    assert.doesNotMatch(JSON.stringify(f.logs), /PRIVATE_|fixture\/first|fixture\/last/);
+  }
+});
+
+for (const structuredOutput of [false, true]) test(`rejected tool submissions stay observable without inferring MCP execution: native=${structuredOutput}`, async t => {
+  let rejectedInput;
+  const f = await fixture(t, {
+    settings(settings) {
+      settings.structuredOutput = structuredOutput;
+      settings.debug.enabled = true;
+      settings.debug.directory = 'debug';
+    },
+    async duringPrompt({ hooks, role, id }) {
+      if (!role.endsWith('-verifier')) return;
+      for (const callID of ['rejected-one', 'rejected-two']) {
+        const input = { sessionID: id, tool: 'invalid', callID };
+        rejectedInput = input;
+        const args = { tool: 'PRIVATE_TOOL_NAME', error: 'PRIVATE_ARGUMENTS_AND_SOURCE' };
+        await hooks['tool.execute.before'](input, { args });
+        await hooks['tool.execute.before'](input, { args });
+        await hooks['tool.execute.after'](input, { isError: true, metadata: { truncated: true } });
+        const stamp = Date.now();
+        await hooks.event({ event: { type: 'message.part.updated', properties: { part: {
+          type: 'tool', ...input, state: { status: 'completed', time: { start: stamp, end: stamp } },
+        } } } });
+      }
+    },
+  });
+  await f.hooks['tool.execute.before']({ sessionID: 'ordinary', tool: 'invalid', callID: 'ordinary' }, { args: {} });
+  const out = await f.command();
+  assert.match(out, /] COMPLETE/);
+  assert.match(out, /rejected-tool-submissions=2/);
+  assert.match(out, /Tool submission notice: 2/);
+  assert.equal(f.prompts().length, 3, 'Diagnostics cannot add review or recovery requests.');
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const result = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8'));
+  const stage = result.stages.at(-1);
+  assert.deepEqual(result.stages.map(stage => stage.toolObservations.rejectedSubmissions), [0, 0, 2]);
+  assert.equal(stage.toolObservations.registered, 1);
+  assert.equal(stage.toolObservations.observedErrors, 0);
+  assert.equal(stage.toolObservations.truncated, 0);
+  assert.equal(stage.invalidStructuredOutputs, 0);
+  assert.equal(stage.blockedNativeToolCalls, 0);
+  assert.equal(stage.completedTools, 1);
+  assert.doesNotMatch(JSON.stringify(result) + out + JSON.stringify(f.logs), /PRIVATE_TOOL_NAME|PRIVATE_ARGUMENTS_AND_SOURCE|rejected-one|rejected-two/);
+  assert.doesNotMatch(out, /PRIVATE_INITIAL_REPORT_/);
+  await assert.rejects(f.hooks['tool.execute.before'](rejectedInput, { args: {} }), /expired/);
+});
+
+for (const target of ['StructuredOutput', 'bash']) test(`rejected submission counts overlap their existing guard: ${target}`, async t => {
+  const f = await fixture(t, {
+    settings(settings) { settings.debug.enabled = true; settings.debug.directory = 'debug'; },
+    async duringPrompt({ hooks, role, id }) {
+      if (!role.endsWith('-verifier')) return;
+      const call = () => hooks['tool.execute.before'](
+        { sessionID: id, tool: 'invalid', callID: 'same-rejected-submission' },
+        { args: { tool: target, error: 'PRIVATE_ARGUMENTS' } },
+      );
+      for (let delivery = 0; delivery < 2; delivery++) {
+        if (target === 'bash') await assert.rejects(call(), /Native tool denied/);
+        else await call();
+      }
+    },
+  });
+  const out = await f.command();
+  assert.match(out, /] COMPLETE/);
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8')).stages.at(-1);
+  assert.equal(stage.toolObservations.rejectedSubmissions, 1);
+  assert.equal(stage.invalidStructuredOutputs, target === 'StructuredOutput' ? 1 : 0);
+  assert.equal(stage.blockedNativeToolCalls, target === 'bash' ? 1 : 0);
+  assert.equal(stage.toolFailures, 0);
+  assert.match(out, /can overlap/);
+  assert.doesNotMatch(JSON.stringify(stage) + out, /PRIVATE_ARGUMENTS/);
 });

@@ -4,6 +4,46 @@ import { homedir } from 'node:os';
 import { join, resolve, parse, relative, isAbsolute } from 'node:path';
 import { visibleText } from './output.mjs';
 
+/**
+ * Value-free observations; counts can overlap and never establish source truth.
+ * @typedef {object} ToolObservations
+ * @property {number} registered Ordinary before-hook calls, excluding host invalid.
+ * @property {number} rejectedSubmissions All host invalid submissions, including guarded ones.
+ * @property {number} afterHook
+ * @property {number} hostCompleted
+ * @property {number} hostErrors
+ * @property {number} reportedErrors
+ * @property {number} truncated
+ * @property {number} observedErrors Deduplicated host/result errors, excluding invalid submissions.
+ * @property {number} unverifiedResults Observed outcomes without error/truncation flags.
+ * @property {number} withoutOutcome Registered calls without a returned/terminal outcome.
+ * @property {'not-assessed'} evidenceValidity
+ * @property {null} recoveredReads
+ */
+
+/** Summarize an attempt grant after revocation; retain no IDs, names or bodies.
+ * Display-only grants have no attempt observations and never reach this helper.
+ * @param {import('./runtime.mjs').Grant} grant
+ * @returns {ToolObservations}
+ */
+export function collectToolObservations(grant) {
+  const observedErrors = new Set([...grant.failedTools, ...grant.reportedToolErrors]);
+  const observed = new Set([...grant.returnedTools, ...grant.terminalTools.keys()]);
+  return {
+    registered: [...grant.toolCalls.values()].filter(tool => tool !== 'invalid').length,
+    rejectedSubmissions: grant.invalidToolCalls.size,
+    afterHook: grant.returnedTools.size,
+    hostCompleted: [...grant.terminalTools.values()].filter(status => status === 'completed').length,
+    hostErrors: grant.failedTools.size,
+    reportedErrors: grant.reportedToolErrors.size,
+    truncated: grant.truncatedTools.size,
+    observedErrors: observedErrors.size,
+    unverifiedResults: [...observed].filter(id => !observedErrors.has(id) && !grant.truncatedTools.has(id)).length,
+    withoutOutcome: [...grant.toolCalls].filter(([id, tool]) => tool !== 'invalid' && !observed.has(id)).length,
+    evidenceValidity: 'not-assessed', recoveredReads: null,
+  };
+}
+
 // Local hook intervals, not provider inference/queue time or Azure server time.
 // Keep only tool names and offsets: no call IDs, arguments, output or reasoning.
 export function createStageTiming(clock = () => performance.now(), wallClock = () => Date.now()) {

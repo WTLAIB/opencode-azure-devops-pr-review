@@ -78,6 +78,18 @@ The plugin does not inspect bodies, infer causes, match retries or certify conte
 A later error event removes that call from `completedTools`. Repeated events and
 after-hooks do not double count; revoked sessions remain ignored.
 
+`toolObservations.rejectedSubmissions` and the receipt's
+`rejected-tool-submissions` count distinct host `invalid` submissions. These are
+rejected requests, not MCP execution failures, even if the host marks its invalid
+handler completed. They are excluded from `registered`, returned/terminal results
+and `withoutOutcome`. The count includes structured-output and prohibited-native
+submissions, so it can overlap those specialized counters; do not add them as
+unique failures. Arguments, requested names and rejection text remain outside
+plugin diagnostics. Inspect the original child history for the rejection reason.
+Observing a rejection adds no retry, does not classify an MCP operation and does
+not change guard thresholds or evidence validation. Older artifacts without this
+field have unknown rejection counts; do not backfill them with zero.
+
 Audit retained host outputs separately for invalid/missing evidence and recovered
 reads. Keep original counters and responses unchanged in historical artifacts.
 Receipts disclose explicit result errors/truncation separately from host errors,
@@ -141,6 +153,13 @@ Primary reference: [OpenCode 1.18.31 export command](https://github.com/anomalyc
 returns the envelope in `info.structured`. This is a host output mechanism,
 not an ADO tool name or allowlist. The plugin still validates snapshots,
 finding IDs, dispositions, and comment-plan constraints.
+
+Initial and final envelopes, snapshots, coverage and disposition objects reject
+unknown fields consistently in native/text transport and legacy final input.
+Diagnostics report trusted paths without copying unknown names/values. Only the
+documented finding-field normalization can remove empty/null extras; it does not
+apply to envelope-level fields. Inspect the unchanged raw response before
+attributing a failure to transport or asking for another authorized evaluation.
 
 Only the chosen transport's submission instructions appear in each role prompt.
 The verifier declares currentHead/currentBase as scalar strings: a full SHA, or an empty

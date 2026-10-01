@@ -54,6 +54,10 @@ It describes the development process, not instructions for agents reviewing a PR
   unchanged. Do not blanket-deny read: it also gates host MCP resource access.
   Preserve event-scoped tool-failure counters and optional terminal-state timing;
   events never provide successful source evidence or infer a failure cause.
+  Count distinct host invalid submissions separately from execution errors,
+  including overlap with existing structured/native guards. Never save their
+  requested names, arguments or rejection text in aggregate diagnostics, count
+  them as source reads, or add retries/guard thresholds from that observation.
   Read recovery remains prompt guidance: one identical repeat per explicitly
   transient logical read, plus at most one unknown-cause idempotent-read repeat
   per stage with fixed arguments/target/version and the original deadline.
@@ -71,6 +75,10 @@ It describes the development process, not instructions for agents reviewing a PR
   field value. Reject explicit truncated/filtered/error/cancelled finishes in
   both transports before recovery. Status-only initial/final submissions cannot
   supply missing review content or qualify as a status spelling amendment.
+  Reject unknown envelope/snapshot/coverage/disposition fields using shared schema
+  key catalogs in both transports and legacy finals. Finding-only normalization
+  below is not permission to drop extra content elsewhere. Keep conditional
+  evidence/version requirements separate from structural key checks.
   Verifiers submit required confirmed/merged/rejected/needsInfo/newFindings arrays;
   confirmed rows contain the seven finding fields plus reason; keep common and
   role-specific instructions consistent about these eight keys. Convert explicit
@@ -159,6 +167,8 @@ It describes the development process, not instructions for agents reviewing a PR
   that contract must update the installer, manual list, and tests together.
   Settings migration preserves values and adds missing defaults, with no
   persistent install backup; invalid input must fail before replacement.
+  Runtime settings also reject duplicate raw JSON keys before the disabled-mode
+  shortcut. Use the shared strict parser and omit private input from errors.
 
 ## Change routing
 
