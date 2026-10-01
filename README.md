@@ -244,9 +244,9 @@ The default is `en` (English), including when the field is omitted. Other exampl
 
 Final human-readable finding fields, disposition reasons, the brief report, comment prose, and comment skip explanations are localized. Intermediate reviews, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to the final-verifier and comment roles in each profile; actual language quality depends on the model. No translation model or extra review stage is added.
 
-With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The complete report stays in the last review session. Use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version.
+With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The runtime attempts to append the complete Markdown report to the last review session without invoking a model. When that display succeeds, use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version. If display fails, inspect the original structured fields and any saved diagnostic report instead. The aggregate diagnostic result records `displayed: false`; display failure alone does not rerun the review or invalidate its validated findings. Diagnostic files are available only when debug logging was enabled and writing succeeded.
 
-Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; the child-session report and optional debug `report.md` preserve the runtime's version.
+Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; a successfully appended child-session report or saved debug `report.md` preserves the runtime's version.
 
 Final findings and disposition reasons are written once in structured fields.
 The runtime renders their details and tables. Initial and final `report` prose
@@ -271,10 +271,20 @@ review content. If your model/provider cannot reliably submit complete native
 envelopes, explicitly set `structuredOutput: false` and restart to use JSON text.
 This changes transport without changing models, adding retries or relaxing
 snapshot, coverage, finding and disposition validation. A single unambiguous
-JSON fence is supported. Duplicate keys (including escaped equivalents), missing
-or ambiguous content, and responses marked truncated, filtered, errored or
-cancelled are rejected; the plugin never selects a duplicate value or fills missing
-evidence. One narrow text-only syntax exception is described below.
+JSON fence is supported. Raw and fenced JSON text reject duplicate keys, including
+escaped-equivalent spellings, before any field value is accepted. Native output
+arrives as an already parsed object, so the plugin cannot determine whether its
+upstream serialization contained duplicate keys. Both transports reject missing
+or ambiguous required content and responses marked truncated, filtered, errored
+or cancelled; neither supplies missing evidence. One narrow text-only syntax
+exception is described below.
+
+Envelope, snapshot, coverage and disposition objects reject unknown fields in
+both transports, including legacy final submissions. Empty-string/null extras at
+those levels are also rejected. Runtime validation and value-free diagnostics
+share the declared key catalogs; conditional evidence, coverage, version and
+original-finding-ID checks remain mandatory. The finding-only normalization
+below does not remove extra fields elsewhere or add missing required values.
 
 Status-only initial/final submissions remain incomplete in both modes. Compare
 the raw response with its requested schema before selecting a transport, and
@@ -320,6 +330,17 @@ Output-repair and comment sessions stop on the first rejection. This guard is
 independent of `outputRetries` and only observes the host's built-in `invalid`
 tool for structured submissions. It is not a general provider retry/spending cap.
 Receipts show `invalid-structured-output=N` when any rejection was observed.
+
+All host `invalid` submissions also contribute to the stage's
+`toolObservations.rejectedSubmissions` and the receipt's
+`rejected-tool-submissions=N`, including rejected MCP tool requests. Repeated
+delivery of the same call ID counts once. These are rejected submissions, not
+MCP execution failures or successful source reads, even if the host marks its
+invalid handler completed. The count can overlap structured-output and
+blocked-native counters; do not add them as unique failures. The counter does not
+copy requested tool names, arguments or rejection text. It adds no retry and does
+not change guard thresholds or evidence validation. Older artifacts without the
+field have unknown rejection counts, not zero. See [tool diagnostics](docs/DEBUGGING.md#receipt-versus-full).
 
 Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
 
@@ -404,7 +425,7 @@ Collection adds no model request and stores no tool arguments or outputs.
 
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
-Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or an output amendment. Exceeding it returns `TIMED_OUT` with the configured limit; `/pr-stop` returns `CANCELLED` with its explicit cause. Iteration and time limits are not spending caps.
+Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or an output amendment. Exceeding it returns `TIMED_OUT` with the configured limit. For an active run, `/pr-stop` acknowledges that authorization was revoked and cancellation requested; the cancelled workflow then reports `CANCELLED` with its cause. If no active run matches, `/pr-stop` reports that no active review was found. Iteration and time limits are not spending caps.
 
 Standalone-check `READY` and review-stage `COMPLETE` are the expected success statuses;
 neither approves the PR. In receipt mode, inspect the final session through the
