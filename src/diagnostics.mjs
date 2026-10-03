@@ -153,20 +153,16 @@ export async function createDiagnostics(settings, context, run) {
   return log;
 }
 
-export function diagnosticResponse(response, maxCharacters) {
+export function diagnosticResponse(response) {
   const raw = visibleText(response);
   // Only select public answer/error fields; omit reasoning, tool inputs/outputs,
   // HTTP headers, provider options, and environment/configuration contents.
   const error = response?.info?.error;
   const structured = response?.info?.structured;
-  const encoded = structured === undefined ? '' : JSON.stringify(structured);
   return {
     messageID: response?.info?.id, model: response?.info?.modelID, provider: response?.info?.providerID,
     finish: response?.info?.finish,
-    error: error ? { name: error.name, message: String(error.data?.message ?? error.message ?? '').slice(0, maxCharacters) } : undefined,
-    text: raw.slice(0, maxCharacters), textCharacters: raw.length, textTruncated: raw.length > maxCharacters,
-    structured: encoded.length <= maxCharacters ? structured : undefined,
-    structuredPreview: encoded.length > maxCharacters ? encoded.slice(0, maxCharacters) : undefined,
-    structuredTruncated: encoded.length > maxCharacters,
+    error: error ? { name: error.name, message: String(error.data?.message ?? error.message ?? '') } : undefined,
+    text: raw, textCharacters: raw.length, structured,
   };
 }

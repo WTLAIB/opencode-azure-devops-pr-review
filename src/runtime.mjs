@@ -49,7 +49,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {'review'|'deep'} profile
  * @property {boolean} active Revoked synchronously before any abort acknowledgement.
  * @property {AbortController} controller
- * @property {number} deadlineAt Whole-run deadline, unchanged by amendments.
+ * @property {number|null} deadlineAt Whole-run deadline, or null when disabled; unchanged by amendments.
  * @property {StageRecord[]} stages Append-only attempt ledger; failed attempts stay visible.
  * @property {Awaited<ReturnType<typeof createDiagnostics>>} [debug]
  * @property {{renderMs:number, displayMs:number, cleanupMs:number}} [timing]
@@ -130,8 +130,8 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {number} [inputCharacters]
  * @property {number} [instructionCharacters]
  * @property {number} [outputCharacters]
- * @property {number} [remainingRunMsAtStart]
- * @property {number} [remainingRunMsAtEnd]
+ * @property {number|null} [remainingRunMsAtStart]
+ * @property {number|null} [remainingRunMsAtEnd]
  * @property {string} [firstToolAt]
  * @property {string} [lastToolAt]
  * @property {string} [endedAt]
@@ -168,6 +168,7 @@ function data(response, label) {
 }
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const abortError = signal => signal.reason instanceof Error ? signal.reason : new Error('Review cancelled or timed out.');
+const remainingRunMs = run => run.deadlineAt === null ? null : Math.max(0, run.deadlineAt - Date.now());
 async function bounded(operation, signal) {
   if (signal.aborted) throw abortError(signal);
   let onAbort;
@@ -316,7 +317,6 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     checkRole(role);
     if (typeof validate !== 'function') throw new Error('Every stage requires an explicit output validator.');
     const input = JSON.stringify(payload);
-    if (input.length > state.settings.maxStageCharacters * 4) throw new Error('Review input is too large; split the PR instead of silently truncating evidence.');
     const spec = ROLES[role];
     if (spec.mode !== run.profile) throw new Error('[AZPR] Reviewer profile mismatch before invocation.');
     const idModel = state.settings.models[spec.mode][spec.slot];
@@ -350,7 +350,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     const format = state.settings.structuredOutput ? stageFormat(role, retryOf ? retryKind : false) : undefined;
     const instructions = retryOf ? REPAIR_PROMPTS[retryKind](state.settings.structuredOutput) : state.config.agent[role].prompt;
     Object.assign(record, { inputCharacters: input.length, instructionCharacters: instructions.length,
-      remainingRunMsAtStart: Math.max(0, run.deadlineAt - Date.now()) });
+      remainingRunMsAtStart: remainingRunMs(run) });
     let receivedAnswer = false;
     let envelope, prepared, syntaxCorrections = [], validatingOutput = false, finalResubmission = false;
     try {
@@ -366,16 +366,16 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         g.timing?.promptSettled(run.controller.signal.aborted ? 'interrupted' : 'rejected');
         throw error;
       });
-      if (response?.error && state.settings.debug.enabled) await run.debug.write(`${stem}.transport-error.json`, diagnosticResponse({ info: { error: response.error } }, state.settings.maxStageCharacters));
+      if (response?.error && state.settings.debug.enabled) await run.debug.write(`${stem}.transport-error.json`, diagnosticResponse({ info: { error: response.error } }));
       const answer = data(response, 'session.prompt');
       receivedAnswer = true;
-      if (state.settings.debug.enabled) await run.debug.write(`${stem}.response.json`, diagnosticResponse(answer, state.settings.maxStageCharacters));
+      if (state.settings.debug.enabled) await run.debug.write(`${stem}.response.json`, diagnosticResponse(answer));
       if (!run.active) throw new Error('Review stopped before output validation.');
       if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
       record.completedTools = g.completedTools.size;
       let usedTextAmendment = false;
       try {
-        if (retryOf) envelope = parseJSONReport(answer, state.settings);
+        if (retryOf) envelope = parseJSONReport(answer);
         else ({ envelope, corrections: syntaxCorrections } = parseReviewJSONReport(answer, state.settings, role));
       }
       catch (error) {
@@ -387,7 +387,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
             answer.info?.sessionID !== made.id) throw error;
         await current();
         if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed || grants.get(made.id) !== g) throw error;
-        envelope = parseAmendmentText(answer, state.settings);
+        envelope = parseAmendmentText(answer);
         if (envelope === undefined) throw error;
         usedTextAmendment = true;
       }
@@ -437,7 +437,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         try {
           const history = data(await deadline(signal => context.client.session.messages({ path: { id: made.id }, query: { limit: 10 }, signal }), 5000), 'session.messages');
           const last = Array.isArray(history) ? history.filter(m => m.info?.role === 'assistant').at(-1) : null;
-          if (last) await run.debug.write(`${stem}.last-message.json`, diagnosticResponse(last, state.settings.maxStageCharacters));
+          if (last) await run.debug.write(`${stem}.last-message.json`, diagnosticResponse(last));
           else run.debug.warnings.push(`No last assistant message was available for ${role}; export its session manually.`);
         } catch { run.debug.warnings.push(`Could not read the last assistant message for ${role}; export its session manually.`); }
       }
@@ -455,7 +455,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (g.lastToolAt) record.lastToolAt = g.lastToolAt;
       record.endedAt = new Date().toISOString();
       record.durationMs = Date.parse(record.endedAt) - Date.parse(record.startedAt);
-      record.remainingRunMsAtEnd = Math.max(0, run.deadlineAt - Date.now());
+      record.remainingRunMsAtEnd = remainingRunMs(run);
       if (g.timing) record.timing = g.timing.finish();
       await run.debug.write(`${stem}.result.json`, record);
     }
@@ -498,12 +498,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     /** @type {Run} */
     const run = { ...details, id, active: true, controller: new AbortController(), stages: [],
       timing: state.settings.debug.enabled ? { renderMs: 0, displayMs: 0, cleanupMs: 0 } : undefined,
-      deadlineAt: Date.now() + state.settings.runTimeoutSeconds * 1000 };
+      deadlineAt: state.settings.runTimeoutSeconds === null ? null : Date.now() + state.settings.runTimeoutSeconds * 1000 };
     runs.set(id, run);
     sourceRuns.set(run.origin, id);
     if (run.lockKey) commentLocks.add(run.lockKey);
-    const timer = setTimeout(() => { void abortRun(run, `Review exceeded the ${state.settings.runTimeoutSeconds}-second whole-run time limit.`, 'TIMED_OUT'); }, state.settings.runTimeoutSeconds * 1000);
-    timer.unref?.();
+    const timer = run.deadlineAt === null ? null : setTimeout(() => {
+      void abortRun(run, `Review exceeded the ${state.settings.runTimeoutSeconds}-second whole-run time limit.`, 'TIMED_OUT');
+    }, state.settings.runTimeoutSeconds * 1000);
+    timer?.unref?.();
     const outcome = { status: 'INCOMPLETE', report: '', failure: '' };
     toast(`AZPR ${id} started (${run.mode}/${run.profile}). Cancel with /pr-stop ${id}. Your original model is unchanged.`);
     try {
@@ -811,10 +813,14 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const status = part.state?.status, time = part.state?.time;
       if (!['completed', 'error'].includes(status) || !Number.isFinite(time?.start) || !Number.isFinite(time?.end) ||
           time.end < time.start || time.end > Date.now()) return;
-      // Diagnostics only. Do not read arguments/output/error text or count an
-      // event as successful source evidence. Unknown/late grants remain ignored.
+      // MCP after-hooks precede host truncation in the pinned host. Observe the
+      // final metadata flags here without retaining content, paths or arguments.
+      // Events never certify source or authorize local-file access.
       g.terminalTools.set(part.callID, status);
       if (status === 'error') { g.failedTools.add(part.callID); g.completedTools.delete(part.callID); }
+      if (part.state.metadata?.isError === true) g.reportedToolErrors.add(part.callID);
+      if (part.state.metadata?.truncated === true) g.truncatedTools.add(part.callID);
+      if (g.reportedToolErrors.has(part.callID) || g.truncatedTools.has(part.callID)) g.completedTools.delete(part.callID);
       g.timing?.toolFinished(part.callID, status, time.end);
     },
     async dispose() { await Promise.allSettled([...runs.values()].map(r => abortRun(r, 'OpenCode plugin disposed.'))); },

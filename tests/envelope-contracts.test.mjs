@@ -34,7 +34,7 @@ function response(value, transport) {
 }
 function validate(value, kind, mode, transport) {
   const role = `azpr-${mode}-${kind === 'initial' ? 'functional' : 'verifier'}`;
-  const settings = { structuredOutput: transport === 'native', maxStageCharacters: 10000 };
+  const settings = { structuredOutput: transport === 'native' };
   const parsed = parseReviewJSONReport(response(value, transport), settings, role);
   const prepared = normalizeFindingFormat(parsed.envelope, role);
   const result = kind === 'initial'
@@ -92,7 +92,7 @@ test('category and legacy disposition rows enforce the same declared keys', () =
 test('standalone check rejects unknown envelope/snapshot keys in either transport', () => {
   for (const transport of ['native', 'text', 'fenced']) {
     const value = { status: 'READY', snapshot: { ...snapshot, scope: 'cumulative' }, report: 'Source ready.', sourceAccess: { arbitraryCapability: 'Available' } };
-    const parse = candidate => parseJSONReport(response(candidate, transport), { maxStageCharacters: 10000 });
+    const parse = candidate => parseJSONReport(response(candidate, transport));
     assert.equal(checkEnvelope(parse(value)).status, 'READY');
     for (const target of [candidate => candidate, candidate => candidate.snapshot]) {
       const extra = structuredClone(value);

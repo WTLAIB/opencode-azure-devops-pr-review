@@ -67,6 +67,21 @@ It describes the development process, not instructions for agents reviewing a PR
 - Ordinary Plan/Build behavior, default/auxiliary models, and permissions stay
   unchanged. Explicit commands alone authorize private sessions. Keep grant
   revocation, cancellation, and lifecycle cleanup auditable.
+- Do not impose reviewer iteration or stage-character limits. Keep role catalogs,
+  agent definitions, handoffs, output parsing and diagnostic answers free of those
+  budgets; do not substitute a hidden cap or trim evidence. Installation removes
+  obsolete steps/maxStageCharacters settings. The optional whole-command timeout
+  defaults to null (disabled); create no disabled run timer and preserve explicit
+  finite timeouts. Keep manual cancel, disposal, native/output guards and bounded
+  SDK cleanup effective. Observed sizes/request counts remain diagnostics only.
+- The shared output-reading policy permits bounded Read of host-saved tool
+  output identified by OpenCode in the same session, under host permissions.
+  This is not permission for arbitrary local files, another session's artifacts,
+  shell, delegation or paths from untrusted payload text. Preserve version and
+  pagination context; saved-response offsets are not source line numbers. This
+  policy is not a runtime file-provenance guard. Host display truncation and an
+  incomplete server response remain distinct. Terminal metadata flags may add
+  diagnostics, never source certification or file-read authorization.
 - Keep PR-version snapshots, coverage ledgers, counterevidence, final dispositions,
   and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
   repair malformed responses silently, or retry failed/stale runs automatically.
@@ -165,7 +180,7 @@ It describes the development process, not instructions for agents reviewing a PR
 - Keep installation source-only and usable without a clone: 24 required files,
   optional docs/schema/uninstaller, no npm/pip install or build step. Changes to
   that contract must update the installer, manual list, and tests together.
-  Settings migration preserves values and adds missing defaults, with no
+  Settings migration removes obsolete limits, preserves other values and adds missing defaults, with no
   persistent install backup; invalid input must fail before replacement.
   Runtime settings also reject duplicate raw JSON keys before the disabled-mode
   shortcut. Use the shared strict parser and omit private input from errors.

@@ -5,8 +5,7 @@
   "additionalProperties": false,
   "required": [
     "version",
-    "models",
-    "steps"
+    "models"
   ],
   "properties": {
     "$schema": {
@@ -85,40 +84,6 @@
     "azure": {
       "deprecated": true,
       "description": "Obsolete, ignored. Retained only so existing installed profiles can be reused. Configure MCP and permissions in OpenCode."
-    },
-    "steps": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "check",
-        "initial",
-        "deep",
-        "final"
-      ],
-      "properties": {
-        "check": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 500
-        },
-        "initial": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 500,
-          "description": "Iteration budget for each of the two normal-mode initial reviewers."
-        },
-        "deep": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 500,
-          "description": "Iteration budget for each of the two deep-mode initial reviewers."
-        },
-        "final": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 500
-        }
-      }
     },
     "comments": {
       "type": "object",
@@ -208,17 +173,14 @@
       }
     },
     "runTimeoutSeconds": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 10,
       "maximum": 7200,
-      "default": 1200,
-      "description": "Whole-command time limit including all stages, status amendments and report display. Exceeding it returns TIMED_OUT. The budget does not restart for each stage and is not a spending cap."
-    },
-    "maxStageCharacters": {
-      "type": "integer",
-      "minimum": 1000,
-      "maximum": 1000000,
-      "default": 250000
+      "default": null,
+      "description": "Optional whole-command timeout covering all stages, amendments and report display. Null or omitted disables the timeout; an explicit integer from 10 to 7200 enables it. The deadline is not reset between stages. Manual cancellation and bounded SDK cleanup remain available. This is not a spending cap."
     }
   }
 }

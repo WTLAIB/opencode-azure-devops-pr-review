@@ -151,8 +151,10 @@ command-scoped guard blocks attempted execution, including write/apply_patch
 variants and rejected calls to hidden native tools. Two distinct blocked attempts
 in a stage stop the run; receipts disclose even a single prevented attempt.
 This does not classify MCP calls or make mixed read/write MCP dispatchers read-only.
-Local-file access remains prohibited by prompt policy; a blanket `read` permission
-denial would also disable MCP resource reads.
+Local-file access is prohibited by prompt policy except for the same session's
+host-saved tool output, read in bounded chunks under existing host permissions.
+This does not grant access to a working tree, settings or another session's files.
+A blanket `read` permission denial would also disable MCP resource reads.
 
 If a provider rejects requests when the shell tool is hidden, explicitly set
 `"shellToolPermission": "ask"` in the installed AZPR settings and restart OpenCode.
@@ -215,7 +217,29 @@ and evidence fields in both output transports; it cannot prove that a model
 actually read the files or that its conclusions are true. See the
 [evidence contract](docs/ARCHITECTURE.md#evidence-contract).
 
-Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Its two initial reviewers each receive `steps.deep` (default 80), versus `steps.initial` (60) in normal mode. Both profiles share `steps.final` (100) and the run timeout; `steps.check` (24) applies only to standalone `/pr-check`. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
+Deep mode uses its own three models and additional instructions for cross-file/system impact, failure interleavings, security boundaries, and counterevidence. Normal mode does not silently reduce source coverage. Deep is not an extra third initial reviewer and does not automatically guarantee higher quality; choose models and evaluate results accordingly. All three deep roles must be configured, otherwise `/pr-deep` refuses before any model call; it never falls back to normal models.
+
+The plugin imposes no reviewer iteration or stage-character limit. The former
+`steps` and `maxStageCharacters` settings have been removed, along with the
+verifier input-size gate and diagnostic-answer previews. Complete responses are
+parsed, passed between stages, saved when debug is enabled, and rendered without
+plugin size truncation. This does not guarantee they fit the host/provider context.
+
+The whole-command timeout defaults to disabled. To disable an existing timeout,
+set this value in the updated installed AZPR settings and restart OpenCode:
+
+```json
+"runTimeoutSeconds": null
+```
+
+Omitting `runTimeoutSeconds` also disables it; an explicit integer from 10 to 7200
+enables a timeout in seconds. Zero, strings and `Infinity` are not disable values.
+No private agent receives a host iteration limit, and a disabled timeout creates
+no whole-command timer. Manual cancellation,
+native-tool guards, bounded output amendments and SDK cleanup remain in effect.
+Model/context limits and OpenCode/MCP tool-output truncation remain separate.
+More iterations cannot restore missing source; see
+[large tool responses](docs/AZURE_MCP.md#large-tool-responses).
 
 Each initial establishes a `scope: "pr"` snapshot: repository identity, PR ID,
 PR-reported source/target SHAs and discovered changed paths. The PR ID must match
@@ -425,7 +449,7 @@ Collection adds no model request and stores no tool arguments or outputs.
 
 **Debug files can contain company source, PR details, and secrets echoed in ordinary model text.** They are not automatically redacted. Directories/files are created with owner-only permissions on Linux; each run contains a `.gitignore` to prevent ordinary Git adds, including for custom project-local locations. This is not protection against forced adds, backups, or other software. Debug files are not deleted automatically or removed by uninstall. Keep them private and clean them up according to company retention rules. Leave debug disabled for normal use if you do not need local copies.
 
-Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The default timeout is 1,200 seconds for the **whole command**, including all stages and display. It is not reset for the verifier or an output amendment. Exceeding it returns `TIMED_OUT` with the configured limit. For an active run, `/pr-stop` acknowledges that authorization was revoked and cancellation requested; the cancelled workflow then reports `CANCELLED` with its cause. If no active run matches, `/pr-stop` reports that no active review was found. Iteration and time limits are not spending caps.
+Completed reviewer sessions cannot be reused. Start another review from an ordinary session. To cancel from another ordinary session in the same OpenCode process, pass the run ID to `/pr-stop`. Cancellation cannot refund requests already sent to a provider. The whole-command timeout is disabled by default (`runTimeoutSeconds: null`). If explicitly enabled, it includes all stages and display, is not reset for the verifier or an output amendment, and returns `TIMED_OUT` when exceeded. Without a timeout, no plugin iteration/time budget ends a stalled run; use `/pr-stop` when needed. For an active run, `/pr-stop` acknowledges that authorization was revoked and cancellation requested; the cancelled workflow then reports `CANCELLED` with its cause. If no active run matches, `/pr-stop` reports that no active review was found. The plugin provides no spending cap.
 
 Standalone-check `READY` and review-stage `COMPLETE` are the expected success statuses;
 neither approves the PR. In receipt mode, inspect the final session through the
@@ -462,7 +486,9 @@ Replacement directly converts settings to schema `version: 2`, then adds missing
 | `models.deep.risk` | `models.deep` (the former single-model string) |
 | `models.deep.verifier` | `models.final` |
 
-The old model keys are removed. Deep no longer adds a third initial reviewer; its former deep model becomes the risk reviewer. Other existing values, including language, `false`, empty strings, `null`, arrays, and custom fields, are preserved. For example, `debug.enabled: true` stays true while a missing `debug.directory` is added. Invalid existing values are not silently repaired; unknown/custom fields remain but may be rejected by the plugin's startup validation. Installation prints changed field names, never private model values. JSON is reformatted only when conversion or missing-field insertion is needed; repeated unchanged installations retain formatting.
+The old model keys are removed. Deep no longer adds a third initial reviewer; its former deep model becomes the risk reviewer. Installation also removes obsolete `steps` and `maxStageCharacters` fields, regardless of their previous values. They are no longer supported settings. Use `sh install.sh --replace` with files from this revision; when replacing runtime files yourself, delete both fields from your AZPR settings before restarting.
+
+Other existing values, including language, `false`, empty strings, `null`, arrays, and custom fields, are preserved. For example, `debug.enabled: true` stays true while a missing `debug.directory` is added. An explicit numeric `runTimeoutSeconds` remains enabled; an omitted value receives `null`, and explicit `null` stays disabled. Install the updated runtime before using a nullable timeout; older runtimes reject it. Invalid remaining values are not silently repaired; unknown/custom fields remain but may be rejected by startup validation. Installation prints changed field names, never private model values. JSON is reformatted only when migration, field removal or missing-field insertion is needed; repeated unchanged installations retain formatting.
 
 **Installation keeps no persistent backup.** It prepares the converted profile before replacing files and temporarily holds the previous integration for rollback if a normal installation step fails. After success, those temporary files are removed. If automatic restoration fails, it retains emergency recovery files and prints their path. This is not power-loss-safe storage or a historical archive. Existing backups from older installers are left untouched.
 
@@ -488,7 +514,8 @@ The installer does not edit your main OpenCode configuration, providers, MCP con
 Install runtime files and prompts from the same revision. Review envelopes now
 require coverage, counterevidence, and corrected confirmed findings; older custom
 prompts that omit them will fail validation. No new model slot or mandatory
-installation file is needed. Existing private settings are preserved; a missing
+installation file is needed. Apart from obsolete fields removed above, existing
+private settings are preserved; a missing
 `outputRetries` is added as `0`, leaving recovery off until explicitly enabled.
 A missing `shellToolPermission` is added as `deny`; an explicit `ask` is preserved.
 

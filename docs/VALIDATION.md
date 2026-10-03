@@ -262,6 +262,36 @@ invalid calls from source bookkeeping. Timeout tests retain the explicit cause
 even when an SDK ignores or replaces the abort signal, and distinguish TIMED_OUT
 from manual CANCELLED. No test repairs or adopts the malformed output.
 
+Removal tests cover absent iteration/character settings and role fields, old-key
+cleanup during installation, unchanged selected source profiles, preserved timeout
+values and repeat-install idempotence. Both native and text reviews pass evidence
+larger than the former maximum output setting into a verifier request exceeding
+the former maximum input gate. Diagnostics, rendered reports and child-session
+display retain that evidence; large strict/fenced/amendment parsing still rejects
+actual truncated/error finishes and ambiguous JSON. No cap is replaced with a
+larger hidden value.
+
+On the live host, inspect active role definitions and the captured run to verify
+no finite iteration limit and no deadline. Account for disabled roles and the
+host's representation of omitted optional fields when comparing with compiled
+agent definitions; property presence alone does not establish a numeric limit.
+
+Timeout tests cover omitted/null values, finite seconds and invalid types.
+Disabled-timeout tests advance the mock clock by a day, then complete, cancel or
+dispose the run; diagnostics must keep null remaining times and no spurious
+timeout. Existing finite timeout, amendment, manual-stop and unconfirmed-abort
+tests retain their behavior.
+
+The compiled check/review/comment roles share the bounded host-output Read policy
+without changing host permissions or evidence/version/location requirements.
+Terminal-metadata tests reproduce MCP after-hooks preceding host truncation, both
+hook/event orders and duplicate delivery; a truncated return must not count as a
+successful after-hook observation or leak its path/content into diagnostics.
+These are orchestration and policy checks, not real-model compliance tests.
+Live acceptance still needs a large response recovered through allowed paging or
+same-session output reads, a genuinely incomplete server response, host-denied
+reads and correct source-file line anchors. Use authorized disposable data only.
+
 ## JSON text compatibility
 
 For explicit JSON text compatibility, exercise the actual host with a local
@@ -346,7 +376,7 @@ Official MCP defects and model compliance remain outside deterministic guarantee
 Readiness-policy regressions check that both normal/deep check agents retain
 read-only, literal-context, untrusted-data and complete-source requirements while
 excluding finding-review instructions. Native/text transport, model bindings,
-steps, permissions, standalone check and both initial reviewers remain intact.
+permissions, standalone check and both initial reviewers remain intact.
 Policy assertions about paging, ancestry and before/after branch reads verify
 instructions, not actual model compliance. The runtime does not interpret MCP
 results to prove those claims. Live evaluation must compare notes to raw calls.

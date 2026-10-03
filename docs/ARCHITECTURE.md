@@ -59,8 +59,9 @@ Both normal and deep profiles start functional and risk sessions concurrently,
 with the same literal request and URL hints, without a checker snapshot or sibling
 report. Each reads PR metadata, requests changes and reviews source. Once both
 return COMPLETE, the runtime compares identity/source/target versions, combines
-the paths and starts the verifier. Deep adds instructions and an initial budget,
-not a third initial or fallback.
+the paths and starts the verifier. Deep adds instructions and its own model
+profile, not a third initial or fallback. Neither mode has a plugin iteration
+or stage-character limit. The whole-command timeout defaults to disabled.
 
 The target comparison reference is PR-reported, not a certified merge base.
 Prompts prefer native PR changes/diffs and exact-commit source, limit findings to
@@ -141,7 +142,7 @@ Concurrent cancellation and cleanup await the same abort operation. Unconfirmed
 aborts are disclosed; local grant revocation does not prove that remote work or
 billing stopped.
 
-The deadline covers the whole workflow, including stage transitions, output
+When enabled, the deadline covers the whole workflow, including stage transitions, output
 amendments and report display. It returns TIMED_OUT with the configured limit;
 explicit `/pr-stop` and disposal return CANCELLED with their respective causes.
 The controller carries the original reason so an SDK abort error cannot replace
@@ -155,8 +156,9 @@ publishable completed review. Cancelling or failing a refreshed comment preview
 invalidates both the previous and newly prepared plan. Publication attempts remain
 uncertain/reported records and are never automatically retried or rolled back.
 
-Stage diagnostics record serialized input and plugin instruction character counts
-plus remaining whole-run milliseconds at attempt start/end. These observations
+Stage diagnostics record serialized input and plugin instruction character counts,
+the configured step limit and remaining whole-run milliseconds at attempt start/end
+(null when disabled). These observations
 do not alter a deadline, reserve stage time, impose a new iteration limit or add
 instructions to model inputs. Host prompts, tools, history and billable tokens
 are outside those character counts.
@@ -467,7 +469,10 @@ or call IDs enter saved observations. After-hooks/events cannot count these
 submissions as successful tools. Receipts disclose them without adding a retry,
 classifying MCP operations or changing acceptance/guard thresholds.
 Legacy toolFailures remains the host-event count; completedTools excludes any
-observed error/truncation. No output-body classification or retry wrapper exists.
+observed error/truncation. Terminal metadata flags can remove an earlier
+after-hook success because MCP after-hooks precede host display truncation.
+No output paths or bodies are read or retained for this accounting, and events
+never certify recovery or authorize file reads. No retry wrapper exists.
 MCP response defects remain external limitations. This project distributes no
 server patches or version-specific adapters. Shared prompts follow the connected
 operations' contracts; historical server quirks belong in troubleshooting notes.
@@ -506,8 +511,8 @@ results never count as completed source work for the status-amendment gate.
 
 This bounds an existing host loop, independently of outputRetries. It neither
 starts another request/session nor repairs malformed JSON. The first review
-rejection can still be followed by the host's next normal turn, within the same
-step/time budget; other provider retries remain outside this guard. Only native
+rejection can still be followed by the host's next normal turn under the same
+grant and optional deadline; other provider retries remain outside this guard. Only native
 StructuredOutput rejections are counted. Ordinary chat, text transport and MCP
 tool errors retain host behavior and permissions.
 
@@ -573,8 +578,15 @@ forced-call tests remain necessary when host behavior changes.
 
 No MCP name, prefix, action, argument or response-schema filter exists. The native
 guard does not make arbitrary custom tools or mixed-action MCP dispatchers read-only.
-Review prompts prohibit modifications and unrelated access. Local-file access is
-still prompt policy: a blanket read denial would also disable host MCP resources.
+Review prompts prohibit modifications and unrelated access. The shared policy
+compiled in config.mjs allows bounded Read of host-saved tool output identified
+by OpenCode in the same session, under existing host permissions. It excludes
+arbitrary local files, cross-session artifacts and paths embedded in payloads;
+it is not a runtime path/provenance check. A saved partial server response still
+has missing evidence, and its line offsets are not original source coordinates.
+The same policy applies to check, review and comment roles without importing
+finding rules into check or expanding the 24-file package. A blanket read denial
+would also disable host MCP resources.
 Tool hooks retain lifecycle checks, completed-call bookkeeping and native-submission
 limits. Display and output-repair grants deny all ordinary tools.
 See [MCP ownership and limitations](AZURE_MCP.md).
@@ -583,7 +595,7 @@ The final Markdown is appended with `noReply: true`. A display-only grant reject
 
 The top-level `outputLanguage` (default `en`) is validated as a language tag and canonicalized. Only final-verifier and comment roles in each profile receive a generated language instruction and an input language field. Completed reviews retain that language for later comments. It controls final-report Markdown and comment prose, not intermediate review output, structured fields, code identifiers, or status receipts. Full-report receipts instruct the original agent not to translate the enclosed report. The publisher receives unchanged saved bodies and is instructed to send them verbatim. Language quality is model-dependent; no language detector or additional translation call is used.
 
-Cancellation revokes grants before requesting session abort and never aborts the parent development session. A request already sent to a provider may still be billed. The host's UI disconnect or Ctrl+C behavior is not guaranteed to propagate cancellation. A wall-clock timeout provides an additional limit.
+Cancellation revokes grants before requesting session abort and never aborts the parent development session. A request already sent to a provider may still be billed. The host's UI disconnect or Ctrl+C behavior is not guaranteed to propagate cancellation. An explicitly configured wall-clock timeout provides an additional limit; it is disabled by default. SDK abort acknowledgement and advisory delivery keep their separate bounded waits even with no whole-command timeout.
 
 ## Explicit comment boundary
 
@@ -646,7 +658,35 @@ location. Full mode remains the explicit choice for returning the report text.
 
 ## Host and cost limits
 
-A review stage may involve multiple model and tool calls. Step limits and timeouts are not token or spending limits. The host or provider may also retry requests internally.
+No reviewer iteration or stage-character setting exists. Agent definitions omit
+host iteration limits. Role catalogs and diagnostics have no step-budget fields.
+Stage handoffs, native/text envelopes, scoped amendment text and diagnostic
+answers have no plugin character cap. Diagnostics retain the complete selected
+answer/error fields, without preview serialization or truncation flags. Observed
+input/output sizes and `modelRequests` describe activity, never authorize work or
+prove source completeness. No extra model request, evidence trimming or hidden
+replacement cap compensates for large input.
+
+Installation deletes obsolete `steps` and `maxStageCharacters` fields, then fills
+missing defaults. Runtime validation rejects those removed settings like other
+unknown keys; manually replaced runtime files require matching settings. The
+settings version remains 2. This is removal, not an optional legacy limit mode.
+
+`runTimeoutSeconds` accepts null/omission to disable the whole-command timeout, or
+10..7200 integer seconds to enable it. Explicit installation values are preserved.
+The runtime uses a null deadline and no timer when disabled; it does not pass
+Infinity or zero to a timer. A finite deadline covers the entire command without
+reset for later stages/amendments. Remaining-run diagnostics are null without a
+deadline. Manual cancellation, disposal, grants, output/native guards and bounded
+SDK cleanup work in either mode.
+
+Removing these budgets does not enlarge model context, provider output limits or
+MCP/host tool responses. Larger envelopes also use more local memory and debug
+storage. The separate 16,000-character command URL/context bound, comment-count/
+body/anchor contracts, and scoped amendment/invalid-submission guards remain;
+none caps a review's source evidence or verifier handoff. A review stage may
+involve multiple model/tool calls, including host/provider retries. The optional
+timeout is not a token or spending limit.
 
 The host may run the original model after the command hook returns, and auxiliary models retain their existing configuration. Model profiles constrain only this plugin's own stages, not all host spending. Model IDs may be reused across roles; independent sessions do not guarantee independent model reasoning or quality.
 
@@ -699,7 +739,7 @@ state mutation. Contract tests exercise native, raw-text and fenced output for
 both profiles, including legacy final submissions and the existing finding-only
 tolerance. Host mock tests remain separate from actual-host certification.
 
-The Python settings migrator is installer-only, not another runtime service. It converts the previous four slots to schema version 2 and recursively fills missing defaults. `models._help` is documentation and is excluded from normalized runtime settings and model instructions. Runtime defaults apply to omitted optional fields, not explicit invalid values such as null; the installer preserves such values for the user to correct. The optional JSON schema supplies editor hints; runtime validation does not depend on that file. Installation retains no persistent backup; temporary rollback files are removed on success. See [migration and update behavior](../README.md#update-disable-or-uninstall).
+The Python settings migrator is installer-only, not another runtime service. It converts the previous four slots to schema version 2, removes obsolete limits and recursively fills missing defaults. `models._help` is documentation and is excluded from normalized runtime settings and model instructions. Runtime defaults apply to omitted optional fields; explicit null is valid only where declared, including the disabled timeout. The installer preserves other invalid values for the user to correct. The optional JSON schema supplies editor hints; runtime validation does not depend on that file. Installation retains no persistent backup; temporary rollback files are removed on success. See [migration and update behavior](../README.md#update-disable-or-uninstall).
 
 Both paths reject duplicate raw JSON keys at every object level, including
 escaped-equivalent names. Runtime settings loading shares the structural key

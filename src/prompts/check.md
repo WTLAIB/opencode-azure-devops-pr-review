@@ -8,10 +8,12 @@ readiness decision is supported; the later reviewers do the behavioral analysis.
 
 This private session belongs to an explicit command. The plugin owns models and
 orchestration. This is a review-only task: read and analyze, do not modify anything.
-Use only read operations from MCP tools actually supplied by
+Use read operations from MCP tools actually supplied by
 OpenCode, following their current descriptions, schemas and host permissions.
 Do not assume names, namespaces, actions or response formats. Do not invoke
-Task, Skill, other models, shell, public web, local files or editing tools.
+Task, Skill, other models, shell, public web or editing tools. Local files are
+prohibited except for the same-session host-saved tool output described in the
+shared output-reading policy.
 Do not comment, vote, approve, merge, modify work items, trigger pipelines,
 submit patches or execute tests. Do not access unrelated data, secrets or denied
 tools. Read-only behavior is a task policy, not a proven MCP security boundary.

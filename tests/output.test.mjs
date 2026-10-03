@@ -4,35 +4,64 @@ import { parseJSONReport, parseAmendmentText, normalizeFindingFormat, stageForma
 import { readFile } from 'node:fs/promises';
 import { ROLES } from '../src/config.mjs';
 import { diagnosticResponse } from '../src/diagnostics.mjs';
-const settings = { maxStageCharacters: 1000 };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
 const snapshot = { repository:'org/project/repo',prId:1,base:'a'.repeat(40),head:'b'.repeat(40),scope:'cumulative',files:['/main.js'] };
 const final = dispositions => ({status:'COMPLETE',snapshot,currentHead:snapshot.head,dispositions,report:'Evidence report'});
 const finding = (id='F-1') => ({id,summary:'Unprotected null input',location:'head:/main.js:2',evidence:'The caller can pass null to the new dereference, causing a request failure.',counterevidence:'The caller checks undefined, not null; its guard does not prevent this failure.',severity:'medium',suggestion:'Guard null and add a regression case for this caller.'});
 const initial = () => ({status:'COMPLETE',snapshot,coverage:{files:[...snapshot.files],gaps:[]},findings:[finding()],report:'Reviewed full changes and the relevant caller; no tests executed.'});
 
+test('large complete envelopes and amendment text parse without a character limit', () => {
+  const value = initial();
+  value.findings[0].evidence = 'start' + 'x'.repeat(1000001) + 'end';
+  const json = JSON.stringify(value);
+  for (const reply of [response(json), response('```json\n' + json + '\n```'), { info: { structured: value, finish: 'stop' } }]) {
+    const parsed = parseJSONReport(reply);
+    assert.deepEqual(initialEnvelope(parsed, snapshot, 'F'), value);
+  }
+  const amendment = response(json);
+  amendment.info = { role: 'assistant', finish: 'stop', error: { name: 'StructuredOutputError', data: { message: 'Model did not produce structured output', retries: 0 } } };
+  assert.deepEqual(parseAmendmentText(amendment), value);
+  for (const finish of ['length', 'content-filter', 'error', 'cancelled']) {
+    assert.throws(() => parseJSONReport({ ...response(json), info: { finish } }), /did not finish successfully/);
+  }
+});
+
+test('diagnostics retain complete visible answers and errors without preview truncation', () => {
+  const text = 'start' + 'x'.repeat(1000001) + 'end';
+  const structured = { report: text };
+  const result = diagnosticResponse({ info: { structured, error: { name: 'APIError', data: { message: text, responseBody: 'PRIVATE_BODY' } } }, parts: [
+    { type: 'text', text }, { type: 'reasoning', text: 'PRIVATE_REASONING' }, { type: 'tool', state: { output: 'PRIVATE_TOOL' } },
+  ] });
+  assert.equal(result.text, text);
+  assert.equal(result.textCharacters, text.length);
+  assert.deepEqual(result.structured, structured);
+  assert.equal(result.error.message, text);
+  for (const key of ['textTruncated', 'structuredTruncated', 'structuredPreview']) assert.equal(Object.hasOwn(result, key), false);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_/);
+});
+
 test('amendment text parsing only recognizes the pinned missing-native error and rejects ambiguous JSON',()=>{
   const reply=text=>({info:{role:'assistant',finish:'stop',error:{name:'StructuredOutputError',data:{message:'Model did not produce structured output',retries:0}}},parts:[{type:'text',text}]});
   for(const value of [{status:'COMPLETE'},{locations:[{id:'V-1',location:'head:/main.js:2'}]},
     {locations:[{id:'F-1',location:'head:/main.js:2'},{id:'R-1',location:'head:/main.js:3'}]}]) {
-    assert.deepEqual(parseAmendmentText(reply(JSON.stringify(value)),settings),value);
+    assert.deepEqual(parseAmendmentText(reply(JSON.stringify(value))),value);
   }
   for(const raw of ['{"status":','{}{}','prefix {}','```json\n{}\n```','[]',
     '{"status":"COMPLETE","status":"PARTIAL"}',
     '{"status":"COMPLETE","st\\u0061tus":"PARTIAL"}',
     '{"locations":[{"id":"F-1","id":"R-1","location":"head:/main.js:2"}]}']) {
-    assert.throws(()=>parseAmendmentText(reply(raw),settings));
+    assert.throws(()=>parseAmendmentText(reply(raw)));
   }
   for(const mutate of [x=>x.info.role='user',x=>x.info.finish='length',x=>x.info.finish='content-filter',
     x=>x.info.error.name='APIError',x=>x.info.error.data.message='Provider failed',
     x=>x.info.error.data.retries=1,x=>x.info.error.data.extra='Unknown error context',
     x=>x.info.structured={},x=>x.parts.push({type:'tool',state:{status:'running'}})]) {
     const value=reply('{"status":"COMPLETE"}');mutate(value);
-    assert.equal(parseAmendmentText(value,settings),undefined);
+    assert.equal(parseAmendmentText(value),undefined);
   }
-  assert.throws(()=>parseAmendmentText(reply('x'.repeat(1001)),settings),/oversized/);
+  assert.throws(()=>parseAmendmentText(reply('x'.repeat(1001))),/complete JSON object/);
   for(const part of [{type:'reasoning',text:'{"status":"COMPLETE"}'},{type:'text',synthetic:true,text:'{}'},
-    {type:'text',ignored:true,text:'{}'}])assert.throws(()=>parseAmendmentText({...reply(''),parts:[part]},settings),/Empty/);
+    {type:'text',ignored:true,text:'{}'}])assert.throws(()=>parseAmendmentText({...reply(''),parts:[part]}),/Empty/);
 });
 
 test('tolerance: null extensions are audited without changing required finding values',()=>{
@@ -144,7 +173,7 @@ test('JSON text rejects duplicate fields instead of silently replacing review ev
     '{"findings":[{"id":"F-1","evidence":"PRIVATE_EVIDENCE","evidence":"replacement"}]}',
     '{"PRIVATE_KEY":null,"PRIVATE_KEY":null}',
   ])for(const content of [raw,'Result:\n```json\n'+raw+'\n```']){
-    assert.throws(()=>parseJSONReport(response(content),settings),error=>{
+    assert.throws(()=>parseJSONReport(response(content)),error=>{
       assert.match(error.message,/duplicate JSON keys/);assert.doesNotMatch(error.message,/PRIVATE_/);return true;
     });
   }
@@ -153,9 +182,8 @@ test('JSON text rejects duplicate fields instead of silently replacing review ev
 test('JSON text preserves complete evidence with repeated keys in separate objects and source strings',()=>{
   const value=initial();value.findings.push(finding('F-2'));
   value.findings[0].evidence='Literal source: {"status":"PARTIAL","status":"COMPLETE"}; arrays [1,2] and braces {}.';
-  const configured={maxStageCharacters:10000};
   for(const raw of [JSON.stringify(value),'```json\n'+JSON.stringify(value,null,2)+'\n```']){
-    const parsed=parseJSONReport(response(raw),configured);
+    const parsed=parseJSONReport(response(raw));
     assert.deepEqual(parsed,value);assert.equal(initialEnvelope(parsed,snapshot,'F').status,'COMPLETE');
   }
 });
@@ -164,7 +192,7 @@ test('incomplete finish rejects even syntactically complete native and text enve
   for(const finish of ['length','content-filter','error','cancelled'])for(const native of [true,false]){
     const value=initial(),reply=response(JSON.stringify(value));reply.info.finish=finish;
     if(native)reply.info.structured=value;
-    assert.throws(()=>parseJSONReport(reply,{maxStageCharacters:10000}),/did not finish successfully/);
+    assert.throws(()=>parseJSONReport(reply),/did not finish successfully/);
   }
 });
 
@@ -411,21 +439,20 @@ test('finding locations must be recounted from exact source without transport wr
 });
 
 test('structured results are read from info.structured without text and still reject errors', () => {
-  assert.deepEqual(parseJSONReport({ info: { structured: { status: 'READY' } }, parts: [] }, settings), { status: 'READY' });
-  assert.throws(() => parseJSONReport({ info: { error: { name: 'StructuredOutputError' }, structured: { status: 'READY' } } }, settings), /StructuredOutputError/);
-  for (const structured of [[], null, 'text', 1]) assert.throws(() => parseJSONReport({ info: { structured } }, settings), /must be an object/);
-  assert.throws(() => parseJSONReport({ info: { structured: { report: 'x'.repeat(1001) } } }, settings), /Oversized/);
+  assert.deepEqual(parseJSONReport({ info: { structured: { status: 'READY' } }, parts: [] }), { status: 'READY' });
+  assert.throws(() => parseJSONReport({ info: { error: { name: 'StructuredOutputError' }, structured: { status: 'READY' } } }), /StructuredOutputError/);
+  for (const structured of [[], null, 'text', 1]) assert.throws(() => parseJSONReport({ info: { structured } }), /must be an object/);
 });
 test('text compatibility accepts JSON or one fenced object, not broken or ambiguous envelopes', () => {
   for (const raw of ['{"status":"READY"}', '```json\n{"status":"READY"}\n```', 'Result:\n```json\n{"status":"READY"}\n```\nEnd.', '```json\r\n{"status":"READY"}\r\n```']) {
-    assert.equal(parseJSONReport(response(raw), settings).status, 'READY');
+    assert.equal(parseJSONReport(response(raw)).status, 'READY');
   }
   for (const raw of ['Missing source', '{"status":"READY"', '```json\n{}\n```\n```json\n{}\n```', '{"a":1}\n{"b":2}', '{"a":1}\n```json\n{}\n```']) {
-    assert.throws(() => parseJSONReport(response(raw), settings), /required JSON envelope.*finish=stop/);
+    assert.throws(() => parseJSONReport(response(raw)), /required JSON envelope.*finish=stop/);
   }
-  assert.throws(() => parseJSONReport(response('x'.repeat(1001)), settings), /oversized/);
-  assert.throws(() => parseJSONReport(response(''), settings), /Empty/);
-  assert.throws(() => parseJSONReport({ info: {}, parts: [{ type: 'reasoning', text: '{"status":"READY"}' }] }, settings), /Empty/);
+  assert.throws(() => parseJSONReport(response('x'.repeat(1001))), /required JSON envelope/);
+  assert.throws(() => parseJSONReport(response('')), /Empty/);
+  assert.throws(() => parseJSONReport({ info: {}, parts: [{ type: 'reasoning', text: '{"status":"READY"}' }] }), /Empty/);
 });
 test('every stage has an object schema and zero host-managed output retries', () => {
   for (const role of Object.keys(ROLES)) {
@@ -441,12 +468,10 @@ test('every stage has an object schema and zero host-managed output retries', ()
 test('diagnostic projection excludes reasoning, tool payloads, headers, and unknown metadata', () => {
   const value = diagnosticResponse({ info: { id: 'msg_1', finish: 'length', error: { name: 'APIError', data: { message: 'actual error', responseHeaders: { authorization: 'SECRET_HEADER' }, responseBody: 'SECRET_BODY' } }, metadata: 'SECRET_METADATA' }, parts: [
     { type: 'text', text: 'Visible reply' }, { type: 'reasoning', text: 'PRIVATE_REASONING' }, { type: 'tool', state: { input: 'PRIVATE_TOOL' } }, { type: 'text', ignored: true, text: 'IGNORED_TEXT' },
-  ] }, 1000);
+  ] });
   assert.equal(value.error.message, 'actual error'); assert.equal(value.text, 'Visible reply');
   assert.doesNotMatch(JSON.stringify(value), /SECRET_|PRIVATE_|IGNORED_/);
-  const large = diagnosticResponse({ info: { structured: { report: 'x'.repeat(100) } }, parts: [{ type: 'text', text: 'y'.repeat(100) }] }, 10);
-  assert.equal(large.text.length, 10); assert.equal(large.textCharacters, 100); assert.equal(large.textTruncated, true);
-  assert.equal(large.structured, undefined); assert.equal(large.structuredTruncated, true); assert.equal(large.structuredPreview.length, 10);
+
 });
 
 

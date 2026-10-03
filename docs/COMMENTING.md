@@ -95,6 +95,14 @@ If a required capability is unavailable, the model must stop rather than guess,
 skip verification, or substitute a long general comment. OpenCode and the MCP
 server still enforce their own permissions; the plugin adds no MCP overrides.
 
+Read-response truncation uses the shared output-reading policy: supported
+pagination or bounded Read of a full output file saved and identified by OpenCode
+in this same session, subject to host permissions. Other local files remain
+prohibited. Saved response offsets are not source-file coordinates, and an
+incomplete server response remains incomplete after saving. A partial duplicate
+listing or missing source cannot qualify a comment for publication. Inspecting a
+saved create result never grants another publishing attempt.
+
 The target parser currently accepts canonical dev.azure.com and hosted
 organization.visualstudio.com PR URLs. This identifies the intended target;
 it does not independently verify the identity returned by an MCP operation.

@@ -9,6 +9,21 @@ run results belong in the ignored `.local/HANDOVER.md`, not this public backlog.
 
 Implemented and covered by offline tests:
 
+- No plugin reviewer-iteration or stage-character limits. Installation removes
+  obsolete settings; role compilation, verifier handoffs, native/text/amendment
+  parsing and diagnostic answers no longer contain those budgets or previews.
+  Large synthetic evidence passes both transports, handoff and full rendering;
+  this does not establish live host/model context capacity or MCP completeness.
+  The whole-command timeout defaults to null. Explicit finite timeouts survive
+  replacement; no timer is scheduled when disabled. Cancellation, disposal,
+  output/native guards and bounded cleanup remain effective.
+- One shared policy for same-session host-saved output, applied to readiness,
+  both review profiles and comments without extra permissions or new package
+  files. Source-version, pagination and full-coverage requirements remain intact.
+  Terminal metadata captures host truncation after the MCP return hook without
+  retaining output paths/content or certifying successful recovery. Offline
+  policy/event tests do not establish model compliance or large-PR completion.
+
 - Runtime settings reject duplicate JSON keys consistently with installation,
   including nested and escaped-equivalent names. Shared output-key catalogs align
   native/text validation and legacy final diagnostics without expanding finding

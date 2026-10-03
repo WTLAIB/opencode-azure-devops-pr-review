@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migrate model roles and add missing defaults without exposing private values."""
+"""Migrate settings and add missing defaults without exposing private values."""
 import json
 import math
 import sys
@@ -79,8 +79,11 @@ def main():
         _, defaults = load(defaults_path)
         raw, existing = load(source_path)
         migrated = migrate(existing)
+        removed = [key for key in ("steps", "maxStageCharacters") if key in existing]
+        for key in removed:
+            del existing[key]
         added = merge(existing, defaults)
-        content = json.dumps(existing, ensure_ascii=False, indent=2, allow_nan=False) + "\n" if added or migrated else raw
+        content = json.dumps(existing, ensure_ascii=False, indent=2, allow_nan=False) + "\n" if added or migrated or removed else raw
         with open(destination, "x", encoding="utf-8") as stream:
             stream.write(content)
     except (ValueError, OSError, UnicodeError, RecursionError):
@@ -89,7 +92,9 @@ def main():
         return 1
     if migrated:
         print("Settings migrated 1 -> 2: review=(freeA, freeB, freeB); deep=(freeA, deep, final), ordered functional/risk/verifier. Both modes now use two initial reviewers. No new model IDs were selected.")
-    print("Settings defaults added: " + (", ".join(added) if added else "none (existing values preserved)."))
+    if removed:
+        print("Removed obsolete settings: " + ", ".join(removed) + ".")
+    print("Settings defaults added: " + (", ".join(added) if added else "none."))
     return 0
 
 

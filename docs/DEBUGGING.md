@@ -66,7 +66,9 @@ events are not proof of error-free execution; inspect the child tool history.
 Each stage also records value-free `toolObservations`. `hostCompleted` and
 `hostErrors` count matching terminal events; `afterHook` counts returned tool
 results. `reportedErrors` counts explicit `isError` flags (top-level or metadata),
-and `truncated` counts metadata truncation flags. Counts can overlap;
+and `truncated` counts metadata truncation flags. Matching terminal events also
+contribute metadata flags: MCP after-hooks may run before host display truncation.
+No output paths, source text or arguments are copied into these counters. Counts can overlap;
 `observedErrors` is the deduplicated union of host errors and reported errors.
 `unverifiedResults` counts observed outcomes without either error or truncation,
 not valid source reads. `withoutOutcome` counts registered calls with no matching
@@ -75,7 +77,7 @@ after-hook result or terminal event. `evidenceValidity: "not-assessed"` and
 The plugin does not inspect bodies, infer causes, match retries or certify content.
 `toolFailures`/`observed-tool-errors` retain their original host-event meaning;
 `completedTools` counts after-hook returns excluding observed errors/truncation.
-A later error event removes that call from `completedTools`. Repeated events and
+A later error/truncation event removes that call from `completedTools`. Repeated events and
 after-hooks do not double count; revoked sessions remain ignored.
 
 `toolObservations.rejectedSubmissions` and the receipt's
@@ -215,8 +217,9 @@ result; native capture success must not bypass local evidence checks.
 
 ## Bounded output amendments
 
-`outputRetries: 1` enables one status, absent final-location OR missing merge-disposition amendment per stage,
-with a shared limit of one extra request. Default `0` disables all three. This is
+`outputRetries: 1` enables one status, absent final-location, missing merge-disposition
+amendment OR complete final content resubmission per stage, with a shared limit
+of one extra request. Default `0` disables all four recovery paths. This is
 post-response validation and bounded feedback, not a patch to OpenCode's native
 StructuredOutput implementation; native capture can succeed with missing fields.
 
@@ -359,11 +362,44 @@ Source reads may succeed even when the final submission cannot be parsed.
 Increasing the timeout does not resolve a repeated syntax error, and the plugin
 does not recover a result by extracting XML or repairing partial arguments.
 
-The run timeout covers all stages together. TIMED_OUT identifies this deadline
+The run timeout is disabled by default. When enabled, it covers all stages together.
+TIMED_OUT identifies this deadline
 and states the configured seconds. CANCELLED retains the explicit `/pr-stop` or
 disposal reason. INCOMPLETE identifies a workflow/output failure, including the
 submission limit. None of these statuses supplies an accepted final review.
 Abort acknowledgement warnings remain meaningful for every stopping cause.
+
+## Timeout and large responses
+
+The plugin no longer configures host iteration limits or caps stage characters.
+Installation removes the former `steps` and `maxStageCharacters` settings. If
+startup reports one as unknown after a manual update, run the matching installer
+with `--replace` or remove those fields yourself, then restart OpenCode. Do not
+raise an obsolete limit. Historical artifacts retain their original fields and
+must be interpreted using the version that wrote them.
+
+`runTimeoutSeconds` defaults to null (disabled); omission also disables it.
+Existing numeric timeouts survive installation, so explicitly set null to disable
+an old timeout. Inspect the configured timeout in `run.json`, observed
+`modelRequests`, tool events and host history. A model's own maximum-step report
+does not establish a runtime stopping cause. `remainingRunMsAtStart` and
+`remainingRunMsAtEnd` are null without a deadline, not zero/exhausted. Without a
+timeout, a stalled run needs manual cancellation or another existing stop
+condition; cleanup and SDK abort acknowledgements remain bounded.
+
+Separate input-tool truncation from final-output limits. Removing plugin budgets
+does not recover missing tool bytes or enlarge model context. Check whether
+the server returned incomplete data or OpenCode saved a complete response and
+displayed a truncated preview. The shared policy permits supported continuation
+and same-session host-saved output under host read permissions; it does not grant
+general local access or certify the saved file's completeness. See
+[large tool responses](AZURE_MCP.md#large-tool-responses).
+
+An initial reviewer keeps its established snapshot; inability to make an extra
+metadata read does not require omitting that snapshot. The verifier owns final
+freshness. Missing initial location alone has its existing exception, while
+missing source/coverage remains PARTIAL. Inspect raw envelopes rather than changing
+statuses, copying SHAs from prose or silently repairing incomplete findings.
 
 ## Final submission recovery
 
@@ -406,10 +442,10 @@ printed in its receipt:
 
 | File | Contents |
 | --- | --- |
-| `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time and whole-run timeout; no provider configuration. |
-| `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, inputCharacters/instructionCharacters, remainingRunMsAtStart, selected model/session, and schema. |
+| `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time, whole-run timeout (null when disabled); no provider configuration. |
+| `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, inputCharacters/instructionCharacters, remainingRunMsAtStart (null without a deadline), selected model/session, and schema. |
 | `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, inputCharacters/instructionCharacters/outputCharacters, remainingRunMsAtStart/remainingRunMsAtEnd, firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
+| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, inputCharacters/instructionCharacters/outputCharacters, remainingRunMsAtStart/remainingRunMsAtEnd (null without a deadline), firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
@@ -481,10 +517,11 @@ model time and should not be added to overlapping stage intervals indiscriminate
 `inputCharacters` is the serialized plugin payload length; `instructionCharacters`
 is the selected plugin policy length (the isolated amendment policy for a repair).
 These omit host/provider instructions, MCP schemas and retained history, and are
-not token or billing measurements. `remainingRunMsAtStart` and `remainingRunMsAtEnd`
-are nonnegative observations of the existing whole-run deadline, including cleanup
-time before the attempt record is written. They do not reserve time, shorten a
-stage or reset the deadline. Compare them to see how much budget reaches the
+not token or billing measurements or character limits. `remainingRunMsAtStart`
+and `remainingRunMsAtEnd` are null without a deadline, otherwise nonnegative
+observations of the whole-run deadline, including cleanup time before the attempt
+record is written. They do not reserve time, shorten a stage or reset the deadline.
+When a timeout is enabled, compare them to see how much time reaches the
 verifier; a smaller prompt alone does not prove less model waiting or generation.
 
 For standalone readiness regressions compare its sourceAccess claims with actual tool history,
@@ -535,12 +572,15 @@ Cancelled report displays are not cached as completed reviews; cancelled preview
 displays invalidate the saved plan. Advisory notification failures do not stop a
 review and do not establish whether a model request succeeded.
 
-Response text and structured-output previews are limited to
-`maxStageCharacters`; truncation is explicitly flagged and the full host session
-remains the source for inspection. A process crash can leave an unfinished run
-without `result.json`. No complete token stream or full tool transcript is
-captured. Debug files are diagnostic evidence, not a resumable review cache;
-restarting still invalidates saved publication plans.
+Response files retain the complete selected visible text, structured answer and
+error message returned by the host, without plugin previews or character cuts.
+There are no answer-preview truncation flags in new files; upstream finish reasons
+and tool-truncation observations remain separate. This preserves what the host
+returned, not missing provider tokens or server bytes. Large answers use more
+memory and disk space. A process crash can leave an unfinished run without
+`result.json`. No complete token stream or full tool transcript is captured.
+Debug files are diagnostic evidence, not a resumable review cache; restarting
+still invalidates saved publication plans.
 
 Files may contain proprietary code or secrets echoed in visible answers.
 Filtering out reasoning/tool/header fields is **not secret redaction**. Owner-only

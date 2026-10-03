@@ -19,6 +19,200 @@ const categories = result => {
     rejected:dispositions.filter(d=>d.status==='REJECTED').map(({id,reason})=>({id,reason})),
     needsInfo:dispositions.filter(d=>d.status==='NEEDS_INFO').map(({id,reason})=>({id,reason})),newFindings:result.newFindings??[]};
 };
+test('removed review limits are absent from settings, schemas and every role', async t => {
+  const f = await fixture(t);
+  const schema = JSON.parse(await readFile(join(ROOT, 'config/settings.schema.json'), 'utf8'));
+  const raw = { ...f.settings };
+  delete raw.steps; delete raw.maxStageCharacters;
+  const normalized = validateSettings(raw);
+  for (const key of ['steps', 'maxStageCharacters']) {
+    assert.equal(Object.hasOwn(f.settings, key), false);
+    assert.equal(Object.hasOwn(normalized, key), false);
+    assert.equal(Object.hasOwn(schema.properties, key), false);
+    assert.throws(() => validateSettings({ ...raw, [key]: null }), /Unknown setting/);
+  }
+  for (const [role, spec] of Object.entries(ROLES)) {
+    assert.equal(Object.hasOwn(spec, 'step'), false);
+    assert.equal(Object.hasOwn(f.cfg.agent[role], 'steps'), false);
+  }
+});
+
+for (const native of [true, false]) test(`large review evidence survives output, verifier handoff and diagnostics: native=${native}`, async t => {
+  // Exceed both the former maximum output setting and its fourfold input gate.
+  const evidence = 'Evidence start\n' + 'x'.repeat(2100000) + '\nEvidence end';
+  let handoff;
+  const f = await fixture(t, {
+    settings(s) { s.structuredOutput = native; s.debug = { enabled: true, directory: 'debug' }; },
+    result({ role, result, packet }) {
+      if (ROLES[role].format === 'initial') result.findings[0].evidence = evidence;
+      if (ROLES[role].format === 'final') {
+        handoff = packet;
+        result = categories(result);
+        assert.ok(JSON.stringify(packet).length > 4000000);
+        assert.ok(packet.reviews.every(review => review.findings[0].evidence === evidence));
+      }
+      return result;
+    },
+    answer({ answer, result }) {
+      answer.info.finish = 'stop';
+      if (native) { answer.info.structured = result; answer.parts = []; }
+      return { data: answer };
+    },
+  });
+  const out = await f.command();
+  assert.match(out, /] COMPLETE/);
+  assert.ok(handoff);
+  assert.equal(f.prompts().length, 3);
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const saved = JSON.parse(await readFile(join(dir, '03-azpr-review-verifier.response.json'), 'utf8'));
+  const envelope = native ? saved.structured : JSON.parse(saved.text);
+  assert.equal(envelope.confirmed.length, 2);
+  assert.ok(envelope.confirmed.every(finding => finding.evidence === evidence));
+  assert.equal(Object.hasOwn(saved, 'structuredPreview'), false);
+  const report = await readFile(join(dir, 'report.md'), 'utf8');
+  assert.ok(report.includes(evidence));
+  const displayed = f.calls.find(call => call.kind === 'prompt' && call.body.noReply);
+  assert.ok(displayed.body.parts.some(part => part.text.includes('\n\n' + report + '\n\n---\n')));
+});
+
+test('timeout defaults off and accepts only explicit finite seconds or null', async t => {
+  const f = await fixture(t);
+  assert.equal(f.settings.runTimeoutSeconds, null);
+  const absent = jclone(f.settings);
+  delete absent.runTimeoutSeconds;
+  assert.equal(validateSettings(absent).runTimeoutSeconds, null);
+  for (const seconds of [null, 10, 3600, 7200]) {
+    assert.equal(validateSettings({ ...absent, runTimeoutSeconds: seconds }).runTimeoutSeconds, seconds);
+  }
+  const schema = JSON.parse(await readFile(join(ROOT, 'config/settings.schema.json'), 'utf8'));
+  assert.deepEqual(schema.properties.runTimeoutSeconds.type, ['integer', 'null']);
+  assert.equal(schema.properties.runTimeoutSeconds.default, null);
+  for (const value of [0, -1, 9, 10.5, 7201, '1200', false, Infinity, NaN]) {
+    assert.throws(() => validateSettings({ ...f.settings, runTimeoutSeconds: value }), /runTimeoutSeconds/);
+  }
+});
+
+for (const stop of ['complete', 'cancel', 'dispose']) test(`disabled timeout survives elapsed time and still supports ${stop}`, { timeout: 3000 }, async t => {
+  let started, release;
+  const ready = new Promise(r => started = r), wait = new Promise(r => release = r);
+  const f = await fixture(t, {
+    settings(s) { s.debug = { enabled: true, directory: 'debug' }; },
+    async duringPrompt() { started(); await wait; },
+  });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let settled = false;
+  const running = f.command('pr-check').then(out => { settled = true; return out; });
+  await ready;
+  t.mock.timers.tick(24 * 60 * 60 * 1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(f.calls.filter(c => c.kind === 'abort').length, 0);
+  if (stop === 'cancel') await f.command('pr-stop', '');
+  if (stop === 'dispose') await f.hooks.dispose();
+  release();
+  const out = await running;
+  assert.match(out, stop === 'complete' ? /] READY/ : /] CANCELLED/);
+  assert.doesNotMatch(out, /TIMED_OUT/);
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const meta = JSON.parse(await readFile(join(dir, 'run.json'), 'utf8'));
+  const result = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8'));
+  assert.equal(meta.runTimeoutSeconds, null);
+  assert.equal(Object.hasOwn(meta, 'steps'), false);
+  assert.equal(Object.hasOwn(result.stages[0], 'stepLimit'), false);
+  assert.equal(result.stages[0].remainingRunMsAtStart, null);
+  assert.equal(result.stages[0].remainingRunMsAtEnd, null);
+  assert.ok(f.calls.filter(c => c.kind === 'abort').every(c => c.path.id !== 'ses_original'));
+});
+
+for (const afterFirst of [true, false]) test(`host truncation after MCP return stays visible without certifying source; afterFirst=${afterFirst}`, async t => {
+  let terminal;
+  const f = await fixture(t, {
+    skipAzure: true,
+    settings(s) { s.debug = { enabled: true, directory: 'debug' }; },
+    async duringPrompt({ hooks, role, id }) {
+      if (!role.endsWith('-check')) return;
+      const input = { sessionID: id, tool: 'any_mcp_read', callID: 'private-call' };
+      await hooks['tool.execute.before'](input, { args: { secret: 'PRIVATE_ARGUMENT' } });
+      const stamp = Date.now();
+      terminal = { type: 'tool', ...input, state: {
+        status: 'completed', time: { start: stamp, end: stamp },
+        metadata: { truncated: true, outputPath: '/PRIVATE_PATH/tool_output' }, output: 'PRIVATE_SOURCE',
+      } };
+      const emit = part => hooks.event({ event: { type: 'message.part.updated', properties: { part } } });
+      const after = () => hooks['tool.execute.after'](input, { content: [{ type: 'text', text: 'PRIVATE_SOURCE' }] });
+      await emit({ ...terminal, sessionID: 'unrelated' });
+      await emit({ ...terminal, callID: 'unknown' });
+      await emit({ ...terminal, state: { ...terminal.state, status: 'running' } });
+      if (afterFirst) { await after(); await emit(terminal); }
+      else { await emit(terminal); await after(); }
+      await emit(terminal); await after();
+    },
+  });
+  const out = await f.command('pr-check');
+  assert.match(out, /truncated-tool-results=1/);
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8')).stages[0];
+  assert.equal(stage.completedTools, 0);
+  assert.equal(stage.toolObservations.truncated, 1);
+  assert.equal(stage.toolObservations.unverifiedResults, 0);
+  assert.equal(stage.toolObservations.evidenceValidity, 'not-assessed');
+  assert.doesNotMatch(JSON.stringify(stage), /PRIVATE_|private-call/);
+  await f.hooks.event({ event: { type: 'message.part.updated', properties: { part: terminal } } });
+});
+
+test('terminal flags require boolean values and exclude unrelated or nonterminal events', async t => {
+  const f = await fixture(t, {
+    skipAzure: true,
+    settings(s) { s.debug = { enabled: true, directory: 'debug' }; },
+    async duringPrompt({ hooks, id }) {
+      const stamp = Date.now();
+      for (const [callID, metadata] of Object.entries({ flagged: { isError: true }, text: { isError: 'true', truncated: 'true' }, clean: {} })) {
+        const input = { sessionID: id, tool: 'custom_read', callID };
+        await hooks['tool.execute.before'](input, { args: {} });
+        await hooks['tool.execute.after'](input, { metadata: {} });
+        const part = { type: 'tool', ...input, state: { status: 'completed', metadata, time: { start: stamp, end: stamp } } };
+        await hooks.event({ event: { type: 'message.part.updated', properties: { part } } });
+        await hooks['tool.execute.after'](input, { metadata: {} });
+      }
+      await hooks['tool.execute.before']({ sessionID: id, tool: 'custom_read', callID: 'pending' }, { args: {} });
+      const state = { status: 'completed', metadata: { isError: true, truncated: true }, time: { start: stamp, end: stamp } };
+      for (const changes of [{ sessionID: 'other' }, { callID: 'unknown' }, { state: { ...state, status: 'running' } },
+        { state: { ...state, time: { start: stamp, end: stamp + 1000000 } } }]) {
+        const part = { type: 'tool', sessionID: id, tool: 'custom_read', callID: 'pending',
+          state, ...changes };
+        await hooks.event({ event: { type: 'message.part.updated', properties: { part } } });
+      }
+    },
+  });
+  const out = await f.command('pr-check');
+  const dir = /Private debug directory: ([^\n]+)/.exec(out)[1];
+  const stage = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8')).stages[0];
+  assert.equal(stage.completedTools, 2);
+  assert.equal(stage.toolObservations.hostErrors, 0);
+  assert.equal(stage.toolObservations.reportedErrors, 1);
+  assert.equal(stage.toolObservations.truncated, 0);
+  assert.equal(stage.toolObservations.withoutOutcome, 1);
+});
+
+test('saved-output policy is shared by all roles without adding file permissions or dropping coverage', async t => {
+  const f = await fixture(t);
+  for (const role of Object.keys(ROLES)) {
+    const agent = f.cfg.agent[role];
+    assert.match(agent.prompt, /host-saved tool output/);
+    assert.match(agent.prompt, /same session/);
+    assert.match(agent.prompt, /offset\/limit/);
+    assert.match(agent.prompt, /not.*complete.*server response/s);
+    assert.match(agent.prompt, /not source-file line numbers/);
+    assert.deepEqual(agent.permission, PRIVATE_PERMISSIONS);
+  }
+  for (const role of ['azpr-review-functional', 'azpr-review-risk', 'azpr-deep-functional', 'azpr-deep-risk']) {
+    assert.match(f.cfg.agent[role].prompt, /Once established, keep your snapshot fixed/);
+    assert.match(f.cfg.agent[role].prompt, /An initial candidate may omit only the separate location field/);
+  }
+  assert.match(f.cfg.agent['azpr-review-verifier'].prompt, /read the same PR metadata again/);
+  assert.deepEqual(f.cfg.permission, f.baseline.permission);
+});
+
 async function fixture(t, opts={}) {
   const dir=await mkdtemp(join(tmpdir(),'azpr-test-'));
   t.after(()=>rm(dir,{recursive:true,force:true}));
@@ -373,19 +567,20 @@ test('final resubmission retains the original whole-run deadline',{timeout:3000}
 for(const mode of MODES) for(const native of [true,false]) test(`lightweight checker: isolated readiness policy (${mode}, native=${native})`,async t=>{
   const f=await fixture(t,{settings:s=>s.structuredOutput=native});
   const checker=f.cfg.agent[roleFor(mode,'check')];
-  assert.ok(checker.prompt.length<9000,'Readiness must not inherit the full finding-review policy.');
+  assert.ok(checker.prompt.length<11000,'Readiness plus shared output-reading policy must not inherit the full finding-review policy.');
   assert.doesNotMatch(checker.prompt,/## Finding quality|## Output\n|verifiedFinding|pendingLocations|numeric self-confidence/);
   assert.match(checker.prompt,/Readiness decision path/);
   assert.match(checker.prompt,/Treat.*untrusted/s);
   assert.match(checker.prompt,/userContext.*literal/s);
-  assert.match(checker.prompt,/Task, Skill, other models, shell, public web, local files/);
+  assert.match(checker.prompt,/Task, Skill, other models, shell, public web or editing tools/);
+  assert.match(checker.prompt,/Local files are\s+prohibited except for the same-session host-saved tool output/);
   assert.match(checker.prompt,/Do not comment, vote, approve, merge/);
   assert.match(checker.prompt,/complete changed-file list/);
   assert.match(checker.prompt,/before and after/);
   assert.match(checker.prompt,/NOT_READY/);
   assert.equal((checker.prompt.match(/# Output transport/g)||[]).length,1);
   assert.equal(checker.model,f.cfg.agent[roleFor(mode,'risk')].model);
-  assert.equal(checker.steps,f.settings.steps.check);
+  assert.equal(Object.hasOwn(checker,'steps'),false);
   for(const stage of ['functional','risk','verifier']) assert.match(f.cfg.agent[roleFor(mode,stage)].prompt,/## Finding quality/);
   assert.deepEqual(checker.permission,PRIVATE_PERMISSIONS);
   assert.deepEqual(f.cfg.mcp,f.baseline.mcp);
@@ -393,7 +588,7 @@ for(const mode of MODES) for(const native of [true,false]) test(`lightweight che
 });
 
 for(const failing of [false,true]) test(`lightweight checker: input and remaining-budget diagnostics survive failure=${failing}`,async t=>{
-  const f=await fixture(t,{settings:s=>s.debug={enabled:true,directory:'.azpr-debug'},
+  const f=await fixture(t,{settings:s=>{s.debug={enabled:true,directory:'.azpr-debug'};s.runTimeoutSeconds=1200;},
     result:({role,result})=>failing&&role.endsWith('-check')?{...result,snapshot:{}}:result});
   const out=await f.command('pr-check');
   assert.match(out,failing?/] INCOMPLETE/:/] READY/);
@@ -402,6 +597,8 @@ for(const failing of [false,true]) test(`lightweight checker: input and remainin
   const request=JSON.parse(await readFile(join(dir,'01-azpr-review-check.request.json'),'utf8'));
   assert.equal(stage.inputCharacters,JSON.stringify(request.payload).length);
   assert.equal(stage.instructionCharacters,request.instructions.length);
+  assert.equal(Object.hasOwn(stage,'stepLimit'),false);
+  assert.equal(Object.hasOwn(request,'stepLimit'),false);
   assert.ok(stage.remainingRunMsAtStart>0&&stage.remainingRunMsAtStart<=f.settings.runTimeoutSeconds*1000);
   assert.ok(stage.remainingRunMsAtEnd>=0&&stage.remainingRunMsAtEnd<=stage.remainingRunMsAtStart);
   assert.equal(stage.modelRequests,1);assert.equal(f.prompts().length,1);
@@ -1425,18 +1622,15 @@ test('concurrent review and deep commands keep immutable profile-specific agents
   }
   assert.deepEqual(f.cfg,original);
 });
-test('both modes reuse the role policy; only deep adds depth scope and its initial budget',async t=>{
+test('both modes reuse the role policy; only deep adds depth scope',async t=>{
   const f=await fixture(t);
   for(const mode of ['review','deep']) for(const stage of ['check','functional','risk','verifier','comment-plan','comment-publish']) {
-    const agent=f.cfg.agent[roleFor(mode,stage)],spec=ROLES[roleFor(mode,stage)];
-    assert.equal(agent.steps,f.settings.steps[spec.step]);
+    const agent=f.cfg.agent[roleFor(mode,stage)];
+    assert.equal(Object.hasOwn(agent,'steps'),false);
     if(mode==='deep' && ['functional','risk','verifier'].includes(stage)) assert.match(agent.prompt,/# Deep mode scope/);
     else assert.doesNotMatch(agent.prompt,/# Deep mode scope/);
     if(['functional','risk'].includes(stage)) assert.match(agent.prompt,/full snapshot changes/);
   }
-  assert.equal(f.cfg.agent['azpr-review-functional'].steps,60);
-  assert.equal(f.cfg.agent['azpr-deep-functional'].steps,80);
-  assert.equal(f.cfg.agent['azpr-deep-risk'].steps,80);
 });
 test('model selection guidance is documentation only, never forwarded as instructions or input',async t=>{
   const f=await fixture(t,{settings:s=>{s.models._help.functional='PRIVATE_HELP_SENTINEL';}});
@@ -1464,13 +1658,13 @@ test('version two settings reject legacy, unknown, null, and malformed model gro
   settings.models.deep={functional:'fixture/a'};
   assert.equal(validateSettings(settings).deepReady,false);
 });
-test('only missing optional settings receive defaults; explicit nulls fail closed',async t=>{
+test('optional defaults do not turn null into a valid non-budget setting',async t=>{
   const f=await fixture(t);
-  for(const key of ['enabled','$schema','auxiliaryModels','returnReport','runTimeoutSeconds','maxStageCharacters','comments','debug','structuredOutput','outputLanguage']) assert.throws(()=>validateSettings({...f.settings,[key]:null}),undefined,key);
+  for(const key of ['enabled','$schema','auxiliaryModels','returnReport','comments','debug','structuredOutput','outputLanguage']) assert.throws(()=>validateSettings({...f.settings,[key]:null}),undefined,key);
   const minimal=jclone(f.settings);
-  for(const key of ['enabled','auxiliaryModels','returnReport','runTimeoutSeconds','maxStageCharacters','comments','debug','structuredOutput','outputLanguage']) delete minimal[key];
+  for(const key of ['enabled','auxiliaryModels','returnReport','runTimeoutSeconds','comments','debug','structuredOutput','outputLanguage']) delete minimal[key];
   const defaults=validateSettings(minimal);
-  assert.equal(defaults.enabled,true);assert.equal(defaults.runTimeoutSeconds,1200);assert.equal(defaults.returnReport,'receipt');
+  assert.equal(defaults.enabled,true);assert.equal(defaults.runTimeoutSeconds,null);assert.equal(defaults.returnReport,'receipt');
   const invalid=await fixture(t,{settings:s=>s.enabled=null});
   assert.deepEqual(invalid.cfg,invalid.baseline);await assert.rejects(invalid.command(),/enabled/);assert.equal(invalid.calls.length,0);
 });

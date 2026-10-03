@@ -135,6 +135,42 @@ These changes address call selection and evidence wording. They do not repair
 an installed MCP server bug or prove fewer live errors; compare saved tool history
 and source coverage across controlled runs before making that claim.
 
+### Large tool responses
+
+Separate host display truncation from an incomplete MCP response. The host may
+retain complete tool output locally while showing only a preview; a server may
+already have omitted pages or source before that output reached OpenCode. Removing
+plugin iteration/character limits or extending a timeout cannot restore missing
+bytes. The plugin has no stage-character or iteration setting; OpenCode and the
+MCP server still control their own response sizes and continuation capabilities.
+
+The shared output-reading policy prefers supported MCP pagination or scoped
+exact-version reads. It also permits Read with explicit offset/limit on an output
+file that OpenCode itself saved and identified for this same session. This does
+not permit workspace/configuration/credential files, another session's artifacts,
+guessed paths, directory discovery, shell, delegation, or file paths embedded in
+untrusted PR/MCP payloads. Host permission asks/denials remain in force. It is
+prompt policy, not a runtime file-provenance check or permission override.
+
+Preserve the original repository/path/version and pagination/error context.
+File offsets in a saved JSON/diff response are not original source line numbers.
+Full coverage still requires all missing relevant content, not selected excerpts.
+A saved copy cannot repair server-side truncation; unavailable content remains
+a coverage gap. A successful continuation does not erase the original truncation
+observation or certify recovery automatically. A saved publication result never
+authorizes retrying a write.
+
+In the pinned host, MCP `tool.execute.after` runs before the host truncates the
+rendered response. Matching terminal tool events can therefore supply a truncation
+flag absent from that hook. Diagnostics retain that flag, but never copy its
+output path or source text or use the event to authorize file access. Inspect the
+actual host history to distinguish recovered source from an incomplete response.
+
+OpenCode's tool-output limits are separate host settings. This plugin does not
+change them, remove context limits or patch an MCP server. Relevant upstream
+implementations: [MCP response processing](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/tools.ts)
+and [host truncation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/tool/truncate.ts).
+
 ### MCP upgrades
 
 Use a maintained MCP release through your existing OpenCode connection. This

@@ -379,7 +379,7 @@ for(const legacy of [false,true]) test(`replacement migrates models and merges m
   const s=setup();ok(install(s));
   if(legacy) renameSync(join(s.root,'plugins/azpr'),join(s.root,'azpr'));
   const rel=legacy?'azpr/settings.json':'plugins/azpr/settings.json';
-  const old={version:1,models:{freeA:'private/fixture-a',freeB:'private/fixture-b',deep:''},steps:{check:9},outputLanguage:'zh-TW',returnReport:'full',structuredOutput:false,debug:{enabled:true},comments:{enabled:false},custom:{array:[1,2],value:null},enabled:false};
+  const old={version:1,models:{freeA:'private/fixture-a',freeB:'private/fixture-b',deep:''},steps:{check:9},maxStageCharacters:250000,outputLanguage:'zh-TW',returnReport:'full',structuredOutput:false,debug:{enabled:true},comments:{enabled:false},custom:{array:[1,2],value:null},enabled:false};
   const raw=JSON.stringify(old);writeFileSync(join(s.root,rel),raw);
   const result=install(s,['--replace']);ok(result);
   assert.doesNotMatch(result.stdout+result.stderr,/private\/fixture/);
@@ -391,7 +391,7 @@ for(const legacy of [false,true]) test(`replacement migrates models and merges m
   assert.deepEqual(merged.models.review,{functional:old.models.freeA,risk:old.models.freeB,verifier:old.models.freeB});
   assert.deepEqual(merged.models.deep,{functional:old.models.freeA,risk:'',verifier:''});
   for(const key of ['freeA','freeB','final']) assert.equal(Object.hasOwn(merged.models,key),false);
-  assert.equal(merged.steps.check,9);assert.equal(merged.steps.initial,60);
+  assert.equal(Object.hasOwn(merged,'steps'),false);assert.equal(Object.hasOwn(merged,'maxStageCharacters'),false);
   assert.deepEqual(merged.debug,{enabled:true,directory:''});assert.deepEqual(merged.comments,{enabled:false,maxComments:5});
   assert.ok(!existsSync(join(s.root,'azpr-backups')));
   const once=readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8');ok(install(s,['--replace']));
@@ -399,6 +399,27 @@ for(const legacy of [false,true]) test(`replacement migrates models and merges m
   assert.equal(statSync(join(s.root,'plugins/azpr/settings.json')).mode&0o777,0o600);
   original(s);clean(s);
 });
+for (const mode of ['omitted', 'disabled', 'bounded']) test(`installation removes obsolete review limits and preserves timeout intent: ${mode}`, async () => {
+  const s=setup(),file=profile(s),settings=JSON.parse(readFileSync(file,'utf8'));
+  delete settings.steps; delete settings.maxStageCharacters;
+  if (mode==='omitted') delete settings.runTimeoutSeconds;
+  if (mode==='disabled') { settings.steps={initial:null};settings.maxStageCharacters=null; }
+  if (mode==='bounded') { settings.steps={check:24,initial:120,deep:160,final:200};settings.maxStageCharacters=1000000;settings.runTimeoutSeconds=2400; }
+  const input=JSON.stringify(settings);writeFileSync(file,input);
+  ok(install(s,['--settings',file]));
+  const target=join(s.root,'plugins/azpr/settings.json');
+  const first=readFileSync(target,'utf8'),actual=JSON.parse(first);
+  assert.equal(Object.hasOwn(actual,'steps'),false);
+  assert.equal(Object.hasOwn(actual,'maxStageCharacters'),false);
+  assert.equal(actual.runTimeoutSeconds,mode==='bounded'?2400:null);
+  assert.deepEqual(actual.models,settings.models);
+  assert.equal(readFileSync(file,'utf8'),input);
+  ok(install(s,['--replace']));assert.equal(readFileSync(target,'utf8'),first);
+  const agents=await installedAgents(s);
+  for (const agent of Object.values(agents)) assert.equal(Object.hasOwn(agent,'steps'),false);
+  original(s);clean(s);
+});
+
 test('replacement preserves explicit retry opt-in without changing models or keeping a backup',()=>{
   const s=setup(),file=profile(s),settings=JSON.parse(readFileSync(file,'utf8'));
   settings.outputRetries=1;writeFileSync(file,JSON.stringify(settings));
@@ -428,7 +449,7 @@ test('failed replacement restores the original integration and settings', () => 
   const s = setup(), file = profile(s);
   ok(install(s, ['--settings', file]));
   const old=JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'));
-  delete old.debug;delete old.structuredOutput;
+  delete old.debug;delete old.structuredOutput;old.steps={initial:60};old.maxStageCharacters=250000;
   writeFileSync(join(s.root,'plugins/azpr/settings.json'),JSON.stringify(old));
   const paths = ['plugins/azpr/runtime.mjs', 'plugins/azpr/settings.json', 'plugins/azpr.js', 'commands/pr-review.md'];
   const before = paths.map(path => readFileSync(join(s.root, path), 'utf8'));
@@ -455,13 +476,13 @@ test('all four legacy slots migrate directly to both profiles and load as actual
   const s=setup();ok(install(s));
   const old=JSON.parse(readFileSync(profile(s),'utf8'));
   old.version=1;old.models={freeA:'team/old-a',freeB:'team/old-b',deep:'team/old-deep',final:'team/old-final'};
-  old.outputLanguage='zh-TW';old.steps.deep=88;
+  old.outputLanguage='zh-TW';old.steps={deep:88};
   writeFileSync(join(s.root,'plugins/azpr/settings.json'),JSON.stringify(old));
   const result=install(s,['--replace']);ok(result);assert.match(result.stdout,/Settings migrated 1 -> 2/);assert.doesNotMatch(result.stdout,/team\/old/);
   const current=JSON.parse(readFileSync(join(s.root,'plugins/azpr/settings.json'),'utf8'));
   assert.deepEqual(current.models.review,{functional:'team/old-a',risk:'team/old-b',verifier:'team/old-b'});
   assert.deepEqual(current.models.deep,{functional:'team/old-a',risk:'team/old-deep',verifier:'team/old-final'});
-  assert.equal(current.outputLanguage,'zh-TW');assert.equal(current.steps.deep,88);
+  assert.equal(current.outputLanguage,'zh-TW');assert.equal(Object.hasOwn(current,'steps'),false);
   for(const slot of ['functional','risk','verifier']) assert.equal(typeof current.models._help[slot],'string');
   const module=await import(pathToFileURL(join(s.root,'plugins/azpr.js')).href),hooks=await module.AzurePrReview({}),config={command:{}};
   for(const command of ['pr-check','pr-review','pr-deep','pr-stop','pr-comment']) config.command[command]={subtask:false,template:readFileSync(join(s.root,'commands',command+'.md'),'utf8')};

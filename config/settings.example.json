@@ -18,12 +18,6 @@
       "verifier": ""
     }
   },
-  "steps": {
-    "check": 24,
-    "initial": 60,
-    "deep": 80,
-    "final": 100
-  },
   "comments": {
     "enabled": false,
     "maxComments": 5
@@ -39,6 +33,5 @@
     "directory": ""
   },
   "outputLanguage": "en",
-  "runTimeoutSeconds": 1200,
-  "maxStageCharacters": 250000
+  "runTimeoutSeconds": null
 }

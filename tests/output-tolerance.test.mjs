@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as output from '../src/output.mjs';
 import { ROLES } from '../src/config.mjs';
 
-const settings = { structuredOutput: false, maxStageCharacters: 50000 };
+const settings = { structuredOutput: false };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
 const parse = (text, role = 'azpr-review-functional', overrides = {}) => output.parseReviewJSONReport(response(text), { ...settings, ...overrides }, role);
 
@@ -21,7 +21,7 @@ for (const role of ['azpr-review-functional', 'azpr-review-risk', 'azpr-review-v
       { action: 'remove-trailing-comma', offset: raw.length - 2 },
     ]);
     assert.equal(JSON.stringify(before), saved);
-    assert.throws(() => output.parseJSONReport(before, settings), /required JSON envelope/);
+    assert.throws(() => output.parseJSONReport(before), /required JSON envelope/);
     assert.deepEqual(parse(valid, role), { envelope: expected, corrections: [] });
   });
 }
@@ -70,7 +70,6 @@ test('syntax tolerance is limited to completed normal text reviews with a valid 
   }
   assert.throws(() => parse(raw, 'unknown'));
   assert.throws(() => parse(raw, undefined, { structuredOutput: true }));
-  assert.throws(() => parse(raw, undefined, { maxStageCharacters: raw.length - 1 }));
   assert.throws(() => parse('{"status":"CCOMPLETE",}'), /status/);
   for (const finish of ['length', 'content-filter', 'error', 'cancelled', 'tool-calls', undefined]) {
     const value = response(raw); value.info.finish = finish;
@@ -82,7 +81,7 @@ test('syntax tolerance is limited to completed normal text reviews with a valid 
   assert.deepEqual(output.parseReviewJSONReport(native, settings, 'azpr-review-functional'), { envelope: native.info.structured, corrections: [] });
 });
 
-test('deeply nested JSON uses bounded input size without recursive normalization', () => {
+test('deeply nested JSON is normalized without recursion', () => {
   const raw = '{"status":"COMPLETE","nested":' + '['.repeat(2000) + '0' + ',]'.repeat(2000) + ',}';
   const prepared = parse(raw);
   assert.equal(prepared.corrections.length, 2001);

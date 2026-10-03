@@ -414,8 +414,8 @@ function trailingCommaCandidate(content) {
 }
 
 /** Strict parsing remains the contract for checks, comments and amendments. */
-export function parseJSONReport(response, settings) {
-  return parseReport(response, settings).envelope;
+export function parseJSONReport(response) {
+  return parseReport(response).envelope;
 }
 
 /** Normal review text only; callers must validate the complete envelope before
@@ -425,7 +425,7 @@ export function parseReviewJSONReport(response, settings, role) {
   return parseReport(response, settings, role);
 }
 
-function parseReport(response, settings, role) {
+function parseReport(response, settings = {}, role) {
   const finish = String(response.info?.finish ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
   if (response.info?.error) {
     const name = String(response.info.error.name ?? 'UnknownError').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
@@ -437,10 +437,9 @@ function parseReport(response, settings, role) {
   let result, corrections = [];
   if (response.info?.structured !== undefined) {
     result = response.info.structured;
-    if (JSON.stringify(result).length > settings.maxStageCharacters) throw new Error('Oversized structured reviewer output; nothing was silently truncated.');
   } else {
     let content = visibleText(response).trim();
-    if (!content || content.length > settings.maxStageCharacters) throw new Error(`Empty or oversized reviewer output (characters=${content.length}; finish=${finish}); inspect the session export or debug response.`);
+    if (!content) throw new Error(`Empty reviewer output (finish=${finish}); inspect the session export or debug response.`);
     // Never guess between multiple envelopes. The scoped review extension may
     // remove only grammar-checked trailing separators, never infer missing data.
     const fences = [...content.matchAll(/^```(?:json)?[^\S\r\n]*\r?\n([\s\S]*?)^```[^\S\r\n]*$/gmi)];
@@ -471,7 +470,7 @@ function parseReport(response, settings, role) {
 
 /** Only the scoped amendment caller may use this transport compatibility path.
  * Never ignore a general host error, extract a substring, or repair JSON. */
-export function parseAmendmentText(response, settings) {
+export function parseAmendmentText(response) {
   const info = response?.info, error = info?.error;
   if (info?.role !== 'assistant' || info.finish !== 'stop' || info.structured !== undefined ||
       !isObject(error) || error.name !== 'StructuredOutputError' ||
@@ -479,9 +478,8 @@ export function parseAmendmentText(response, settings) {
       error.data.message !== 'Model did not produce structured output' || error.data.retries !== 0 ||
       Object.keys(error.data).some(key => !['message', 'retries'].includes(key)) ||
       !Array.isArray(response.parts) || response.parts.some(part => part.type === 'tool')) return;
-  const visible = response.parts.filter(part => part.type === 'text' && !part.ignored && !part.synthetic).map(part => part.text ?? '').join('\n');
-  const content = visible.trim();
-  if (!content || visible.length > settings.maxStageCharacters) throw new Error('Empty or oversized amendment text; no transport fallback was accepted.');
+  const content = response.parts.filter(part => part.type === 'text' && !part.ignored && !part.synthetic).map(part => part.text ?? '').join('\n').trim();
+  if (!content) throw new Error('Empty amendment text; no transport fallback was accepted.');
   let result;
   try { result = JSON.parse(content); } catch { throw new Error('Amendment text must be one complete JSON object; no JSON repair or extraction is allowed.'); }
   if (!isObject(result)) throw new Error('Amendment text must be a JSON object.');

@@ -11,9 +11,9 @@ replace=0
 usage() {
   cat <<'TXT'
 Usage: sh install.sh [--settings FILE] [--replace] [--config-dir DIR]
-  --settings    Select a trusted JSON profile; convert roles and add missing defaults.
+  --settings    Select a trusted JSON profile; migrate fields and add missing defaults.
   --replace     Convert settings and replace this integration without keeping backups.
-                Preserve values and add missing defaults unless --settings selects another profile.
+                Remove obsolete limits; preserve other values and add missing defaults.
   --config-dir  OpenCode configuration directory (default: XDG_CONFIG_HOME/opencode).
 Python 3 (standard library only) is required to merge JSON safely.
 No npm install, pip packages, jq, sudo, or network access is required.
