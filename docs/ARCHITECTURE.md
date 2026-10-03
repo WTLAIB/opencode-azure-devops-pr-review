@@ -156,10 +156,10 @@ publishable completed review. Cancelling or failing a refreshed comment preview
 invalidates both the previous and newly prepared plan. Publication attempts remain
 uncertain/reported records and are never automatically retried or rolled back.
 
-Stage diagnostics record serialized input and plugin instruction character counts,
-the configured step limit and remaining whole-run milliseconds at attempt start/end
-(null when disabled). These observations
-do not alter a deadline, reserve stage time, impose a new iteration limit or add
+Stage diagnostics record serialized input and plugin instruction character counts
+and remaining whole-run milliseconds at attempt start/end (null when the timeout
+is disabled). These observations do not alter a deadline, reserve stage time,
+impose a new iteration limit or add
 instructions to model inputs. Host prompts, tools, history and billable tokens
 are outside those character counts.
 

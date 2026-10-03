@@ -168,8 +168,9 @@ Trailing-comma tests cover normal/deep initial and final text, raw preservation,
 exact correction offsets, nested objects/arrays, escapes, quoted source punctuation,
 and unchanged values. Negative cases reject holes, doubled/leading commas, missing
 values/brackets, invalid tokens, multiple envelopes, duplicate/escaped-equivalent
-keys, bad finishes and oversized data. Runtime tests keep full evidence, coverage,
-versions and original-ID validation, and ensure a failed normalized candidate cannot
+keys and bad finishes. Complete large envelopes are accepted without a plugin
+character limit. Runtime tests keep full evidence, coverage, versions and
+original-ID validation, and ensure a failed normalized candidate cannot
 unlock a model amendment. Checks, native transport, comments and amendments remain
 strict. Historical failures replayed offline remain historical failures; no absent
 verifier is inferred to have completed.
