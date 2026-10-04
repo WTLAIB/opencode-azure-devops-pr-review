@@ -23,3 +23,12 @@ jobs:
           node-version: '22'
       - run: npm run check
       - run: npm test
+      - name: Install the exact V1 host into a disposable prefix
+        if: matrix.os == 'ubuntu-22.04'
+        run: npm install --prefix "$RUNNER_TEMP/azpr-v1-host" --no-audit --no-fund opencode-ai@1.18.31
+      - name: Exercise native output and the fresh installed package
+        if: matrix.os == 'ubuntu-22.04'
+        run: node tests/host-v1-smoke.mjs "$RUNNER_TEMP/azpr-v1-host/node_modules/.bin/opencode"
+      - name: Exercise text output and package replacement
+        if: matrix.os == 'ubuntu-22.04'
+        run: node tests/host-v1-smoke.mjs "$RUNNER_TEMP/azpr-v1-host/node_modules/.bin/opencode" --text --replace

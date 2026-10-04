@@ -139,7 +139,7 @@
     "structuredOutput": {
       "type": "boolean",
       "default": true,
-      "description": "Use the OpenCode 1.18.31 StructuredOutput transport for review envelopes. Set false explicitly when complete native submissions are unreliable; JSON text keeps the same evidence validation and rejects duplicate keys or incomplete finish reasons. No automatic transport or model fallback. An authorized output amendment may accept complete JSON text after the pinned missing-native error, with full validation and an explicit notice."
+      "description": "Use V1 native StructuredOutput for capture (default). Review schemas describe preferred fields; local adapters retain incomplete observations with limitations. False explicitly selects JSON text. Source checks and comments keep strict contracts."
     },
     "shellToolPermission": {
       "enum": ["deny", "ask"],
@@ -151,7 +151,7 @@
       "minimum": 0,
       "maximum": 1,
       "default": 0,
-      "description": "Opt in to one shared status/location/merge amendment or complete final content resubmission per stage. Narrow amendments preserve existing fields; final resubmission may replace evidence and decisions only with a matching frozen snapshot and known unchanged current source/target versions. Same stopped verifier context, configured model, one request, no ordinary tools, unchanged deadline, full validation and retained original failures. Status-only initial responses cannot regenerate a review. Provider errors, invalid outer JSON, truncation, unknown/stale versions, cancellation, unconfirmed aborts and comments do not qualify. A scoped amendment may accept complete JSON text after the pinned missing-native error with disclosure. Extra model usage may be billed."
+      "description": "Optional source-check status amendment only: 0 disables it; 1 permits one isolated status-only request after all other check contracts pass. Review output recovery is local and never adds a model request."
     },
     "debug": {
       "type": "object",

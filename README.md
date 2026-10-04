@@ -121,7 +121,8 @@ prevent native argument expansion before the plugin handles this text.
 
 Normal and deep reviews start the initial reviewers directly. Each reads PR
 identity and source/target commit references, requests the changed files, and
-reviews them. The runtime compares identities/versions before verification.
+reviews them. The runtime compares identities/versions and passes disagreements
+as explicit limitations to the verifier.
 `/pr-check` remains an optional separate diagnostic with stricter cumulative
 readiness requirements; its result is not a prerequisite or cached review input.
 
@@ -131,7 +132,7 @@ path. It does not guarantee fewer live errors or faster models. See
 
 ### Optional PR comments
 
-The workflow never starts a publishing stage automatically; reviewer prompts prohibit modifications. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a complete review, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use the originating review's `risk` model: `models.review.risk` or `models.deep.risk`. They do not rerun the review, even if another mode has since completed.
+The workflow never starts a publishing stage automatically; reviewer prompts prohibit modifications. To enable publishing, set `comments.enabled: true` in your installed settings **before reviewing**, then restart OpenCode. After a review satisfying all publication contracts, run `/pr-comment <review-id>` to inspect a read-only preview, then `/pr-comment <review-id> --publish` in the same original conversation/process. Both stages use the originating review's `risk` model: `models.review.risk` or `models.deep.risk`. They do not rerun the review, even if another mode has since completed.
 
 The shared `outputLanguage` setting controls the final report and comment prose. The default policy posts at most five confirmed, actionable defects as short inline threads, with no long summary or cosmetic nits. The runtime validates the saved plan's format and passes it unchanged to the publisher. The model chooses tools from OpenCode and is instructed to verify HEAD, anchors, and duplicates, then create only the saved comments. There are no hardcoded MCP names, action filters, or provider-specific response adapters. No votes, approvals, merges, or existing-thread edits are authorized by the prompts. Publishing requires host/server permission and is disabled by default. A success receipt is explicitly `MODEL_REPORTED_POSTED`, not independently verified by the plugin. See [comment policy, setup, and limitations](docs/COMMENTING.md).
 
@@ -236,25 +237,25 @@ Omitting `runTimeoutSeconds` also disables it; an explicit integer from 10 to 72
 enables a timeout in seconds. Zero, strings and `Infinity` are not disable values.
 No private agent receives a host iteration limit, and a disabled timeout creates
 no whole-command timer. Manual cancellation,
-native-tool guards, bounded output amendments and SDK cleanup remain in effect.
+native-tool guards, source-check status amendments and SDK cleanup remain in effect.
 Model/context limits and OpenCode/MCP tool-output truncation remain separate.
 More iterations cannot restore missing source; see
 [large tool responses](docs/AZURE_MCP.md#large-tool-responses).
 
 Each initial establishes a `scope: "pr"` snapshot: repository identity, PR ID,
-PR-reported source/target SHAs and discovered changed paths. The PR ID must match
-the URL. Both initials must agree on identity and versions; different file order
-or discovery lists become a sorted union for the verifier to inspect. Original
-lists and coverage remain in the reports. This is not proof of a common ancestor
-or of independently complete file discovery.
+PR-reported source/target SHAs and discovered changed paths. Matching snapshots
+contribute a sorted union of paths. Conflicting or unavailable initial metadata
+remains explicit in the verifier handoff; it is never replaced with invented SHAs.
+The verifier must establish the requested PR independently. Original observations
+and coverage remain available. This is not proof of a common ancestor or complete discovery.
 
 The verifier rereads the same PR and returns `currentHead` and `currentBase`.
 A changed source or target reference gives `STALE`; an unknown version gives
-`INCOMPLETE`. Commit timestamps cannot substitute for SHAs. PR metadata may lag
-branch changes; this is not an atomic server-side guarantee. Missing source gives
-PARTIAL with concrete gaps, not invented values. Incomplete initials prevent
-verification, circular finding merges remain invalid, and no review reruns
-automatically.
+`PARTIAL`. Commit timestamps cannot substitute for SHAs. PR metadata may lag
+branch changes; this is not an atomic server-side guarantee. Incomplete initial
+observations can still reach verification. Missing evidence, circular merges and
+unresolved original IDs remain disclosed and cannot authorize comments. No review
+is rerun automatically.
 
 ## Reports and cancellation
 
@@ -268,7 +269,7 @@ The default is `en` (English), including when the field is omitted. Other exampl
 
 Final human-readable finding fields, disposition reasons, the brief report, comment prose, and comment skip explanations are localized. Intermediate reviews, status receipts, JSON keys/status values, finding IDs, code identifiers, paths, and source quotes remain unchanged. The runtime passes the language to the final-verifier and comment roles in each profile; actual language quality depends on the model. No translation model or extra review stage is added.
 
-With the default `returnReport: "receipt"`, your original conversation gets the run status, session IDs, and model IDs. The runtime attempts to append the complete Markdown report to the last review session without invoking a model. When that display succeeds, use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version. If display fails, inspect the original structured fields and any saved diagnostic report instead. The aggregate diagnostic result records `displayed: false`; display failure alone does not rerun the review or invalidate its validated findings. Diagnostic files are available only when debug logging was enabled and writing succeeded.
+With the default `returnReport: "receipt"`, a COMPLETE review returns the run status, session IDs, and model IDs. PARTIAL/STALE results and incomplete drafts include their available report body so useful observations remain accessible. The runtime attempts to append the complete Markdown report to the last review session without invoking a model. When that display succeeds, use OpenCode's child-session navigation to inspect it; exact controls depend on your installed version. If display fails, inspect the original structured fields and any saved diagnostic report instead. The aggregate diagnostic result records `displayed: false`; display failure alone does not rerun the review or invalidate its validated findings. Diagnostic files are available only when debug logging was enabled and writing succeeded.
 
 Set `returnReport: "full"` to include the final report in the original conversation. This uses additional conversation context. Both return modes use identical review requests and output validation; switching modes is not a JSON-error recovery mechanism. The main agent is instructed to reproduce the report verbatim in its configured language, including the provenance section, without an English-only presentation instruction. Its rendering is still model-dependent; a successfully appended child-session report or saved debug `report.md` preserves the runtime's version.
 
@@ -289,145 +290,52 @@ Saved inline comments also contain an AI/model attribution footer and a notice t
 
 ### Output reliability and private debug files
 
-By default, `structuredOutput: true` supplies a JSON schema through OpenCode
-1.18.31's native output mechanism. A captured tool call can still omit required
-review content. If your model/provider cannot reliably submit complete native
-envelopes, explicitly set `structuredOutput: false` and restart to use JSON text.
-This changes transport without changing models, adding retries or relaxing
-snapshot, coverage, finding and disposition validation. A single unambiguous
-JSON fence is supported. Raw and fenced JSON text reject duplicate keys, including
-escaped-equivalent spellings, before any field value is accepted. Native output
-arrives as an already parsed object, so the plugin cannot determine whether its
-upstream serialization contained duplicate keys. Both transports reject missing
-or ambiguous required content and responses marked truncated, filtered, errored
-or cancelled; neither supplies missing evidence. One narrow text-only syntax
-exception is described below.
+Reviews prefer structured JSON, but useful observations survive small formatting
+errors and incomplete fields. Both initial reviewers still hand their available
+results to the verifier. No model is called just to repair review formatting.
 
-Envelope, snapshot, coverage and disposition objects reject unknown fields in
-both transports, including legacy final submissions. Empty-string/null extras at
-those levels are also rejected. Runtime validation and value-free diagnostics
-share the declared key catalogs; conditional evidence, coverage, version and
-original-finding-ID checks remain mandatory. The finding-only normalization
-below does not remove extra fields elsewhere or add missing required values.
+- Local syntax recovery handles trailing commas, redundant/missing complete
+  delimiters, missing separators, bare keys, single/smart quotes and comments.
+  String values remain unchanged. Raw responses and correction records are retained.
+- Known field spelling, status/severity case, numeric PR IDs and complete SHA
+  quote wrappers are normalized. Extra fields and conflicting aliases remain
+  visible; conflicting values prevent full contract acceptance.
+- Prose, ambiguous JSON and status-only objects remain literal unstructured
+  observations. Missing evidence or coverage is disclosed, never fabricated.
+- Missing/repeated initial IDs receive unique bookkeeping IDs, preserving the
+  supplied IDs. Missing final decisions become `UNREVIEWED` rows alongside the
+  original observations. No rejection or confirmation is inferred.
+- `COMPLETE` means a usable structured verifier result. `PARTIAL` retains useful
+  output with limitations. Changed reported source/target versions stay `STALE`.
+  Model factual quality must be assessed separately from all three statuses.
 
-Status-only initial/final submissions remain incomplete in both modes. Compare
-the raw response with its requested schema before selecting a transport, and
-validate the new mode on a separate authorized run. A successful sample is not
-a guarantee for other models, PRs or host versions. There is no automatic switch.
+The default `structuredOutput: true` uses the V1 host's StructuredOutput tool.
+Its review schema describes preferred fields and accepts incomplete content for
+local assessment. `structuredOutput: false` explicitly selects JSON text. Neither
+mode changes model selection, evidence policy, cancellation or native-tool guards.
+One exact V1 transport condition is recoverable: a stopped assistant response with
+only `StructuredOutputError: Model did not produce structured output` and zero
+native retries can retain its already-returned text. This is disclosed locally;
+general provider errors, truncated/filtered/cancelled output and response identity
+mismatches are not accepted as review evidence. The existing native invalid-call
+limit remains in place.
 
-Role prompts include only the selected transport's submission instructions.
-The verifier's current-head field uses a simple string schema for tool-parser
-compatibility. An unknown head remains INCOMPLETE; this never relaxes the full
-SHA comparison required for a completed review.
+Readable output does not automatically qualify for PR comments. Both initials,
+final evidence, original-ID decisions and PR identity/version contracts must all
+pass before a review is cached for preview/publication. A COMPLETE verifier can
+coexist with an initial limitation and `Publication unavailable`.
 
-Normal initial/verifier JSON text with finish=stop may contain trailing commas
-after complete object members or array values. A grammar-aware scan removes only
-those separators; strings, keys and values stay unchanged. Leading/double commas,
-array holes, missing values/brackets, duplicate keys and all other malformed JSON
-still fail. Full envelope validation is required, including a valid role status;
-this cannot unlock an extra model amendment when validation fails. Native output,
-source checks, comments and amendment sessions retain strict syntax parsing.
+`outputRetries: 1` now permits only one status-only amendment for standalone
+`/pr-check`, when all other strict check contracts pass. It uses a new same-model
+session, no ordinary tools and one request; default is zero. Review content and
+format failures do not start amendments or resubmissions. Comment workflows remain
+strict and never retry automatically. See [output troubleshooting](docs/DEBUGGING.md).
 
-Finding output tolerates surrounding ASCII whitespace on an otherwise exact
-field name and unknown fields whose value is exactly `""` or `null`. A redundant
-CONFIRMED V disposition may also be removed when its complete finding exactly
-matches the sole same-ID newFindings entry. Original F/R dispositions remain
-complete and unique; the removed row and reason stay in the raw response.
-Required values stay unchanged. The complete envelope must then
-pass validation; missing evidence, conflicting keys and content-bearing extras
-still fail with field-specific diagnostics. Accepted changes appear as
-`output-format-corrections=N` in receipts and `outputFormatCorrections` in stage
-results; raw responses remain available for inspection. This adds no model call
-and does not consume the amendment allowance or change source checks/comments.
-
-Initial candidates may omit only their separate `location` field. The runtime
-records `pendingLocations`, shows `pending-locations=N` in receipts, and passes
-those IDs to the verifier without guessing locations or requesting an initial
-location amendment. Evidence and full coverage remain required. Final CONFIRMED
-findings and new discoveries still need locations; unresolved candidates must
-be NEEDS_INFO and cannot become PR comments.
-
-With native output, two rejected `StructuredOutput` submissions in one review
-session stop the run as `INCOMPLETE`. The host may continue after the first
-rejection; the plugin adds no request or session and never edits the arguments.
-Output-repair and comment sessions stop on the first rejection. This guard is
-independent of `outputRetries` and only observes the host's built-in `invalid`
-tool for structured submissions. It is not a general provider retry/spending cap.
-Receipts show `invalid-structured-output=N` when any rejection was observed.
-
-All host `invalid` submissions also contribute to the stage's
-`toolObservations.rejectedSubmissions` and the receipt's
-`rejected-tool-submissions=N`, including rejected MCP tool requests. Repeated
-delivery of the same call ID counts once. These are rejected submissions, not
-MCP execution failures or successful source reads, even if the host marks its
-invalid handler completed. The count can overlap structured-output and
-blocked-native counters; do not add them as unique failures. The counter does not
-copy requested tool names, arguments or rejection text. It adds no retry and does
-not change guard thresholds or evidence validation. Older artifacts without the
-field have unknown rejection counts, not zero. See [tool diagnostics](docs/DEBUGGING.md#receipt-versus-full).
-
-Optional `outputRetries: 1` allows **one bounded amendment per review stage**:
-
-- An invalid top-level status such as `CCOMPLETE`: the same model returns only
-  a status in a fresh session; all other fields remain immutable.
-- Absent `location` fields in otherwise valid COMPLETE verifier findings:
-  the same reviewer gets one request in its original, stopped session to retain
-  its own source context. It returns only the requested IDs and source locations.
-  Existing field values stay unchanged; no tool/source work is repeated. If the
-  location cannot be established from that context, the stage remains incomplete.
-
-- Missing original disposition rows in an otherwise valid COMPLETE verifier
-  submission: one request in the same stopped session may add only MERGED rows
-  pointing to already confirmed original findings. All missing IDs must be
-  accounted for from that verifier's existing source context. If any merge is
-  unproven or needs changes to an existing finding, the amendment must decline.
-  No merge is inferred from prose or supplied by the runtime.
-
-- Other output-validation failures in a parsed COMPLETE verifier submission:
-  one complete final content resubmission in the same stopped session. Snapshot
-  identity/file set and the already observed current source/target versions must
-  match the expected PR and remain frozen. The verifier may correct missing
-  evidence or decisions using retained source context. No initial finding is
-  copied as a fallback, and the complete replacement must pass validation.
-
-All cases share one allowance, not one each. Default `0` disables all.
-The first three narrow amendments require every other contract to pass; final
-content resubmission requires the known, unchanged version frame. The original
-session must have a completed tool call and a confirmed abort. Repair grants
-deny ordinary tools and a second model request. The complete amended envelope
-is validated again. Original failures, `retry-kind`, attempt/session IDs and
-amendment/resubmission notices remain visible in receipts and diagnostics. Final
-resubmission is model-authored content recovery, with extra usage, not local
-formatting or proof of source truth. Provider errors, invalid outer JSON, truncation,
-unknown/stale versions, cancellation and unconfirmed aborts do not qualify.
-A status-only initial response still cannot regenerate a review. The plugin
-never extracts guessed locations from report text; amended locations are model
-claims, not independently verified source facts.
-
-An authorized amendment can accept one complete JSON text object when the only
-host error is `StructuredOutputError` for a missing native submission and the
-response ends with `stop`. This requires the same active grant, one model request,
-no tool attempts or rejected submissions, and full amendment/envelope validation.
-No extra request is made. `output-transport=json-text` and a receipt notice disclose
-the change; the original error remains in diagnostics. Truncated or ambiguous
-JSON, duplicate keys, general host/provider errors and cancellations still fail.
-Normal review submissions and comment sessions do not use this fallback.
-
-Normal reviewers receive only their full-review instructions. The bounded
-amendment instructions replace the reviewer prompt only in an authorized repair
-session; enabling retries does not expose an alternative output format to normal
-reviews. If the host cannot apply that isolated prompt, repair stops before a
-model request. Provider/host system context and ordinary agents are preserved.
-
-This does not retry malformed/missing outer JSON, general host/provider errors,
-initial evidence/coverage gaps, changed or unknown PR versions, cancellations, or
-comment preview/publication. Missing final content can qualify only for the
-explicit content resubmission described above. A
-second failure ends that stage. The existing run timeout is not reset. A full
-review has three stages, so enabling this setting permits at most three extra
-amendment requests (one for standalone `/pr-check`); final content recovery can
-replace evidence and decisions. This is not a spending cap or proof of review quality.
-Restart OpenCode after changing the setting. See [bounded output amendments](docs/DEBUGGING.md#bounded-output-amendments).
+Before model sessions start, the plugin checks the selected models and a connected
+MCP in the V1 host catalog. `/pr-stop` also cancels this preflight. A connected MCP
+is not proof of Azure authorization or correct source reads. Private auxiliary
+and compaction requests are blocked through V1 hooks; ordinary agents retain their
+configuration. V1 cannot provide V2's request-kind or retry-decision hooks.
 
 Debug is opt-in and works with both `receipt` and `full`. Add these fields to your existing installed settings (do not replace the entire profile):
 
@@ -463,7 +371,7 @@ during final-report display does not leave a completed review available for
 comments. A cancelled/failed comment preview cannot be published; preview again
 explicitly when appropriate. An uncertain publication attempt must not be retried.
 
-The original conversation and OpenCode's title, summary, or compaction models can still incur their usual costs.
+The original conversation and its auxiliary models can still incur their usual costs. Private-session guards cover the observed V1 hooks, not every host-internal retry or external provider operation.
 
 ## Update, disable, or uninstall
 
@@ -516,7 +424,8 @@ require coverage, counterevidence, and corrected confirmed findings; older custo
 prompts that omit them will fail validation. No new model slot or mandatory
 installation file is needed. Apart from obsolete fields removed above, existing
 private settings are preserved; a missing
-`outputRetries` is added as `0`, leaving recovery off until explicitly enabled.
+`outputRetries` is added as `0`, leaving source-check status amendments off.
+Review syntax recovery and literal PARTIAL delivery do not require this setting.
 A missing `shellToolPermission` is added as `deny`; an explicit `ask` is preserved.
 
 ## Repository layout

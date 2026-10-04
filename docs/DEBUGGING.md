@@ -1,5 +1,20 @@
 # Debugging review output
 
+## Host readiness and request observations
+
+Preflight checks the configured model slots against connected providers and the
+actual V1 capabilities.toolcall flag, plus at least one connected MCP. Failure
+creates no reviewer session. Inspect host status locally without sharing provider
+configuration or credentials. Catalog readiness cannot prove Azure authorization,
+correct version selectors or complete source. Cancellation also covers preflight.
+
+Private auxiliary/compaction requests are denied through V1's available hooks;
+ordinary agents keep their models and permissions. V1 has no V2 model.request kind
+or retry-decision hook. requestObservations records authorizedPrimary and observed
+retry attempt/next metadata, omitting provider error text. These events neither
+retry a request nor prove billing, content validity or complete request coverage.
+Known private-session tracking is process-local; do not claim V2 restart parity.
+
 ## Provider rejection before source reads
 
 A provider error before any MCP call is separate from MCP login or an invalid
@@ -17,32 +32,31 @@ change providers or models, or establish a completed review. See the
 
 ## Incomplete native submissions
 
-A native tool recorded as completed does not establish a valid review. If an
-initial or final response contains only `status`, the review content is missing;
-changing its spelling cannot supply evidence, coverage or dispositions. Compare
-the stored response to the full request schema and check whether any separate
-text exists. Do not infer a model-only, provider-only or host-only cause from the
-stored tool arguments. The OpenCode 1.18.33 [capture path](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts)
-records the tool submission; AZPR's independent validators remain necessary.
+A completed StructuredOutput tool call does not prove review quality or source
+validity. Review capture now accepts partial objects and locally assesses their
+content. A status-only object remains a literal PARTIAL observation; it cannot
+supply missing evidence. Compare the original response, adapted result and warnings.
 
-For repeated incomplete native submissions, explicitly select
-`structuredOutput: false`, restart and evaluate a new authorized review with the
-same model, PR and budgets. This avoids the native submission mechanism while
-retaining the full review contract. It does not resume or repair the failed run.
-Keep both outcomes and compare source coverage and adjudication, not just status.
-JSON text with duplicate keys, including escaped equivalents, fails before any
-value can be accepted; a length/filter/error/cancelled finish also prevents
-acceptance or output recovery. No automatic format switch or model fallback exists.
+The native default and explicit `structuredOutput: false` text mode use the same
+review adapters. A stopped native response with only the exact missing-submission
+StructuredOutputError and zero retries can retain already-returned text locally.
+Its correction record identifies the transport recovery; the original error stays
+in the response artifact. No new model request is added. General provider errors,
+truncated/filtered/cancelled output and mismatched response identity remain failed.
+
+Duplicate raw JSON keys cannot choose a field value, including escaped-equivalent
+keys. The original review text is retained as unstructured data instead. Settings,
+source-check and comment JSON remain strict. Do not infer a provider-only or
+model-only cause without the raw response and tool history.
 
 ## Receipt versus full
 
-For ordinary JSON-text reviews, inspect outputFormatCorrections for accepted
-remove-trailing-comma entries. Their offsets are zero-based UTF-16 positions in
-the selected JSON body, excluding fences/preamble. Compare the unchanged response
-artifact with the validated result; acceptance still requires full validation.
-rejectedOutputFormatCorrections records a syntax-normalized candidate that failed
-validation, not a completed review or a reason to start another model request.
-This extension never applies to checks, comments, native output or amendments.
+For review syntax recovery, inspect outputFormatCorrections and compare the raw
+response artifact with the adapted result. Offsets refer to zero-based UTF-16
+positions in the selected JSON body, excluding fences/preamble. Literal retention
+uses `retain-unstructured-review`. No model request is added. Corrections do not
+certify source truth or erase missing evidence. PARTIAL/STALE reports and drafts
+are enclosed even with returnReport=receipt; COMPLETE reports follow the setting.
 
 `returnReport` changes only what is returned after the workflow. It does not
 change reviewer models, stage prompts, source collection, language settings, or
@@ -110,7 +124,8 @@ attempt, not a failed review stage. Check `displayed` in the aggregate result an
 the saved report. If UI navigation is unavailable, the parent should present the
 receipt and diagnostic location without retrieving or regenerating the report.
 A later explicit diagnostic request can read local artifacts; full return mode
-is an opt-in for including the entire report in the ordinary conversation.
+is an opt-in for enclosing COMPLETE reports. PARTIAL/STALE reports and drafts
+already include their available content.
 
 For repeated source lookups, inspect each initial's calls, snapshot and coverage,
 then the verifier's combined paths. There is no checker handoff in normal/deep
@@ -150,190 +165,55 @@ Primary reference: [OpenCode 1.18.31 export command](https://github.com/anomalyc
 
 ## Output transport
 
-`structuredOutput` defaults to `true`: each role receives a JSON schema using
-`session.prompt.body.format`. The host exposes its `StructuredOutput` tool and
-returns the envelope in `info.structured`. This is a host output mechanism,
-not an ADO tool name or allowlist. The plugin still validates snapshots,
-finding IDs, dispositions, and comment-plan constraints.
+The V1 default uses native StructuredOutput with a permissive review capture
+schema. Preferred field descriptions still tell the model to submit complete
+findings, coverage, PR versions and final decisions. The runtime subsequently
+assesses completeness. Check/comment schemas remain strict.
 
-Initial and final envelopes, snapshots, coverage and disposition objects reject
-unknown fields consistently in native/text transport and legacy final input.
-Diagnostics report trusted paths without copying unknown names/values. Only the
-documented finding-field normalization can remove empty/null extras; it does not
-apply to envelope-level fields. Inspect the unchanged raw response before
-attributing a failure to transport or asking for another authorized evaluation.
+Explicit `structuredOutput: false` omits the native schema and asks for JSON text.
+A single fence is supported. The local parser handles punctuation around complete
+values and preserves supplemental text. Ambiguous JSON or prose stays literal;
+no substring or JSON example is promoted into complete evidence.
 
-Only the chosen transport's submission instructions appear in each role prompt.
-The verifier declares currentHead/currentBase as scalar strings: a full SHA, or an empty
-string only for INCOMPLETE when the current head could not be verified. JSON text
-needs normal JSON string serialization; quotation marks are not part of the SHA
-value passed to a tool. Older null/incomplete envelopes remain readable, but no
-unknown or quoted-inside-the-value head can complete a review.
-
-No extra formatter/reviewer model is started by default. The plugin does not
-rerun full stages or switch models. The opt-in amendments below use the
-same model, with distinct status, missing-location and missing-merge contracts. If a provider cannot use the native mechanism, select
-`structuredOutput: false` locally and restart. Text mode accepts a JSON object
-or one unambiguous fenced object with optional commentary. It does not guess
-among multiple envelopes, repair truncated JSON, or ignore host/model errors.
-
-The baseline host supports this field even though its legacy generated SDK
-types omit it; the JavaScript SDK forwards the supplied body. Compatibility
-must still be tested with the actual provider. See the pinned
-[prompt implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts)
-and [SDK implementation](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/sdk/js/src/gen/sdk.gen.ts).
+Inspect request.format, response.structured/response.text, result.result,
+outputFormatCorrections and reviewWarnings together. A response can be captured
+correctly while its facts remain incomplete. Changing transport requires restart
+and a separately authorized new review; it cannot repair a historical run.
 
 ## Finding-field format notices
 
-`output-format-corrections=N` records local corrections accepted only after full
-stage validation. For example, `" evidence"` can become `"evidence"` without
-changing its text, and `"evidence_note": ""` can be removed without discarding
-content. This does not add a session, call a model, repeat source reads or consume
-the amendment allowance. It applies only to initial/verifier finding objects.
+Known field spelling and enum case can be normalized. Numeric PR IDs and quote
+wrappers around full 40/64-character SHAs are formatting; unknown versions remain
+unknown. Extra fields are retained. Conflicting aliases retain both values and
+prevent full contract acceptance. Missing evidence and coverage remain warnings.
 
-Stage `outputFormatCorrections` lists the trusted field path and action; removed
-empty unknown fields use their original zero-based property index rather than
-echoing potentially private names. Compare the raw `.response.json` with the
-validated `.result.json`. The receipt includes a notice even with debug disabled;
-the original native/text response also remains in its OpenCode session.
+Repeated/missing initial IDs receive bookkeeping IDs while originalId preserves
+the supplied value. The verifier receives all expected IDs and pending locations.
+Missing final decisions become runtime UNREVIEWED rows, not model rejections.
+Inspect original observations and the complete verifier result, especially when
+category arrays and legacy dispositions both appear.
 
-Unknown finding fields whose value is null are also removable, with a distinct
-remove-null-unknown-field action. A single redundant CONFIRMED V disposition may
-be removed only when its complete finding exactly matches the sole same-ID
-newFindings entry; deduplicate-new-finding records both array paths. Original F/R
-accounting remains strict, and the redundant reason stays in the original response.
-
-Conflicting keys, misspellings/case differences, missing/empty evidence and
-content-bearing extra fields still fail. Diagnostics distinguish, for
-example, `findings[0].evidence is missing` from `findings[1].id duplicates an
-earlier finding`, without printing source values. The same rules apply to
-`dispositions[i].verifiedFinding` and `newFindings[i]`. Other envelope fields are
-not normalized, and a failed candidate does not record accepted corrections.
-Count format notices separately from native rejections and model amendments.
-
-A host tool marked completed, or zero invalidStructuredOutputs, does not prove
-schema conformance. Inspect the saved arguments and the plugin's validator
-result; native capture success must not bypass local evidence checks.
+A COMPLETE verifier can follow a PARTIAL initial. Its report remains available,
+but comments are unavailable unless every initial/final publication contract and
+version check passes. A PARTIAL report is useful output with limitations; it does
+not prove that no issue exists. Factual/presentation quality needs separate review.
 
 ## Bounded output amendments
 
-`outputRetries: 1` enables one status, absent final-location, missing merge-disposition
-amendment OR complete final content resubmission per stage, with a shared limit
-of one extra request. Default `0` disables all four recovery paths. This is
-post-response validation and bounded feedback, not a patch to OpenCode's native
-StructuredOutput implementation; native capture can succeed with missing fields.
+`outputRetries: 1` permits only a standalone source-check status amendment when
+all other strict check contracts pass and a tool completed. It uses one fresh
+same-model session, one request, isolated instructions and no ordinary tools.
+Original evidence is immutable. Cancellation, unknown abort state, missing hooks,
+changed fields, provider errors and repeated requests prevent acceptance.
 
-### Status
+The exact V1 completed missing-native error may allow one complete text object
+within that already authorized check amendment, with the original validators.
+It is recorded as outputTransportFallback and never starts another request.
 
-Set `"outputRetries": 1` and restart to enable one status-only resubmission per
-review stage. `0` is the default; other values are rejected. This is useful when
-the model returned a complete JSON envelope with an invalid top-level status
-token, such as `CCOMPLETE`, while every other evidence check passes. Error
-messages identify the status field and allowed values without echoing arbitrary
-model text. Missing/non-token statuses do not qualify.
-
-The original failed session must have a completed tool call and a confirmed
-abort. Completion bookkeeping is not independent proof of a source read. The
-same model gets a fresh session with the original envelope and must return only
-`{"status":"COMPLETE"}` (or another allowed, truthful status). The plugin keeps
-all original evidence/report fields and validates the amended envelope again.
-Normal reviewer prompts contain no one-field amendment instructions. Only the
-new repair session receives them through a scoped system-prompt replacement;
-the host must apply it before the repair model request is allowed. Its private
-request artifact records that effective plugin prompt, not the full-review rules.
-Ordinary tool use and a second model request in that repair session are denied.
-Both transports support this; host `format.retryCount` stays zero. This field
-does not prevent the host from continuing after an invalid tool call within the
-same session; the separate guard below bounds native structured rejections.
-
-This is not general recovery for `StructuredOutputError`, missing/malformed JSON,
-authentication or transport errors, incomplete coverage, missing evidence,
-changed heads, cancellation, or comments. Those still stop. No whole workflow is
-rerun, and the existing timeout is not reset. Each of the three review stages can
-have at most one extra formatting request; extra usage may still be billed by
-the selected provider. Host-internal retries and auxiliary calls are separate.
-
-The receipt retains the failed attempt and its error, then lists
-`output-retry=1/1` and `retry-of=<original-session>` beside the new session. Debug
-files retain both responses; a retry result records `attempt: 2` and `retryOf`.
-The first result remains FAILED even when the overall review later completes.
-Inspect all attempts when evaluating reliability, not just the final status.
-
-### Missing disposition rows
-
-The verifier receives `expectedFindingIds` explicitly. A missing-row error lists
-the absent original IDs, also saved as `missingDispositionIds`. Prose that explains
-a merge does not substitute for a structured row.
-
-With the single amendment budget available, an otherwise valid COMPLETE final
-submission can request only missing MERGED rows from the same stopped verifier
-context. Each target must already be CONFIRMED, every missing ID must occur once,
-and existing values cannot change. No new tools or decisions are allowed. The
-reviewer declines when its previous evidence cannot support all requested merges.
-The runtime does not infer them from prose. Existing merges that depend on missing
-rows, missing evidence/locations and unknown/stale versions are ineligible.
-
-A successful amendment records `retry-kind=disposition` and `amendedDispositions`
-while retaining the original FAILED record. A refusal or invalid amendment ends
-the run without another attempt. Source truth still depends on reviewer evidence.
-
-### Missing locations
-
-An initial envelope may omit only the separate location field. These candidates
-retain all other evidence and complete coverage, appear as pendingLocations in
-stage diagnostics and the verifier request, and produce a pending-locations=N
-receipt notice. No value is supplied and no initial location amendment is started,
-regardless of outputRetries. The verifier must establish locations for confirmation
-or classify unresolved candidates NEEDS_INFO. Inspect final dispositions to see
-the outcome; an initial pending-locations count does not claim resolution.
-
-A verifier envelope with COMPLETE and absent finding `location` fields
-may qualify only when every other contract passes. The same stopped session is
-regranted for one plugin-authored message to keep its original source context.
-The model returns only `{"locations":[{"id":"F-1","location":"head:/src/example.ts:12"}]}`
-for the requested IDs. It cannot change any original value, use ordinary tools,
-start a second model request or switch to status repair. If it cannot establish
-the locations from previously read exact-commit source, it must decline; an empty
-locations list fails closed. No locations are extracted automatically from prose.
-
-Missing evidence/counterevidence, coverage gaps, invalid IDs, empty existing
-locations, changed/unknown heads, comments and uncertain cancellation never
-qualify. Native/text parse errors remain terminal except for the narrow complete-text
-amendment compatibility below. Both the eligibility
-probe and final amended result use the full validator; placeholders never enter
-accepted results or diagnostics as evidence.
-
-Receipts retain the first FAILED record and show `retry-kind=location`, an explicit
-location notice, and the same session ID for both attempts. Stage results record
-`amendedLocations` (IDs and field paths), separate raw response artifacts and
-the final validated envelope. Audit these as model-authored amendments, not
-independent verification of source lines. The verifier still checks initial
-locations against source. Any eligible key normalization is recorded separately
-only if the amended full result passes. A second failure ends the stage.
-
-Completed sessions still refuse ordinary reuse. Only the plugin's exact amendment
-message, same run/role/model, confirmed abort and isolated system prompt can grant
-this exception. The existing whole-command deadline is never restarted.
-
-### Complete JSON text amendments
-
-Only a scoped native amendment can accept a complete JSON text object when the
-host reports StructuredOutputError/data.message="Model did not produce structured
-output", retries=0 and finish=stop. It must come from that session's assistant,
-with no native structured result, one request, no attempted ordinary tools or
-native rejections, valid isolated instructions, an active grant and confirmed
-abort. Normal review and comment responses cannot use this path.
-
-The parser accepts only a whole JSON object, without preamble, fences or duplicate
-keys. No truncated JSON, tool output, reasoning or earlier response is used.
-The exact amendment contract and full original stage validation must both pass.
-No second request, value inference or JSON repair is added. General provider/SDK
-errors, cancellation, content filters and non-stop finish reasons still fail.
-
-An accepted stage records outputTransportFallback (native to json-text) and the
-receipt shows output-transport=json-text plus a notice. The raw host error stays
-in response diagnostics and the session. A failed candidate gets no acceptance
-notice. Count this separately from local formatting and first-pass native success.
+Initial/verifier stages no longer start status, location, merge or final-content
+amendments. Their local adapters retain useful results and disclose limitations
+regardless of outputRetries. Old failed/amended artifacts remain historical data;
+do not relabel them as successful new-format runs. Comments never retry.
 
 ## Repeated native submission failures and timeouts
 
@@ -345,8 +225,8 @@ repair and comment sessions stop at the first. Counters are per session, apply
 with native output only, and do not depend on outputRetries.
 
 The receipt shows `invalid-structured-output=N` and, at the limit, INCOMPLETE
-with a concrete stopping reason. The plugin never repairs quotes or adopts the
-rejected result. It adds no model request or session; any continuation after the
+with a concrete stopping reason. The plugin does not adopt rejected native arguments;
+local recovery applies to an already-returned completed review response. It adds no model request or session; any continuation after the
 first ordinary-review rejection is the host's existing loop. Completed built-in
 invalid calls do not count as source/tool evidence. Other provider retries and
 MCP errors are outside this guard.
@@ -357,7 +237,7 @@ host's interruption of a rejected call. Markup alone does not prove the model
 ignored tool instructions: serving systems can convert their own markup into
 native calls. Compare field values, schema types and finish reasons before
 attributing truncation to a model or token limit. Some converters mishandle
-array-valued schema types; currentHead deliberately uses a scalar string.
+array-valued schema types; the preferred currentHead representation is a scalar string.
 Source reads may succeed even when the final submission cannot be parsed.
 Increasing the timeout does not resolve a repeated syntax error, and the plugin
 does not recover a result by extracting XML or repairing partial arguments.
@@ -403,23 +283,17 @@ statuses, copying SHAs from prose or silently repairing incomplete findings.
 
 ## Final submission recovery
 
-The verifier now submits required confirmed/merged/rejected/needsInfo/newFindings
-arrays. Confirmed rows contain all seven finding fields plus reason; the runtime
-converts explicit categories to its internal dispositions. Legacy dispositions
-alone remain compatible. Mixed formats or JSON-encoded arrays are invalid.
+Read result.reviewWarnings and the final report alongside the original response.
+Incomplete corrected findings, cycles, omitted decisions and unknown versions
+produce PARTIAL output. Explicit changed versions remain STALE. Original missing
+IDs are rendered as UNREVIEWED with their observations. No model resubmission is
+requested. If the verifier's execution itself fails, draft.md can retain accepted
+initial observations while failed verifier claims remain only in diagnostics.
 
-With outputRetries=1, a parsed COMPLETE final output that fails validation may
-receive one complete same-session resubmission if no narrow amendment qualifies.
-Snapshot identity/file set and current source/target versions must already match
-and remain frozen. This does not recover missing source, unknown/stale versions,
-provider errors, invalid outer JSON or an entire missing initial review. All
-recovery kinds share one allowance; no ordinary tools, second request or deadline
-reset. Compare both response artifacts: evidence/decisions may change, never by
-local inference. Original failures remain FAILED. Diagnostics add bounded
-validationErrors paths/codes, retryKind=final and an accepted finalResubmission
-ledger. The receipt explicitly discloses content recovery, even if it fails.
-Shape validation still cannot establish source truth or exclude a well-shaped
-non-defect. Evaluate semantic quality separately from envelope completion.
+Before spending another model call, determine whether the limitation came from
+source access, capture/formatting, evidence quality, cancellation or the provider.
+Keep raw calls and failed runs. A complete transport exchange does not establish
+that a model interpreted dates, recovery behavior or impact correctly.
 
 ## Enable local diagnostics
 
@@ -442,21 +316,20 @@ printed in its receipt:
 
 | File | Contents |
 | --- | --- |
+| `readiness.json` | Checked model slots, connected MCP count and sourceAccess=not-assessed; no credentials or provider configuration. |
 | `run.json` | Run ID, origin, command mode, model profile (`review`/`deep`), language, project, start time, whole-run timeout (null when disabled); no provider configuration. |
 | `NN-azpr-MODE-ROLE.request.json` | Input payload, role instructions, inputCharacters/instructionCharacters, remainingRunMsAtStart (null without a deadline), selected model/session, and schema. |
 | `NN-azpr-MODE-ROLE.response.json` | Last returned visible text/structured answer, finish reason, model error name/message. Written before envelope validation. |
-| `NN-azpr-MODE-ROLE.result.json` | Parsed/validated result or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, inputCharacters/instructionCharacters/outputCharacters, remainingRunMsAtStart/remainingRunMsAtEnd (null without a deadline), firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
+| `NN-azpr-MODE-ROLE.result.json` | Accepted result with reviewWarnings or error, attempt/retry kind, model/session IDs, timestamps, durationMs, modelRequests, inputCharacters/instructionCharacters/outputCharacters, remainingRunMsAtStart/remainingRunMsAtEnd (null without a deadline), firstToolAt/lastToolAt when observed, completedTools and invalidStructuredOutputs, including interrupted stages. |
 | `NN-azpr-MODE-ROLE.transport-error.json` | Selected SDK error name/message, when available. |
 | `NN-azpr-MODE-ROLE.last-message.json` | Best-effort last assistant message from a read-only history lookup after a failed request with no answer. No model is resumed. |
 | `result.json` | Overall outcome/error and all completed stage records. |
-| `report.md` | Rendered validated final fields plus overview/provenance; or comment preview/publication receipt. |
+| `report.md` | Rendered accepted final fields, limitations and overview/provenance; or comment preview/publication receipt. |
 | `draft.md` | Clearly unconfirmed initial observations after an incomplete review; never a completed report or comments input. Aggregate reportKind is incomplete-draft. |
 
 A complete normal or deep review normally has three stage records: functional
 initial review, risk initial review, and final verification. Standalone `/pr-check`
-has one source-check record. An
-enabled amendment adds one attempt record for the affected stage. Location repair
-uses the original session; status repair creates a new one. `MODE` is `review`
+has one source-check record. An enabled source-check status amendment adds one attempt in a new session. `MODE` is `review`
 or `deep`; the two initial file numbers may vary because the sessions start
 concurrently. A comment command uses the originating review's profile.
 
@@ -498,8 +371,8 @@ intervals can include permission prompts and host overhead, not just Azure/MCP
 server work. Missing after-hooks without terminal events make active/outside
 values unknown rather than treating that time as model work. Duplicate/conflicting
 events do not rewrite terminal outcomes; late callbacks cannot mutate finished
-attempts or revoked grants. An amendment
-has its own timing even when it reuses the verifier session.
+attempts or revoked grants. A source-check amendment
+has its own timing in its new session.
 
 The pinned host's native StructuredOutput can bypass ordinary tool hooks. The
 last-tool-to-response interval therefore measures an observed boundary, not a
@@ -537,32 +410,21 @@ submission containing only status is missing the review itself; it cannot use
 status-only recovery, even if source tools ran. Do not fill those fields from
 the other reviewer or reinterpret the missing report as a completed review.
 
-For quality-contract failures, compare the saved response to its request schema:
+For quality-contract limitations, compare the raw response, adapted result and
+strict completeness assessment. Coverage should include every changed path;
+repository/PR and both SHAs should agree; final confirmed findings need complete
+source locations, counterevidence, severity and suggestions. Missing data stays
+missing. Extra fields remain visible instead of causing delivery failure.
 
-- Each initial review needs `coverage.files` and `coverage.gaps`. COMPLETE cannot
-  omit a snapshot file or carry review gaps; PARTIAL must explain its gaps. An
-  unavailable snapshot may be omitted only with PARTIAL and empty files/findings.
-- Direct snapshots use scope=pr. Repository/PR and source/target SHAs must agree
-  between initials; path differences form a union for the verifier. A version
-  mismatch fails the run even if each stage passed its local output contract.
-- Final currentHead and currentBase are required for PR-scope COMPLETE. Either
-  changed version gives STALE; unavailable versions cannot produce COMPLETE.
-- Every finding needs `counterevidence`, severity and a correction/verification
-  suggestion as well as its ID, summary and source evidence. Initial location
-  alone may be absent; final confirmed findings/discoveries require it. No extra
-  fields are accepted after the disclosed formatting step above.
-- Each CONFIRMED disposition needs the verifier's complete `verifiedFinding`
-  under the same original ID; other dispositions must not carry one.
-- Comment severity must equal the supplied verified high/medium severity. A
-  low-severity finding must be explicitly skipped, not promoted.
+Conflicting initial versions go to the verifier with warnings. Explicit changed
+current versions stay STALE; unavailable versions produce PARTIAL. Unknown or
+missing decisions cannot silently discard original observations or authorize
+comments. The runtime never supplies missing final evidence or retries a model
+to obtain it. A COMPLETE verifier does not override initial publication gaps.
 
-Both native and text output use these checks. Install matching runtime/prompts
-and restart after an update; old custom prompts must satisfy the new contract.
-Only scoped model amendments or final content resubmission may supply missing final content;
-the runtime never invents it, and initial omissions remain absent until verification. No fallback to the
-original candidate is performed. Debug data
-lets you inspect coverage claims, counterevidence and corrected findings, not
-independently prove that source reads or reasoning were correct.
+Comment severity still must match the corrected high/medium finding. Low-severity
+findings must be skipped. Debug data lets you inspect claims; it cannot prove the
+truth of source, reasoning, severity or semantic duplicate decisions.
 
 `abortUnconfirmed: true` in `result.json` (also shown as a receipt warning) means
 the host did not acknowledge a session-abort request within the local deadline,
@@ -591,15 +453,15 @@ protection. No automatic deletion or retention policy is imposed.
 ## Rendered reports and incomplete drafts
 
 The final `report` field is now a short checks/limitations overview. Full Markdown
-is generated from the validated snapshot, finding evidence, disposition reasons
+is generated from accepted structured fields, limitations, extra content, disposition reasons
 and model ledger. Inspect those structured fields as well as report when debugging
 content; a short raw report field is intentional. No extra model formats it.
 
-INCOMPLETE runs can retain valid initial observations as a clearly marked draft,
+INCOMPLETE runs can retain accepted initial observations as a clearly marked draft,
 including missing IDs and failure details. Failed final claims are not adopted.
 An inactive/abort-uncertain run never resumes a session to display its draft;
-diagnostic storage remains available when enabled. Receipt mode does not embed
-draft source; full mode returns it with its unconfirmed label. Drafts cannot feed
+diagnostic storage remains available when enabled. Both return modes include
+available drafts with their unconfirmed labels. Drafts cannot feed
 comment preview/publication. The receipt itself is never a review report.
 
 ## Language and attribution

@@ -66,7 +66,7 @@ target heads at the last PR merge in
 They are PR-reported references, not proof of live branch tips or a common
 ancestor. lastMergeCommit is not either source reference. The verifier rereads
 the same PR and returns both versions: either changed gives STALE; missing
-versions give INCOMPLETE. Metadata lag and races remain limitations.
+versions leave a PARTIAL review. Metadata lag and races remain limitations.
 
 For scope=pr, missing independent merge-base proof alone no longer blocks review.
 Prefer native PR changes/diffs and exact-commit source. Do not mislabel target-only
@@ -122,8 +122,8 @@ and the original deadline; a second failure remains a coverage gap. Writes,
 publication, execution, truncation and empty searches never qualify. Disclose
 the failed read and repeat outcome even when recovered; success does not prove
 a transient cause. This is not an enforced MCP retry counter, new session,
-wrapper, argument rewriter or permission filter. `outputRetries` controls output
-amendments/resubmission, not MCP recovery. Host/provider retries remain separate.
+wrapper, argument rewriter or permission filter. `outputRetries` controls only source-check status
+amendments, not review formatting or MCP recovery. Host/provider retries remain separate.
 
 Private-role native shell/edit/skill/public-web denials are separate from MCP
 permissions. They neither narrow nor grant arbitrary MCP tools. Host resource
@@ -183,8 +183,9 @@ Keep credentials and connection configuration private.
 
 Accept honestly reported model or server limitations instead of adding per-version
 adapters, speculative retries or extra model rounds to force completion. Missing
-required evidence still yields PARTIAL/INCOMPLETE; final source/version and finding
-contracts remain mandatory. See [diagnostics](DEBUGGING.md) to distinguish observed
+required evidence stays explicit in PARTIAL reports; execution failures remain
+INCOMPLETE. Complete source/version and finding contracts are required for
+publication eligibility. See [diagnostics](DEBUGGING.md) to distinguish observed
 tool errors from unassessed source validity.
 
 ### Historical troubleshooting: official MCP 2.10.0

@@ -82,91 +82,46 @@ It describes the development process, not instructions for agents reviewing a PR
   policy is not a runtime file-provenance guard. Host display truncation and an
   incomplete server response remain distinct. Terminal metadata flags may add
   diagnostics, never source certification or file-read authorization.
-- Keep PR-version snapshots, coverage ledgers, counterevidence, final dispositions,
-  and corrected `verifiedFinding` contracts. Do not hide incomplete evidence,
-  repair malformed responses silently, or retry failed/stale runs automatically.
-  Explicit JSON text compatibility keeps these same contracts. Reject duplicate
-  raw/fenced JSON keys, including escaped-equivalent keys, before accepting any
-  field value. Reject explicit truncated/filtered/error/cancelled finishes in
-  both transports before recovery. Status-only initial/final submissions cannot
-  supply missing review content or qualify as a status spelling amendment.
-  Reject unknown envelope/snapshot/coverage/disposition fields using shared schema
-  key catalogs in both transports and legacy finals. Finding-only normalization
-  below is not permission to drop extra content elsewhere. Keep conditional
-  evidence/version requirements separate from structural key checks.
-  Verifiers submit required confirmed/merged/rejected/needsInfo/newFindings arrays;
-  confirmed rows contain the seven finding fields plus reason; keep common and
-  role-specific instructions consistent about these eight keys. Convert explicit
-  categories to the existing disposition contract without inferring content. Accept
-  legacy dispositions only alone, never mixed with category fields. Snapshot file
-  identity is a unique path set, not array order; reject duplicates/missing paths.
-  Local finding-format normalization may trim ASCII JSON whitespace from known
-  field names and remove exactly empty-string or null unknown fields. A redundant
-  CONFIRMED V disposition may be removed only when its complete finding exactly
-  matches the sole same-ID newFindings entry; preserve its reason in raw output.
-  Original F/R dispositions must remain complete and unique. Reject collisions
-  and content-bearing extras; never change field values or supply missing data.
-  Preserve raw responses, fully validate the candidate, and disclose accepted
-  changes in stage diagnostics and receipts. Limit this to initial/verifier
-  findings with valid statuses, excluding output repair and comment sessions.
-  Normal initial/verifier JSON text with finish=stop may remove only trailing
-  separators after complete members/values before matching closing delimiters.
-  Use a grammar-aware scan, preserve raw bytes and every key/value, reject
-  duplicate keys, and validate the entire envelope. Require a valid role status;
-  no syntax tolerance for native output, checks, comments or amendment grants.
-  Record zero-based JSON-body UTF-16 offsets and disclose accepted corrections.
-  A candidate failing validation remains failed without unlocking a model repair;
-  rejected corrections are diagnostics, not accepted output. No generic JSON repair.
-  An initial PARTIAL result may omit an unavailable snapshot only with empty
-  coverage.files/findings and concrete gaps; it cannot enter final verification.
-  Initial candidates may omit only the separate location field, with explicit
-  pendingLocations diagnostics and verifier handoff. Never infer its value.
-  Final confirmations/discoveries still require locations; unresolved candidates
-  must be NEEDS_INFO and excluded from comments. Missing evidence/coverage is
-  never a location exception.
-  Model-based recovery requires explicitly enabled `outputRetries: 1`: at most
-  one status-only, absent final-location, missing merge-disposition amendment OR
-  complete final content resubmission per stage, never more than one kind.
-  Narrow amendments require all other contracts to pass an eligibility probe, never accepted as
-  evidence. Status repair uses a fresh session; location repair narrowly regrants
-  the same stopped session to retain that reviewer's source context. Missing-merge
-  amendments use that same context and may only append requested original IDs as
-  MERGED into already confirmed originals; never infer a merge from prose, add
-  new evidence, change existing fields or fill gaps with arbitrary decisions. No ordinary
-  tools, no existing field changes, one model request, full revalidation, raw
-  failure retention and explicit notices apply to these narrow amendments.
-  A parsed COMPLETE final output that fails validation may instead receive one
-  same-session content resubmission when its snapshot and observed current source/
-  target versions already match the expected PR. Prefer an eligible narrow amendment;
-  never chain into another recovery. Freeze identity, file set and current versions.
-  The verifier may correct missing evidence/decisions from retained source context;
-  the runtime never copies initials or supplies missing findings. Collect bounded
-  value-free error paths, retain both submissions and disclose content replacement.
-  No initial whole-review regeneration, ordinary tools, second request, deadline
-  reset, incomplete/stale/unknown versions, provider errors, truncation, comments,
-  cancellation or unconfirmed abort. Full revalidation is mandatory; field presence
-  is not proof of source truth or quality. Initial coverage requirements remain strict.
-  Keep amendment instructions out of normal reviewer prompts. Only an explicit
-  repair grant may replace the reviewer system prompt; verify that replacement
-  before allowing the repair model request and preserve unrelated host context.
-  Keep native/text transport instructions separate. Native currentHead/currentBase
-  fields use scalar strings; an unknown PR version stays INCOMPLETE. Never strip
-  quotes or fill missing current versions from the snapshot to satisfy validation.
-  Only an authorized amendment may accept complete JSON text after the pinned
-  host's missing-native-submission error, with finish=stop, one request, no tool
-  attempts/rejections, confirmed abort and an active grant. Reject duplicate keys,
-  truncation, general errors and cancellations. Fully validate, retain the host
-  error and disclose the transport change; add no model request or JSON repair.
-  The native invalid-submission guard stops the existing host loop at two
-  rejected structured calls per review session (one for output repair/comments).
-  It does not repair JSON, add requests, or filter MCP operations. Keep timeout,
-  manual cancellation and output-failure causes distinct.
-- Render final details once from validated findings and dispositions. The final
-  report field is a short overview of checks, exclusions and limitations; human-
-  readable final fields follow outputLanguage. Preserve initial evidence in its
-  original language. Incomplete drafts show only validated initial observations,
-  clearly unconfirmed, plus failure/missing-ID diagnostics; never cache them as
-  completed reviews or use them for comments. No formatting/translation model.
+- Preserve useful review observations even when formatting, coverage or evidence
+  is incomplete. Initial/verifier stages use local syntax recovery and tolerant
+  adapters, retaining raw responses, extra fields and explicit limitations. Never
+  invent source evidence, current versions or model decisions. Ambiguous JSON,
+  including duplicate keys, stays literal unstructured text rather than selecting
+  one value. Missing final decisions become runtime UNREVIEWED notices with the
+  original observations. A failed admitted initial may leave the other initial
+  and verifier usable; configuration, routing, cancellation and permission faults
+  still stop the workflow. No review-format model amendment or resubmission.
+- Keep native StructuredOutput and explicit JSON text modes on V1. Review schemas
+  describe preferred fields without making complete evidence a host capture gate;
+  completeness is assessed after capture. Reject provider errors and explicit
+  truncated/filtered/error/cancelled finishes. Only the pinned host's exact
+  completed missing-native-submission error may retain already-returned review
+  text locally, with an explicit correction record and no new request. Preserve
+  response session/role/model checks, invalid native submission guards, settings
+  duplicate-key rejection, and strict source-check/comment contracts.
+- Separate report delivery from publication eligibility. COMPLETE describes a
+  usable structured verifier result, not factual quality or PR approval. PARTIAL
+  preserves limitations; explicit changed versions remain STALE. Cache a review
+  for comments only when both initials, final evidence, all original decisions,
+  and identity/version checks pass. Initial locations may remain pending for the
+  verifier; final publishable findings need complete locations and evidence.
+- `outputRetries: 1` applies only to one source-check status amendment, with a
+  new same-model session, isolated instructions, immutable evidence, no ordinary
+  tools, one request, active authorization and a confirmed abort. Default is zero.
+  Never restore review regeneration or expand the host/provider retry policy.
+- Render structured findings, extra content, warnings and unresolved originals
+  deterministically. Preserve source observations in their original language.
+  Include PARTIAL/STALE reports and incomplete drafts even in receipt mode;
+  failed execution text remains diagnostic, never accepted evidence. No formatter
+  or translation model. Keep final prose concise through existing policy, without
+  a word limit or semantic truth gate.
+- Read provider/MCP readiness from the actual V1 host before sessions are created,
+  under the run's cancellation signal. Catalog readiness does not prove Azure
+  access. Preserve model selection and ordinary agents. Private auxiliary and
+  compaction attempts must not bypass existing grants; V1 has no V2 request-kind
+  or retry-decision hook. Document this limit instead of inventing equivalent
+  guarantees. Observe retry metadata without provider error text or added retries.
+
 - Comment preview is distinct from publication. Publication needs explicit
   `--publish`, prior opt-in settings, and a saved plan in the same origin/process.
   An uncertain attempt is not permission to retry. Never call model-reported
@@ -226,8 +181,8 @@ git diff --check
 
 For a behavior change, add a reproducing regression test, implement the smallest
 coherent fix, then run the full suite. Keep schema, runtime contracts, prompt
-examples, migration, and docs aligned. Do not relax validators to make a test PR
-look successful. Never claim improved review quality based only on mock tests.
+examples, migration, and docs aligned. Evaluate tolerant report delivery separately from strict publication eligibility;
+never make a test PR look successful by inventing missing evidence. Never claim improved review quality based only on mock tests.
 
 ## Finish and hand off
 

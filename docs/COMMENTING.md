@@ -34,6 +34,13 @@ When the lookup returns no record, this property access throws before the fallba
 Check for a missing record before dereferencing it, and add a regression test for an empty lookup result.
 ```
 
+A readable COMPLETE/PARTIAL report does not by itself authorize comments. The
+runtime must establish both initial contracts, all original decisions, complete
+final evidence and consistent PR versions. Otherwise it reports `Publication
+unavailable` and does not cache the review. `UNREVIEWED` observations cannot be
+turned into comments. Review syntax recovery does not relax comment-plan or
+publication validation.
+
 The final verifier's `verifiedFinding` for each `CONFIRMED` original and its
 structured `newFindings` (`V-*`) are passed to the planner. These are the corrected,
 verified claims, not the original candidates. `NEEDS_INFO`, `REJECTED`, and

@@ -74,7 +74,7 @@ export function validateSettings(raw) {
   const shellToolPermission = withDefault(raw.shellToolPermission, 'deny');
   if (!['deny', 'ask'].includes(shellToolPermission)) throw new Error('shellToolPermission must be deny or ask. Native shell execution remains blocked in both modes.');
   const outputRetries = raw.outputRetries === undefined ? 0 : raw.outputRetries;
-  if (!Number.isInteger(outputRetries) || outputRetries < 0 || outputRetries > 1) throw new Error('outputRetries must be 0 or 1 (one shared status/location/merge amendment or final content resubmission per review stage).');
+  if (!Number.isInteger(outputRetries) || outputRetries < 0 || outputRetries > 1) throw new Error('outputRetries must be 0 or 1 (one eligible status amendment for standalone source checks; review formatting uses local recovery).');
   const debug = raw.debug === undefined ? { enabled: false, directory: '' } : raw.debug;
   keys(debug, ['enabled', 'directory'], 'debug');
   if (typeof debug.enabled !== 'boolean' || (debug.directory !== undefined &&
@@ -152,7 +152,9 @@ export function buildAgents(settings, prompts) {
       (spec.mode === 'deep' && ['initial', 'final'].includes(spec.format) ? '\n\n' + prompts.deep : '') +
       '\n\n# Output transport\n' + (settings.structuredOutput
         ? 'After completing all necessary source/tool work, submit the required envelope once through the host StructuredOutput tool. Supply field values using their declared types. Do not print a separate JSON text/code block or surrounding commentary. Examples describe the envelope fields, not a separate text response. The output schema describes the envelope, not an MCP tool restriction.'
-        : 'Return one valid JSON object, optionally in a single JSON code fence, without surrounding commentary. Serialize strings as JSON strings, escaping quotes and newlines correctly.'),
+        : (['initial', 'final'].includes(spec.format)
+          ? 'Prefer one JSON object with the requested review fields. If the envelope cannot be completed, preserve useful review observations and concrete limitations; do not discard findings merely to satisfy formatting. No additional model request repairs review formatting.'
+          : 'Return one valid JSON object, optionally in a single JSON code fence, without surrounding commentary. Serialize strings as JSON strings, escaping quotes and newlines correctly.')),
     permission: { task: 'deny', ...NATIVE_TOOL_PERMISSIONS, bash: settings.shellToolPermission },
   }]));
 }

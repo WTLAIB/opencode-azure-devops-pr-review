@@ -60,7 +60,7 @@ supporting evidence and impact. Keep the following assessments separate:
 
 | Assessment | Required evidence | Interpretation |
 | --- | --- | --- |
-| Operational integrity | Validated stages, independent source verification, complete coverage/IDs, current versions, correct workflow and disclosed recovery. | Blocking for execution acceptance. COMPLETE establishes the implemented workflow contract, not factual perfection or PR approval. |
+| Operational integrity | Correct routing, preserved output/limitations, execution authorization, source/ID/version evidence and disclosed recovery. | Distinguish readable delivery from complete publication contracts. COMPLETE is not factual perfection or PR approval. |
 | Factual quality | Actual defect identity, reachable trigger, exact evidence/locations, numerical and assertion accuracy, bounded scope and justified severity. | Record concrete errors and whether they change the finding, impact or recommended fix. A supported high/medium difference alone is not a failure; do not silently correct or overlook wrong claims. |
 | Presentation | Concision, clear language and one complete canonical evidence packet. | Record redundancy or awkward wording separately. They do not by themselves invalidate execution; lost evidence belongs in the stronger assessments above. |
 
@@ -77,242 +77,74 @@ a same-model submission check is not independent verification or a speed guarant
 
 ## Offline checks
 
-Run from the repository root with a supported Node.js development runtime:
+Run from the repository root with Node.js 22 and Python 3:
 
 ```sh
-npm test
 npm run check
+npm test
+git diff --check
 ```
 
-Workflow tests use mock OpenCode SDK responses and hooks. They cover configuration preservation, ordinary-chat no-ops, private-role authorization, exact model routing, two independent initial sessions in both modes, incomplete-profile refusal, snapshot consistency, complete finding dispositions, stale source/target versions, cancellation, and display-only reports. Concurrent normal/deep tests verify static model bindings; comment tests verify the cached originating profile survives later reviews in another mode. Guidance-only settings never reach model instructions.
+The suite uses mock V1 SDK responses and isolated installer directories, without
+real models or Azure writes. Important boundaries are exercised independently:
 
-Lifecycle regressions cover unresponsive advisory UI/log requests, SDK abort calls
-that ignore cancellation signals, abort API errors, lock release, and cancellation
-during final-report or preview display. Cancelled reviews/previews cannot authorize
-publication. Contract tests reject wrong-PR readiness, merge cycles, inconsistent
-merge targets, explicit null settings, and empty prompts. Invalid source/planner/
-publisher envelopes must be marked FAILED in stage diagnostics, not just at the
-outer workflow. These are local orchestration checks, not remote cancellation or
-source-authenticity guarantees.
+- Two initial sessions, literal URL/context, exact role/model bindings, independent
+  profiles, source checks, zero-finding verification and saved comment provenance.
+- Local JSON recovery with unchanged values/raw responses, large evidence without
+  iteration/character caps, literal ambiguous/prose retention, supplemental fields,
+  conflicting aliases and unique bookkeeping IDs. Settings remain strict.
+- PARTIAL initial handoff, unavailable/conflicting versions, missing final decisions
+  as UNREVIEWED, stale source/target references, full observations in readable
+  reports, and publication unavailable when any required contract is missing.
+- Native/text modes, exact completed V1 missing-native fallback, broad provider-error
+  rejection, truncated/unknown finishes, wrong response identity, hook admission,
+  no review-format model requests and strict comment/source-check output.
+- One isolated opt-in source-check status amendment, immutable evidence, no ordinary
+  tools, one request, preservation of unrelated system context and failed attempts.
+- Cancellable model/MCP preflight, missing/disconnected catalogs, no model fallback,
+  native guards, auxiliary/compaction denial, value-free host retry observations,
+  same-origin locks, timeout/disposal, uncertain abort and display-only reports.
+- Comment contracts, explicit publication, saved exact plans, source-profile/model
+  attribution, host-denial simulations, whole-batch uncertainty and no automatic
+  retry. No test posts to Azure.
+- Settings migration, missing defaults, removed legacy limits, duplicate keys,
+  permission modes, preserved preferences and strict rejection before replacement.
+  The real installer is tested for fresh/replacement installs, 24-file manual
+  packages, missing files, rollback, symlinks, locks and archival uninstall.
 
-Quality-contract tests require complete per-reviewer coverage ledgers, concrete
-gap explanations for PARTIAL, counterevidence/severity/suggestion fields, and a
-complete corrected finding for each CONFIRMED disposition. Native/text transports
-both reject coverage omissions. Prompt JSON examples are checked against the
-same validators and native schema fields. A two-session barrier test verifies
-that both initial sessions start before either returns; zero findings still
-invoke the final verifier. Comment tests verify corrected-claim handoff and reject
-severity changes, low-severity promotion, or fallback to stale initial wording.
-These are contract and routing checks, not empirical review-quality results.
+Strict low-level evidence helpers remain independently tested as the publication
+assessment reference. Runtime tests exercise tolerant delivery instead of the
+superseded initial/final model-amendment flow. Old private failure artifacts and
+Git history remain unchanged. A lower or higher test count is not a quality score.
 
-Comment tests cover saved-plan validation, explicit publishing, arbitrary MCP tool names/arguments, host-denial simulations, confirmed-only eligibility, caps, whole-batch uncertainty bookkeeping, cancellation, and honest model-reported publication labels. They do not assert a programmatic read-only MCP boundary or parse provider-specific responses. No test posts to Azure.
+## Isolated OpenCode 1.18.31 fixture
 
-Language tests cover the default, language-tag validation/canonicalization, final-only localization in both review modes, propagation to comment preview/publishing, unchanged saved comment bodies, restart requirements, and settings preservation across installer replacement. They check routing and instructions with mocks, not real-model translation quality.
+Use an exact V1 binary in a disposable prefix, without replacing your normal
+OpenCode installation. The fixture installs this checkout only into an isolated
+configuration, uses a deterministic loopback provider and a fake stdio MCP, and
+keeps its generated evidence under ignored .local/. It does not read personal
+provider settings, start a real hosted model or contact Azure.
 
-Installer tests execute the real shell scripts in disposable directories. They cover fresh installs, the actual installed plugin import, no-backup replacement, settings preservation, rollback after an injected failure, emergency file retention if restoration also fails, conflicts, symlinks, locks, and archival uninstall. Existing historical backups remain untouched.
+```sh
+node tests/host-v1-smoke.mjs /absolute/path/to/opencode-1.18.31
+node tests/host-v1-smoke.mjs /absolute/path/to/opencode-1.18.31 --text --replace
+```
 
-Manual-package tests install and import the plugin using only the 24 required
-files, without docs, README, source package metadata, editor schema, or uninstaller.
-They also cover replacement/migration from a full install, generated module
-metadata, optional-copy failure warnings, and early rejection of every missing
-required runtime, prompt, command, or migration file without replacing old files.
-The manual list is also checked against the operational catalogs and source files.
-
-Settings migration tests cover all four old model slots mapped to two three-role profiles, installed agent loading after conversion, nested missing defaults, explicit partial profiles, legacy directory migration, preserved non-model false/empty/null/array/custom values, repeated-install idempotence, private file permissions, and rejection of malformed/duplicate-key/non-object JSON, unsupported versions, or ambiguous mixed layouts before replacement. Python 3 standard library is required for these installer tests and for installation, not for plugin execution.
-
-Compatibility tests target OpenCode **1.18.31**: a pure transcription of its
-pre-hook command substitution checks that literal context cannot reach native
-shell/file expansion through the supplied templates. This is not execution of
-the full host. Tests also cover multiline/Unicode context through every review
-stage, no cross-command inheritance, arbitrary MCP calls without name/action
-filtering, unchanged host permission configuration, deprecated-setting handling,
-and old-to-nested installation migration/rollback.
-
-Test output is generated on demand rather than committed as a historical log.
-
-Source-access regressions cover URL identity hints without altering literal
-context or guessing custom layouts, independent initial inputs, and unchanged
-host MCP permissions/configuration. Normal/deep tests require three stages,
-matching PR identities and source/target SHAs, sorted path union, retained
-original lists, and a final check of both versions. Identity/version mismatches
-prevent verification. Missing metadata can produce honest PARTIAL without fake
-SHAs; a status-only placeholder remains a failed review, not an amendment.
-
-Shared directory-policy checks cover both profiles without a pinned server
-workaround. Live capability cases should distinguish commit-capable discovery,
-branch-only path hints and unavailable version semantics. Prompt assertions
-verify instruction delivery, not a server's implementation or model compliance.
-
-Standalone policy retains cumulative proof and branch-fallback limits; review
-policy avoids ancestry/tree discovery and requests changed-file inclusion.
-Location guidance counts source lines without wrappers; receipts forbid
-retasking completed reviewers. These tests do not prove fewer live errors,
-accurate source anchors or lower cost.
-
-For live comparisons, keep the snapshot/configuration fixed and record all MCP
-errors (including recovered ones), query arguments, per-stage/whole-run duration,
-structured rejections and status amendments. Verify successful exact-commit reads,
-complete coverage, independently discovered change lists, final line anchors and evidence wording.
-Check report retrieval separately from review completion. Do not interpret empty
-warnings or a passing output schema as proof of error-free tool use or correct
-claims. Repeat seeded and clean controls before generalizing a reliability gain.
-
-Output/debug tests cover native structured envelopes, text compatibility,
-ambiguous/malformed/oversized responses, identical receipt/full stage requests,
-private diagnostic file modes, Git ignores, symlink refusal, failed-stage visible
-output, last-message recovery, deterministic model attribution and merge tables,
-and identical preview/publication disclosures. Tests do not prove a provider
-will support native structured output or obey language/attribution instructions.
-
-Trailing-comma tests cover normal/deep initial and final text, raw preservation,
-exact correction offsets, nested objects/arrays, escapes, quoted source punctuation,
-and unchanged values. Negative cases reject holes, doubled/leading commas, missing
-values/brackets, invalid tokens, multiple envelopes, duplicate/escaped-equivalent
-keys and bad finishes. Complete large envelopes are accepted without a plugin
-character limit. Runtime tests keep full evidence, coverage, versions and
-original-ID validation, and ensure a failed normalized candidate cannot
-unlock a model amendment. Checks, native transport, comments and amendments remain
-strict. Historical failures replayed offline remain historical failures; no absent
-verifier is inferred to have completed.
-
-Finding-format regressions reproduce a padded evidence key and empty-string/null unknown
-field in native/text output for both profiles. They verify unchanged evidence,
-raw-response retention, an explicit receipt/diagnostic audit and exactly three
-ordinary review requests. Conflicting aliases, content-bearing extras,
-misspellings, missing evidence, bad severity, duplicate IDs and snapshot/coverage
-failures cannot pass through local normalization. A verifier with a known unchanged
-version frame may qualify for the separately tested final content resubmission;
-initial evidence/coverage gaps remain terminal. Verifier paths and stale/unknown-head gates
-remain covered. Exact duplicate V-disposition tests retain raw reasons and reject
-conflicting values, missing original IDs, duplicate discoveries and extra rows.
-These are sanitized fixtures, not uploaded session exports.
-
-Status-retry regressions cover the invalid top-level enum token seen in a live
-review, immutable evidence, one-field amendments, the opt-in limit of one,
-separate same-model sessions, ordinary-tool denial, a single repair model
-request, both output transports/profiles, and preservation of both attempts.
-Incomplete evidence, malformed output, host errors, stale heads, missing tool
-bookkeeping, cancellation and unconfirmed aborts remain terminal. Comment
-preview/publication never retry. Installer checks retain explicit opt-in while
-adding missing `outputRetries` as zero. These tests use synthetic fixtures,
-not private session exports, and do not establish improved live success rates.
-
-Final submission regressions cover required category arrays, unchanged conversion
-to complete corrected findings/dispositions, legacy-only compatibility and mixed-
-format rejection. Snapshot file permutations pass while duplicate/missing paths
-and changed identity do not. Bounded final resubmission tests cover malformed
-array containers and missing corrected findings, same session/model/context,
-frozen source/target versions, one request, no ordinary tools, complete validation,
-retained failures, safe diagnostics, cancellation, unchanged deadlines and no
-second repair. Both transports/profiles and corrected comment-preview inputs are
-covered. A well-shaped false positive still requires semantic evaluation: repeat
-seeded-defect and clean-control live cases with separate first-pass/recovered
-completion, false positives, location/test accuracy, latency and request counts.
-Passing fixtures does not certify improved real-model reliability.
-
-Initial-location regressions pass unchanged candidates to the verifier in both
-profiles/transports with explicit pendingLocations and no extra request. Missing
-evidence, coverage gaps and malformed existing locations still fail. Unresolved
-candidates use NEEDS_INFO and are excluded from comment planning.
-
-Absent final-location regressions retain the same verifier session, raw failed
-response and immutable original fields while accepting exactly one locations
-amendment. Tests cover final findings, mixed local normalization, altered IDs
-or evidence, duplicate/extra IDs, invalid line ranges, shared retry limits, denied
-tools, isolated prompts, cancellation and abort uncertainty. Missing other evidence,
-coverage gaps, empty existing locations and stale/unknown heads remain failures.
-
-Missing-merge regressions require explicit expected IDs, complete missing-ID
-diagnostics and one same-context amendment into already confirmed representatives.
-Exercise native/text output in both profiles, multi-ID merges, invalid/extra IDs,
-cycles, changed evidence/status/report, decline, exhausted budgets, source/target
-changes, missing source/location, denied tools, isolated instructions and cancellation.
-A diagnostic eligibility placeholder must never become an accepted decision.
-
-Rendered-report tests preserve full localized evidence and reasons without a
-duplicate report body. Incomplete drafts retain only valid initial candidates,
-label them unconfirmed and never populate the completed cache or comment plans.
-Verify noReply display, separate draft.md diagnostics and original-language data.
-
-Amendment text tests recognize only the pinned missing-native error, then require
-one complete JSON object and the original validators. Duplicate/escaped keys,
-ambiguous or truncated text, pending tools, ordinary tool attempts, denied extra
-requests, wrong sessions, general errors, cancellation and invalid native calls
-cannot use the compatibility path. Accepted transport changes are disclosed;
-no new request or model is started. This is not provider reliability evidence.
-
-Prompt-isolation regressions check that ordinary review sessions never receive
-one-field amendment instructions, while granted repairs replace only the known
-reviewer prompt and retain unrelated system context. They model the pinned host's
-system-transform-before-params order and retained array reference. Missing or
-ambiguous prompt replacement prevents repair inference. A status-only initial
-submission reports the missing full-review fields and is never repaired.
-
-Transport regressions require only the selected native/text submission policy
-in each compiled role. The verifier schema uses scalar string currentHead/currentBase fields;
-tests retain 40/64-character SHA support, reject missing or extra-quoted heads
-for COMPLETE/STALE, keep unknown heads INCOMPLETE and different heads STALE.
-These contract tests do not emulate every hosted tool parser or prove that a
-schema change fixes a particular provider's streaming conversion.
-
-Native-submission regressions reproduce bare-SHA JSON rejection through the
-pinned host's invalid-tool hook shape. They cover the per-session limit, duplicate
-hook delivery, independent reviewers, revocation of a hanging sibling, rejection
-of another model request after the limit, comment uncertainty and exclusion of
-invalid calls from source bookkeeping. Timeout tests retain the explicit cause
-even when an SDK ignores or replaces the abort signal, and distinguish TIMED_OUT
-from manual CANCELLED. No test repairs or adopts the malformed output.
-
-Removal tests cover absent iteration/character settings and role fields, old-key
-cleanup during installation, unchanged selected source profiles, preserved timeout
-values and repeat-install idempotence. Both native and text reviews pass evidence
-larger than the former maximum output setting into a verifier request exceeding
-the former maximum input gate. Diagnostics, rendered reports and child-session
-display retain that evidence; large strict/fenced/amendment parsing still rejects
-actual truncated/error finishes and ambiguous JSON. No cap is replaced with a
-larger hidden value.
-
-On the live host, inspect active role definitions and the captured run to verify
-no finite iteration limit and no deadline. Account for disabled roles and the
-host's representation of omitted optional fields when comparing with compiled
-agent definitions; property presence alone does not establish a numeric limit.
-
-Timeout tests cover omitted/null values, finite seconds and invalid types.
-Disabled-timeout tests advance the mock clock by a day, then complete, cancel or
-dispose the run; diagnostics must keep null remaining times and no spurious
-timeout. Existing finite timeout, amendment, manual-stop and unconfirmed-abort
-tests retain their behavior.
-
-The compiled check/review/comment roles share the bounded host-output Read policy
-without changing host permissions or evidence/version/location requirements.
-Terminal-metadata tests reproduce MCP after-hooks preceding host truncation, both
-hook/event orders and duplicate delivery; a truncated return must not count as a
-successful after-hook observation or leak its path/content into diagnostics.
-These are orchestration and policy checks, not real-model compliance tests.
-Live acceptance still needs a large response recovered through allowed paging or
-same-session output reads, a genuinely incomplete server response, host-denied
-reads and correct source-file line anchors. Use authorized disposable data only.
-
-## JSON text compatibility
-
-For explicit JSON text compatibility, exercise the actual host with a local
-provider that returns complete review JSON as text after MCP source calls.
-Verify no StructuredOutput schema/call appears, native execution is still
-blocked, all three stages validate, and source versions/dispositions are retained.
-Then compare real native/text runs at fixed models, PR versions and budgets.
-Distinguish malformed native submissions from transport-independent missing
-evidence; one passing text run does not prove the provider's root cause is fixed.
-Regressions reject duplicate top-level/nested/escaped keys in raw and fenced
-text, while preserving repeated keys across separate objects and literal source
-strings. Syntactically complete objects with truncated/filtered/error/cancelled
-finishes fail before recovery. Status-only responses in either transport cannot
-complete initials/finals, consume an evidence-filling retry or enable comments.
+The fixture checks actual version, loader/commands, host provider/MCP catalogs,
+source check, normal/deep review, local syntax correction, incomplete native
+capture, literal prose delivery, blocked shell calls, a harmless ordinary-shell
+positive control and cancellation. Native default and explicit text transport
+are separate processes. Replacement preserves the private fixture settings.
+The host is stopped on success or failure; failed artifacts are retained locally.
+CI runs the fixture on Ubuntu 22.04 with the pinned host. The offline suite also
+runs on Ubuntu 24.04. Passing these checks does not certify real provider parsing,
+ADO MCP behavior, TUI navigation, factual review quality or a different host build.
 
 ## What remains unverified
 
-Offline tests do not prove real OpenCode CLI/TUI compatibility, provider routing,
-Azure MCP capabilities, child-session navigation, cancellation propagation, or
-actual billing. A recorded live acceptance sample applies only to its tested
+Mock tests do not prove actual host behavior. The isolated host fixture covers
+only its explicit local cases; it does not prove real-service provider routing,
+Azure MCP capabilities, child-session navigation, remote cancellation or billing. A recorded live acceptance sample applies only to its tested
 host, settings and PR; it does not certify other configurations or a success rate.
 
 ## Environment acceptance
@@ -322,7 +154,7 @@ host, settings and PR; it does not certify other configurations or a success rat
 3. Leave the `models.deep` roles empty initially. Deep mode must refuse to start. Run `/pr-check` against a small known PR and verify `models.review.risk` routing, complete cumulative changes, pagination, and exact-commit source access.
 4. Run normal review without a preceding check. Inspect actual session/model IDs for exactly two independent initials followed by the separately configured verifier. The parent development conversation must not be copied into them.
 5. Inspect the final report through child-session navigation. Completed private sessions must refuse reuse.
-6. Configure all three approved `models.deep` roles only when ready. Verify exactly two initial reviews, deeper analysis instructions, routing, and finding dispositions. Partial initial reviews must prevent final verification; changed heads must not automatically rerun a review. Inspect provider usage records. Run a normal review afterward and confirm comments for the earlier deep review still use `models.deep.risk`.
+6. Configure all three approved `models.deep` roles only when ready. Verify exactly two initial reviews, deeper analysis instructions, routing, and finding dispositions. Partial initial observations must reach verification with explicit limitations; changed heads must not automatically rerun a review. Inspect provider usage records. Run a normal review afterward and confirm comments for the earlier deep review still use `models.deep.risk`.
 7. Cancel from another ordinary session in the same process with `/pr-stop <run-id>`. Confirm only review sessions are affected.
 8. Disable the plugin with `enabled: false`, restart, and confirm normal development still works.
 
@@ -338,27 +170,28 @@ and verify actual host/server permission enforcement on a disposable PR. The
 plugin does not copy agent-only restrictions from the originating Plan/Build
 agent. Do not mistake mock hook tests for a live permission or security audit.
 
-If a run reports output-format-corrections, compare the original response with
-the accepted stage result and outputFormatCorrections. Verify only allowed key
-formatting, empty-string/null unknown fields or exact duplicate V rows changed;
-all required values stayed
-identical and no extra session was started. A recovered formatting defect still
-counts as a model output defect; report it separately from unmodified successes.
+If a run reports output-format-corrections, compare the original response with the
+adapted result. Verify syntax recovery preserves values and unstructured retention
+preserves literal text. Check every warning and bookkeeping ID; missing evidence
+must stay missing, and no extra review-format request may appear. A recovered
+format defect remains a model output defect, separate from unmodified success.
 
-If opting into `outputRetries: 1`, verify a qualifying failure's original FAILED
-record and `retryOf` attempt. A status amendment uses a new session and only
-`status`; a location amendment uses the original session and only the requested
-`locations`; a missing-merge amendment uses the original session and only requested
-`dispositions` with MERGED targets already confirmed. Confirm all original field values remain unchanged, no ordinary tool executes during repair,
-and a second model request is refused. Confirm cancellation still wins and
-the overall deadline does not restart. Count original contract failures and
-recovered outcomes separately; repeated synthetic successes are a smoke test,
-not a guarantee for other models or repositories.
+For PARTIAL outputs, verify omitted final decisions become UNREVIEWED and the
+original observations remain visible. Test both a prose-only initial and a final
+with evidence gaps. They should deliver useful content without enabling comments.
+A failed/truncated provider execution cannot be accepted as that initial's evidence.
+Changed current versions remain STALE even alongside other missing fields.
 
-When output-transport=json-text appears, retain the original missing-native error
-and verify the complete text amendment and final envelope. Do not count it as an
-unmodified native success. When pending-locations appears, inspect every affected
-ID's final disposition and independently check confirmed source anchors.
+If enabling outputRetries=1, test only a qualifying standalone source-check status
+failure: one fresh same-model session, one-field amendment, unchanged evidence,
+no ordinary tool, no second request and no deadline reset. Review initials/finals
+must never start status/location/disposition/final-content amendments.
+
+For the exact V1 missing-native fallback, retain the original StructuredOutputError
+and correction record, compare all already-returned text and verify no added
+request. General errors, truncation, cancellation and mismatched identities remain
+failed executions. Pending initial locations require independent final anchors;
+none may be invented to enable comments.
 
 For CLI automation, set the process cwd and PWD consistently and pass an absolute
 `opencode run --dir /path/to/review-workspace`. Verify the host-reported directory

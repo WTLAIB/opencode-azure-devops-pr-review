@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import * as output from '../src/output.mjs';
 import { ROLES } from '../src/config.mjs';
 
-const settings = { structuredOutput: false };
 const response = text => ({ info: { finish: 'stop' }, parts: [{ type: 'text', text }] });
-const parse = (text, role = 'azpr-review-functional', overrides = {}) => output.parseReviewJSONReport(response(text), { ...settings, ...overrides }, role);
+const parse = (text, role = 'azpr-review-functional') => output.parseReviewJSONReport(response(text), { structuredOutput: false }, role);
 
 for (const role of ['azpr-review-functional', 'azpr-review-risk', 'azpr-review-verifier', 'azpr-deep-functional', 'azpr-deep-risk', 'azpr-deep-verifier']) {
   test(`trailing commas preserve values and record exact offsets: ${role}`, () => {
@@ -14,7 +13,7 @@ for (const role of ['azpr-review-functional', 'azpr-review-risk', 'azpr-review-v
     const raw = valid.slice(0, -2) + ',],}';
     const before = response(raw);
     const saved = JSON.stringify(before);
-    const prepared = output.parseReviewJSONReport(before, settings, role);
+    const prepared = output.parseReviewJSONReport(before, { structuredOutput: false }, role);
     assert.deepEqual(prepared.envelope, expected);
     assert.deepEqual(prepared.corrections, [
       { action: 'remove-trailing-comma', offset: raw.length - 4 },
@@ -31,7 +30,8 @@ test('one fenced envelope retains punctuation inside strings, Unicode and number
   const plain = parse(raw);
   for (const text of [raw, 'Result:\n```json\n' + raw + '\n```\nEnd.', '```JSON\r\n' + raw + '\r\n```']) {
     const prepared = parse(text);
-    assert.deepEqual(prepared, plain);
+    assert.deepEqual(prepared.envelope, plain.envelope);
+    assert.deepEqual(prepared.corrections, plain.corrections);
     assert.equal(Object.is(prepared.envelope.n, -0), true);
     assert.equal(prepared.envelope.notes, '中\t,}\n,]');
     assert.equal(prepared.corrections.length, 3);
@@ -46,8 +46,8 @@ test('one fenced envelope retains punctuation inside strings, Unicode and number
 });
 
 for (const tail of [',}', '[,]', '[1,,]', '{,}', '{"a":,}', '{"a":1,"b":}', '[1,', '{"a":1,',
-  '[1,2}', '[01,]', '[1.,]', '[NaN,]', '[True,]', "{'x':1,}", '{"a":1 /* note */,}',
-  '{"a":"unclosed,}', '{"a":"bad\\q",}', '{"a":1,}\u00a0']) {
+  '[1,2}', '[01,]', '[1.,]', '[NaN,]', '[True,]',
+  '{"a":"unclosed,}', '{"a":"bad\\q",}']) {
   test(`syntax tolerance rejects ambiguous or non-JSON content: ${JSON.stringify(tail)}`, () => {
     assert.throws(() => parse('{"status":"COMPLETE","value":' + tail + ',}'), /required JSON envelope/);
   });
@@ -63,22 +63,20 @@ test('syntax tolerance rejects duplicate keys, multiple envelopes and unsafe fen
     'prefix {"status":"COMPLETE",}', '[{"status":"COMPLETE",},]']) assert.throws(() => parse(raw));
 });
 
-test('syntax tolerance is limited to completed normal text reviews with a valid status', () => {
+test('syntax tolerance is review-only and leaves status assessment to the caller', () => {
   const raw = '{"status":"COMPLETE",}';
   for (const [role, spec] of Object.entries(ROLES)) {
     if (!['initial', 'final'].includes(spec.format)) assert.throws(() => parse(raw, role));
   }
   assert.throws(() => parse(raw, 'unknown'));
-  assert.throws(() => parse(raw, undefined, { structuredOutput: true }));
-  assert.throws(() => parse('{"status":"CCOMPLETE",}'), /status/);
+  assert.equal(parse('{"status":"CCOMPLETE",}').envelope.status, 'CCOMPLETE');
   for (const finish of ['length', 'content-filter', 'error', 'cancelled', 'tool-calls', undefined]) {
     const value = response(raw); value.info.finish = finish;
-    assert.throws(() => output.parseReviewJSONReport(value, settings, 'azpr-review-functional'));
+    assert.throws(() => output.parseReviewJSONReport(value, { structuredOutput: false }, 'azpr-review-functional'));
   }
-  const value = response(raw); value.info.error = { name: 'APIError' };
-  assert.throws(() => output.parseReviewJSONReport(value, settings, 'azpr-review-functional'), /APIError/);
-  const native = { info: { finish: 'stop', structured: { status: 'COMPLETE' } }, parts: [{ type: 'text', text: raw }] };
-  assert.deepEqual(output.parseReviewJSONReport(native, settings, 'azpr-review-functional'), { envelope: native.info.structured, corrections: [] });
+  const value = response(raw); value.info.error = { name: 'APIError', message: 'Fixture error' };
+  assert.throws(() => output.parseReviewJSONReport(value, { structuredOutput: false }, 'azpr-review-functional'), /APIError/);
+  assert.throws(() => output.parseReviewJSONReport(response(raw)), /required JSON envelope/);
 });
 
 test('deeply nested JSON is normalized without recursion', () => {

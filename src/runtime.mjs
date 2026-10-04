@@ -13,29 +13,26 @@ import { randomUUID } from 'node:crypto';
 import { commentTarget, confirmedFindings, recordPublishResult, targetKey, validateCommentPlan } from './comments.mjs';
 import {
   COMMANDS, ROLES, PROMPTS, BLOCKED_NATIVE_TOOLS, roleFor, initialRoles, buildAgents,
-  statusRepairPrompt, locationRepairPrompt, dispositionRepairPrompt, finalResubmissionPrompt, validateSettings,
+  statusRepairPrompt, validateSettings,
 } from './config.mjs';
 import {
-  OutputStatusError, OutputLocationError, OutputDispositionError,
-  dispositionRepairPlan, applyDispositionAmendment, locationRepairPlan, applyLocationAmendment,
-  finalSubmissionIssues, finalResubmissionPlan, checkFinalResubmission,
-  parseUniqueJSON, parseJSONReport, parseReviewJSONReport, parseAmendmentText,
+  OutputStatusError, finalSubmissionIssues,
+  parseUniqueJSON, parseJSONReport, parseAmendmentText,
   normalizeFindingFormat, stageFormat, parseReviewRequest, checkEnvelope,
-  initialEnvelope, mergeInitialSnapshots, finalEnvelope,
+  readReviewOutput, reviewOutputFormat, acceptInitialReview, selectReviewSnapshot, acceptFinalReview,
 } from './output.mjs';
 import { createDiagnostics, diagnosticResponse, createStageTiming, collectToolObservations } from './diagnostics.mjs';
 import {
   reviewProvenance, provenanceReport, commentAttribution, renderFinalReport,
   renderIncompleteDraft, renderReceipt, renderDiagnosticNotices,
 } from './attribution.mjs';
-const REPAIR_PROMPTS = { status: statusRepairPrompt, location: locationRepairPrompt, disposition: dispositionRepairPrompt, final: finalResubmissionPrompt };
+const REPAIR_PROMPTS = { status: statusRepairPrompt };
 const DEFAULT_DIR = dirname(fileURLToPath(import.meta.url));
 const OWN = 'azpr-optin';
 // 1.18.31 expands native command arguments before our hook. An unreachable
 // positional index prevents both explicit expansion and implicit argument append.
 const ARGUMENT_SENTINEL = '$9007199254740991';
 const ownRole = (name) => typeof name === 'string' && name.startsWith('azpr-');
-const AUXILIARY = new Set(['title', 'summary', 'compaction']);
 const blockedNativeTools = new Set(BLOCKED_NATIVE_TOOLS);
 const text = (v) => typeof v === 'string' && v.trim().length > 0;
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -77,7 +74,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {Set<string>} completedTools Returned outcomes, never source certification.
  * @property {boolean} [displayOnly]
  * @property {string} [displayText]
- * @property {'status'|'location'|'disposition'|'final'|null} [repairKind]
+ * @property {'status'|null} [repairKind]
  * @property {string} [expectedText]
  * @property {boolean} [repairInstructionsApplied]
  * @property {boolean} [repairRequestRejected]
@@ -108,8 +105,8 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {string} status RUNNING, FAILED or a validated domain status.
  * @property {string} startedAt
  * @property {string} [retryOf]
- * @property {'status'|'location'|'disposition'|'final'} [retryKind]
- * @property {object} [result] Populated only after complete domain validation.
+ * @property {'status'} [retryKind]
+ * @property {object} [result] Accepted output; review limitations remain explicit.
  * @property {string} [error]
  * @property {number} [completedTools]
  * @property {number} [invalidStructuredOutputs]
@@ -123,9 +120,6 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {object[]} [validationErrors]
  * @property {string[]} [missingDispositionIds]
  * @property {string[]} [pendingLocations]
- * @property {string[]} [amendedDispositions]
- * @property {object[]} [amendedLocations]
- * @property {object} [finalResubmission]
  * @property {object} [outputTransportFallback]
  * @property {number} [inputCharacters]
  * @property {number} [instructionCharacters]
@@ -138,19 +132,6 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  * @property {number} [durationMs]
  * @property {object} [timing]
  * @property {boolean} [displayed]
- */
-
-/**
- * Explicit failure handoff to the shared one-amendment decision. Neither raw
- * nor prepared envelopes are validated evidence; both must be treated as data.
- * @typedef {object} FailedSubmission
- * @property {unknown} envelope Prepared candidate used by narrow eligibility probes.
- * @property {unknown} rawEnvelope Original parsed submission, before normalization.
- * @property {string} sessionID Stopped original session; no standing authorization.
- * @property {number} completedTools
- * @property {boolean} finalResubmission Eligible transport, not a validated replacement.
- * @property {object[]} [corrections]
- * @property {object[]} [validationErrors]
  */
 
 function errorText(e) { return e instanceof Error ? e.message : 'OpenCode SDK operation failed.'; }
@@ -196,12 +177,39 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
   // Advisory UI/log delivery must not own workflow progress or hold run locks.
   const setupLog = message => { void deadline(signal => context.client?.app?.log({ body: { service: OWN, level: 'warn', message }, signal }), 1000).catch(() => {}); };
   const toast = message => { void deadline(signal => context.client?.tui?.showToast({ body: { title: 'AZPR', message, variant: 'info', duration: 10000 }, signal }), 1000).catch(() => {}); };
-  async function current() {
+  function requireEnabled() {
     if (!state.ready) throw new Error(`[AZPR] ${state.error} Settings: ${settingsPath}`);
     if (!state.settings.enabled) throw new Error('[AZPR] Review is disabled (enabled=false). Normal development is unchanged.');
+  }
+  async function current(signal) {
+    requireEnabled();
     let now;
-    try { now = await readFile(settingsPath, 'utf8'); } catch { throw new Error('[AZPR] settings.json is not readable. Restart after fixing it.'); }
+    try { now = await (signal ? bounded(() => readFile(settingsPath, 'utf8'), signal) : readFile(settingsPath, 'utf8')); }
+    catch { if (signal?.aborted) throw abortError(signal); throw new Error('[AZPR] settings.json is not readable. Restart after fixing it.'); }
     if (now !== state.raw) throw new Error('[AZPR] settings.json changed. Restart OpenCode; never mix settings within a run.');
+  }
+  async function readiness(run) {
+    if (typeof context.client.provider?.list !== 'function' || typeof context.client.mcp?.status !== 'function') {
+      throw new Error('[AZPR] OpenCode provider/MCP readiness catalogs are unavailable.');
+    }
+    const signal = run.controller.signal;
+    const [models, servers] = await bounded(() => Promise.all([
+      context.client.provider.list({ signal }), context.client.mcp.status({ signal }),
+    ]), signal);
+    const catalog = data(models, 'provider.list'), mcp = data(servers, 'mcp.status');
+    if (!Array.isArray(catalog.all) || !Array.isArray(catalog.connected) || !isObject(mcp)) throw new Error('[AZPR] Invalid readiness catalogs.');
+    const slots = ['review', 'deep'].includes(run.mode) ? ['functional', 'risk', 'verifier'] : ['risk'];
+    for (const slot of slots) {
+      const { providerID, modelID } = modelRef(state.settings.models[run.profile][slot]);
+      const providers = catalog.all.filter(provider => provider.id === providerID);
+      const model = providers.length === 1 ? providers[0].models?.[modelID] : null;
+      if (!catalog.connected.includes(providerID) || !model || model.id !== modelID) throw new Error(`[AZPR] The selected ${run.profile}.${slot} model is unavailable; no fallback was selected.`);
+      if (model.capabilities?.toolcall !== true) throw new Error(`[AZPR] The selected ${run.profile}.${slot} model does not advertise tool support.`);
+    }
+    const connected = Object.values(mcp).filter(server => server?.status === 'connected').length;
+    run.readiness = { checkedModelSlots: slots, connectedMcpServers: connected, sourceAccess: 'not-assessed' };
+    await run.debug.write('readiness.json', run.readiness);
+    if (!connected) throw new Error('[AZPR] No MCP server is connected. Check host MCP status and authentication.');
   }
   function checkRole(role) {
     if (!Object.hasOwn(ROLES, role) || JSON.stringify(state.config?.agent?.[role]) !== state.fingerprints?.[role]) throw new Error('[AZPR] Private reviewer configuration was changed or is unknown.');
@@ -232,7 +240,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     return run.stopping;
   }
   async function requireActiveAmendment(run, originalError) {
-    await current();
+    await current(run.controller.signal);
     if (!run.active || run.controller.signal.aborted || run.abortUnconfirmed) throw originalError;
   }
   async function stage(run, role, payload, validate) {
@@ -241,58 +249,10 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const spec = ROLES[role];
       /** @type {FailedSubmission|undefined} */
       const failed = error?.submission;
-      if (!state.settings.outputRetries || !spec || spec.comment || !failed?.completedTools || !run.active ||
+      if (!state.settings.outputRetries || !spec || spec.format !== 'check' || !failed?.completedTools || !run.active ||
           run.controller.signal.aborted || run.abortUnconfirmed) throw error;
-      if (error instanceof OutputDispositionError && spec.format === 'final') {
-        const original = clone(failed.envelope), plan = dispositionRepairPlan(original, error.missingIds, validate);
-        if (plan) {
-          await requireActiveAmendment(run, error);
-          const repair = { operation: 'output-disposition-repair', originalEnvelope: original, ...plan,
-            outputLanguage: state.settings.outputLanguage, error: error.message };
-          toast(`${role}: missing merge dispositions amendment 1/1 in session=${failed.sessionID}. Existing source context only.`);
-          return stageAttempt(run, role, repair, (amendment, record) => {
-            const result = validate(applyDispositionAmendment(original, plan, amendment));
-            if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
-            record.amendedDispositions = plan.missingDispositionIds;
-            return result;
-          }, failed.sessionID, 'disposition');
-        }
-      }
-      if (error instanceof OutputLocationError) {
-        const original = clone(failed.envelope), missingLocations = locationRepairPlan(original, role, validate);
-        if (missingLocations) {
-          await requireActiveAmendment(run, error);
-          const repair = { operation: 'output-location-repair', originalEnvelope: original, missingLocations, error: error.message };
-          toast(`${role}: location amendment 1/1 in session=${failed.sessionID}. Existing source context only; no new tools.`);
-          // A scoped regrant retains this reviewer's own source context. Status and
-          // location recovery share one budget: neither calls stage() recursively.
-          return stageAttempt(run, role, repair, (amendment, record) => {
-            const result = validate(applyLocationAmendment(original, role, missingLocations, amendment));
-            if (failed.corrections?.length) record.outputFormatCorrections = failed.corrections;
-            record.amendedLocations = missingLocations;
-            return result;
-          }, failed.sessionID, 'location');
-        }
-      }
-      if (spec.format === 'final' && failed.finalResubmission) {
-        const plan = finalResubmissionPlan(failed.rawEnvelope, payload.snapshot);
-        if (plan) {
-          await requireActiveAmendment(run, error);
-          const repair = { operation: 'output-final-resubmission', originalEnvelope: failed.rawEnvelope,
-            frozen: plan, expectedFindingIds: payload.expectedFindingIds, validationErrors: failed.validationErrors,
-            outputLanguage: state.settings.outputLanguage };
-          toast(`${role}: final content resubmission 1/1 in session=${failed.sessionID}. Existing source context only.`);
-          // This replaces model-authored content, not missing values inferred by
-          // the runtime. All amendment kinds share this single stage allowance.
-          return stageAttempt(run, role, repair, (replacement, record) => {
-            const result = validate(checkFinalResubmission(replacement, plan));
-            record.finalResubmission = { scope: 'complete-final-content', originalSessionID: failed.sessionID };
-            return result;
-          }, failed.sessionID, 'final');
-        }
-      }
       if (!(error instanceof OutputStatusError) || typeof failed.envelope.status !== 'string' || !/^[A-Z_]{1,24}$/.test(failed.envelope.status)) throw error;
-      const original = clone(failed.envelope), completeStatus = spec.format === 'check' ? 'READY' : 'COMPLETE';
+      const original = clone(failed.envelope), completeStatus = 'READY';
       // This probe only establishes that every other contract passes. Never
       // adopt its result or infer the model's intended status from a typo.
       try {
@@ -311,7 +271,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     }
   }
   async function stageAttempt(run, role, payload, validate, retryOf, retryKind = 'status') {
-    await current();
+    await current(run.controller.signal);
     if (!run.active) throw new Error('Review stopped.');
     if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     checkRole(role);
@@ -322,10 +282,8 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     const idModel = state.settings.models[spec.mode][spec.slot];
     if (!idModel) throw new Error('Required model is not configured.');
     const title = `[AZPR ${run.id}] ${spec.label}${retryOf ? ' (output retry 1/1)' : ''}`;
-    const reuseContext = Boolean(retryOf && ['location', 'disposition', 'final'].includes(retryKind));
-    const made = reuseContext ? { id: retryOf } : data(await bounded(() => context.client.session.create({ body: { parentID: run.origin, title }, signal: run.controller.signal }), run.controller.signal), 'session.create');
-    if (!text(made.id) || made.id === run.origin || (!reuseContext && seenSessions.has(made.id))) throw new Error('SDK did not return a new independent session.');
-    if (reuseContext && (!seenSessions.has(made.id) || grants.has(made.id) || !run.stages.some(s => s.sessionID === made.id && s.role === role && s.model === idModel && s.attempt === 1 && s.status === 'FAILED'))) throw new Error('Context amendment requires this stage\'s stopped original session.');
+    const made = data(await bounded(() => context.client.session.create({ body: { parentID: run.origin, title }, signal: run.controller.signal }), run.controller.signal), 'session.create');
+    if (!text(made.id) || made.id === run.origin || seenSessions.has(made.id)) throw new Error('SDK did not return a new independent session.');
     if (!run.active) throw new Error('Review stopped before model invocation.');
     if (retryOf && run.abortUnconfirmed) throw new Error('Output retry stopped because session abort was not confirmed.');
     seenSessions.add(made.id);
@@ -337,6 +295,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       returnedTools: new Set(), reportedToolErrors: new Set(), truncatedTools: new Set(),
       blockedNativeCalls: new Map(), invalidStructuredCalls: new Set(), invalidToolCalls: new Set(), repairToolAttempts: 0,
       timing: state.settings.debug.enabled ? createStageTiming() : undefined,
+      hostRetries: new Map(),
     };
     grants.set(made.id, g);
     /** @type {StageRecord} */
@@ -347,12 +306,12 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     };
     run.stages.push(record);
     const stem = `${String(run.stages.length).padStart(2, '0')}-${role}`;
-    const format = state.settings.structuredOutput ? stageFormat(role, retryOf ? retryKind : false) : undefined;
+    const format = state.settings.structuredOutput ? (retryOf ? stageFormat(role, retryKind) : reviewOutputFormat(role)) : undefined;
     const instructions = retryOf ? REPAIR_PROMPTS[retryKind](state.settings.structuredOutput) : state.config.agent[role].prompt;
     Object.assign(record, { inputCharacters: input.length, instructionCharacters: instructions.length,
       remainingRunMsAtStart: remainingRunMs(run) });
-    let receivedAnswer = false;
-    let envelope, prepared, syntaxCorrections = [], validatingOutput = false, finalResubmission = false;
+    let receivedAnswer = false, boundaryFailure = false;
+    let envelope, prepared, syntaxCorrections = [], validatingOutput = false;
     try {
       await run.debug.write(`${stem}.request.json`, { ...record, payload, format, instructions });
       if (!run.active) throw new Error('Review stopped before model invocation.');
@@ -372,11 +331,16 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (state.settings.debug.enabled) await run.debug.write(`${stem}.response.json`, diagnosticResponse(answer));
       if (!run.active) throw new Error('Review stopped before output validation.');
       if (!g.messages || !g.calls) throw new Error('Required chat.message/chat.params hooks were not observed; this OpenCode version is not verified for review.');
+      if (answer.info?.role !== 'assistant' || answer.info.sessionID !== made.id || answer.info.agent !== role ||
+          answer.info.providerID !== modelRef(idModel).providerID || answer.info.modelID !== modelRef(idModel).modelID) {
+        boundaryFailure = true;
+        throw new Error('Reviewer response identity does not match the authorized session, role and model.');
+      }
       record.completedTools = g.completedTools.size;
       let usedTextAmendment = false;
       try {
         if (retryOf) envelope = parseJSONReport(answer);
-        else ({ envelope, corrections: syntaxCorrections } = parseReviewJSONReport(answer, state.settings, role));
+        else ({ envelope, corrections: syntaxCorrections } = readReviewOutput(answer, role));
       }
       catch (error) {
         // The compatibility path belongs to the existing one-request amendment
@@ -391,15 +355,15 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         if (envelope === undefined) throw error;
         usedTextAmendment = true;
       }
+      if (retryOf && (g.repairToolAttempts || g.repairRequestRejected)) throw new Error('Source-check amendment attempted forbidden tools or an additional model request.');
       record.outputCharacters = JSON.stringify(envelope).length;
-      if (retryKind === 'final' && retryOf && (g.repairToolAttempts || g.repairRequestRejected)) throw new Error('Final resubmission attempted forbidden tools or an additional model request.');
       validatingOutput = true;
-      finalResubmission = answer.info?.role === 'assistant' && answer.info?.sessionID === made.id &&
-        !['length', 'content-filter', 'error', 'cancelled'].includes(answer.info?.finish) && !g.invalidStructuredCalls.size;
-      prepared = retryOf ? { envelope, corrections: [] } : normalizeFindingFormat(envelope, role);
+      prepared = retryOf || ['initial', 'final'].includes(spec.format)
+        ? { envelope, corrections: [] } : normalizeFindingFormat(envelope, role);
       prepared.corrections = [...syntaxCorrections, ...prepared.corrections];
       const result = validate(prepared.envelope, record);
       if (prepared.corrections.length) record.outputFormatCorrections = prepared.corrections;
+      if (result.reviewWarnings?.length) record.reviewWarnings = result.reviewWarnings;
       if (usedTextAmendment) record.outputTransportFallback = { from: 'native', to: 'json-text', error: 'StructuredOutputError' };
       if (spec.format === 'initial') {
         const pending = result.findings.filter(finding => !Object.hasOwn(finding, 'location')).map(finding => finding.id);
@@ -412,25 +376,20 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       if (run.controller.signal.aborted) error = abortError(run.controller.signal);
       record.status = 'FAILED';
       record.error = errorText(error);
+      // Only a stage admitted through both V1 hooks may fail independently.
+      // Configuration/routing failures still revoke the entire workflow.
+      if (error instanceof Error && g.messages && g.calls && !boundaryFailure && !error.message.startsWith('[AZPR]')) error.reviewStageFailed = true;
       if (syntaxCorrections.length) record.rejectedOutputFormatCorrections = prepared?.corrections ?? syntaxCorrections;
       if (spec.format === 'final' && validatingOutput) {
         record.validationErrors = finalSubmissionIssues(envelope);
         if (!record.validationErrors.length) record.validationErrors = [{ path: '$', code: 'contract', message: errorText(error) }];
       }
-      // Syntax tolerance must pass every contract locally; it cannot unlock an
-      // amendment/resubmission that the original malformed JSON could not enter.
-      const recoverableFailure = error instanceof OutputStatusError || error instanceof OutputLocationError ||
-        error instanceof OutputDispositionError || (spec.format === 'final' && validatingOutput && finalResubmission);
-      if (!retryOf && !syntaxCorrections.length && recoverableFailure) {
-        /** @type {FailedSubmission} */
-        const submission = {
-          envelope: prepared?.envelope ?? envelope, corrections: prepared?.corrections,
-          sessionID: made.id, completedTools: g.completedTools.size,
-          rawEnvelope: envelope, finalResubmission, validationErrors: record.validationErrors,
-        };
-        error.submission = submission;
+      // Only strict source-check status spelling can request an opt-in model
+      // amendment. Review formatting/content gaps never add a model request.
+      if (!retryOf && spec.format === 'check' && error instanceof OutputStatusError) {
+        error.submission = { envelope: prepared?.envelope ?? envelope, sessionID: made.id,
+          completedTools: g.completedTools.size };
       }
-      if (error instanceof OutputDispositionError) record.missingDispositionIds = error.missingIds;
       grants.delete(made.id); // Revoke even if a failed HTTP request left work on the server.
       if (!run.controller.signal.aborted) await abortSession(run, made.id);
       if (!receivedAnswer && state.settings.debug.enabled && typeof context.client.session.messages === 'function') {
@@ -451,6 +410,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       record.toolFailures = g.failedTools.size;
       record.toolObservations = collectToolObservations(g);
       record.modelRequests = g.calls;
+      record.requestObservations = { authorizedPrimary: g.calls, retries: [...g.hostRetries.values()] };
       if (g.firstToolAt) record.firstToolAt = g.firstToolAt;
       if (g.lastToolAt) record.lastToolAt = g.lastToolAt;
       record.endedAt = new Date().toISOString();
@@ -510,6 +470,9 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     toast(`AZPR ${id} started (${run.mode}/${run.profile}). Cancel with /pr-stop ${id}. Your original model is unchanged.`);
     try {
       run.debug = await createDiagnostics(state.settings, context, run);
+      run.phase = 'preflight';
+      await current(run.controller.signal);
+      await readiness(run);
       Object.assign(outcome, await action(run));
       if (!run.active) throw new Error(run.reason || 'Review stopped.');
       await displayReport(run, outcome.report, outcome.status);
@@ -604,7 +567,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       replaceCommandParts(output, run ? `[AZPR ${run.id}] Authorization revoked and cancellation requested. Requests already sent may still be billed.${run.abortUnconfirmed ? ' OpenCode did not confirm session abort; inspect its sessions.' : ''} Display this status only; do not start another review.` : '[AZPR] No active review found in this process. No reviewer was started; display this status only.');
       return;
     }
-    await current();
+    requireEnabled();
     const cmd = state.config.command?.[input.command];
     if (JSON.stringify(cmd) !== state.commandFingerprints[input.command] || cmd.agent || cmd.model || cmd.subtask !== false) throw new Error('[AZPR] Command routing changed; refusing to change your normal agent/model.');
     if (seenSessions.has(input.sessionID)) throw new Error('[AZPR] Start a new Review command from your ordinary development session, not a reviewer session.');
@@ -621,28 +584,42 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       }
       run.phase = 'initial reviews';
       const candidates = initialRoles(run.profile);
-      const first = await Promise.allSettled(candidates.map(role => stage(run, role, request,
-        result => initialEnvelope(result, null, ROLES[role].prefix, request.prUrl))));
-      const failed = first.find(r => r.status === 'rejected');
-      if (failed) throw new Error(`Initial review incomplete: ${errorText(failed.reason)}`);
-      const reviews = first.map(r => r.value);
-      if (reviews.some(r => r.status !== 'COMPLETE')) throw new Error('At least one initial reviewer reported PARTIAL; final verification was not started.');
-      const snapshot = mergeInitialSnapshots(reviews);
-      const packet = { ...request, snapshot };
+      const first = await Promise.allSettled(candidates.map(async role => {
+        try { return await stage(run, role, request, result => acceptInitialReview(result, ROLES[role].prefix, request.prUrl)); }
+        catch (error) {
+          if (!error?.reviewStageFailed) void abortRun(run, errorText(error), 'INCOMPLETE');
+          throw error;
+        }
+      }));
+      if (!run.active || run.controller.signal.aborted) throw abortError(run.controller.signal);
+      const reviews = first.map((item, index) => item.status === 'fulfilled' ? item.value : {
+        status: 'PARTIAL', snapshot: null, coverage: { files: [], gaps: ['This initial reviewer did not return an accepted response.'] },
+        findings: [], report: `Runtime notice: ${candidates[index]} failed. No observations from that failed execution were accepted.`,
+        reviewWarnings: [`Initial execution unavailable: ${errorText(item.reason)}`], contractComplete: false,
+      });
+      const { snapshot, warnings: snapshotWarnings } = selectReviewSnapshot(reviews, request.prUrl);
+      const packet = { ...request, snapshot, reviewWarnings: snapshotWarnings };
       const allFindings = reviews.flatMap(r => r.findings);
       run.phase = 'final verification';
       const pendingLocations = allFindings.filter(finding => !Object.hasOwn(finding, 'location')).map(finding => finding.id);
       const expectedFindingIds = allFindings.map(finding => finding.id);
-      const verified = await stage(run, roleFor(run.profile, 'verifier'), { ...packet, reviews, pendingLocations, expectedFindingIds, outputLanguage: state.settings.outputLanguage }, result => finalEnvelope(result, snapshot, allFindings));
+      const verified = await stage(run, roleFor(run.profile, 'verifier'), { ...packet, reviews, pendingLocations, expectedFindingIds, outputLanguage: state.settings.outputLanguage }, result => acceptFinalReview(result, snapshot, allFindings, request.prUrl));
+      const initialWarnings = reviews.flatMap((review, index) => review.reviewWarnings.map(message => `${candidates[index]}: ${message}`));
+      const presented = { ...verified, reviewWarnings: [...new Set([...snapshotWarnings, ...initialWarnings, ...verified.reviewWarnings])],
+        initialObservations: verified.status === 'COMPLETE' ? [] : allFindings,
+        unstructuredInitials: verified.status === 'COMPLETE' ? [] : reviews.filter(review => review.unstructured).map(review => review.report) };
+      const publicationEligible = verified.contractComplete && reviews.every(review => review.contractComplete) && !snapshotWarnings.length;
+      if (!publicationEligible) run.publicationUnavailable = true;
       const provenance = reviewProvenance(run);
-      return { status: verified.status, report: renderReport(run, () => `${renderFinalReport(verified, state.settings.outputLanguage)}\n\n---\n\n${provenanceReport(provenance, verified, state.settings.outputLanguage)}`),
-        review: { id: run.id, origin: run.origin, profile: run.profile, request: input.arguments, snapshot, outputLanguage: state.settings.outputLanguage, provenance, findings: clone(allFindings), final: clone(verified), attempts: new Map(), plan: null } };
+      return { status: verified.status, report: renderReport(run, () => `${renderFinalReport(presented, state.settings.outputLanguage)}\n\n---\n\n${provenanceReport(provenance, verified, state.settings.outputLanguage)}`),
+        review: { id: run.id, origin: run.origin, profile: run.profile, request: input.arguments, snapshot: verified.snapshot, publicationEligible, outputLanguage: state.settings.outputLanguage, provenance, findings: clone(allFindings), final: clone(verified), attempts: new Map(), plan: null } };
     });
     // A cancelled presentation must not leave a publishable "completed" review.
-    if (status === 'COMPLETE') {
+    if (status === 'COMPLETE' && review?.publicationEligible && !run.abortUnconfirmed) {
       completed.set(run.id, review);
       if (completed.size > 20) completed.delete(completed.keys().next().value);
     }
+    else if (review) run.publicationUnavailable = true;
     replaceCommandParts(output, renderReceipt(run, report, status, failure, state.settings));
   }
   return {
@@ -688,12 +665,13 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
       const agent = input.agent ?? output.message?.agent;
       if (!ownRole(agent)) {
         if (output.parts?.some(p => (p.type === 'agent' && ownRole(p.name)) || (p.type === 'subtask' && ownRole(p.agent)))) throw new Error('[AZPR] Use an explicit /pr-review or /pr-deep command; private reviewers cannot be @mentioned or tasked.');
-        if (seenSessions.has(input.sessionID) && !AUXILIARY.has(agent)) throw new Error('[AZPR] Reviewer sessions cannot be reused for ordinary prompts. Return to the original Plan/Build session.');
+        if (seenSessions.has(input.sessionID)) throw new Error('[AZPR] Reviewer sessions cannot be reused for ordinary or auxiliary prompts. Return to the original Plan/Build session.');
         return;
       }
       await current();
       const m = input.model ?? output.message?.model;
       const g = authorize(input.sessionID, agent, `${m?.providerID}/${m?.modelID}`);
+      if (!g.displayOnly && (output.parts?.length !== 1 || output.parts[0]?.type !== 'text' || output.parts[0]?.text !== g.expectedText)) throw new Error('[AZPR] Reviewer message does not match the plugin request.');
       if (g.displayOnly && (output.parts?.length !== 1 || output.parts[0]?.type !== 'text' || output.parts[0]?.text !== g.displayText)) throw new Error('[AZPR] Display-only message does not match the generated report.');
       if (g.repairKind && (output.parts?.length !== 1 || output.parts[0]?.type !== 'text' || output.parts[0]?.text !== g.expectedText)) throw new Error('[AZPR] Output repair message does not match the plugin amendment request.');
       if (g.messages) throw new Error('[AZPR] A reviewer session accepts exactly one plugin-started message per grant.');
@@ -701,7 +679,7 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
     },
     async 'chat.params'(input) {
       if (!ownRole(input.agent)) {
-        if (seenSessions.has(input.sessionID) && !AUXILIARY.has(input.agent)) throw new Error('[AZPR] Non-review model execution in a private review session is denied.');
+        if (seenSessions.has(input.sessionID)) throw new Error('[AZPR] Non-review or auxiliary model execution in a private review session is denied.');
         return;
       }
       await current();
@@ -804,7 +782,17 @@ export async function createAzurePrReviewPlugin(context = {}, baseDirectory = DE
         else g.completedTools.add(input.callID);
       }
     },
+    async 'experimental.session.compacting'(input) {
+      if (seenSessions.has(input.sessionID)) throw new Error('[AZPR] Compaction is not authorized in private review sessions.');
+    },
     async event({ event }) {
+      if (event?.type === 'session.status' && event.properties?.status?.type === 'retry') {
+        const g = grants.get(event.properties.sessionID), { attempt, next } = event.properties.status;
+        if (g?.run.active && !g.displayOnly && Number.isInteger(attempt) && attempt > 0 && Number.isFinite(next)) {
+          g.hostRetries.set(`${attempt}:${next}`, { attempt, next });
+        }
+        return; // No provider error text, tool arguments or retry decision is copied.
+      }
       if (event?.type !== 'message.part.updated') return;
       const part = event.properties?.part;
       if (part?.type !== 'tool' || part.tool === 'invalid') return;
